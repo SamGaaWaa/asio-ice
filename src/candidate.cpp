@@ -1,0 +1,104 @@
+#include "candidate.hpp"
+
+#include <openssl/md5.h>
+
+#include <string>
+#include <sstream>
+#include <iomanip>
+#include <iostream>
+#include <cstring>
+
+namespace ice {
+
+std::string_view to_string(candidate_type type)noexcept {
+    switch (type) {
+    case candidate_type::host:
+        return "host";
+    case candidate_type::srflx:
+        return "srflx";
+    case candidate_type::prflx:
+        return "prflx";
+    case candidate_type::relayed:
+        return "relay";
+    }
+	return "unknown";
+}
+
+candidate::candidate(
+	std::string_view foundation,
+	uint8_t component,
+	std::string_view transport,
+	int priority,
+	net::ip::udp::endpoint address,
+	candidate_type type,
+	std::optional<net::ip::udp::endpoint> related,
+	std::string_view tcptype,
+	std::optional<uint32_t> generation
+):
+	_foundation(foundation),
+	_component(component),
+	_transport(transport),
+	_priority(priority),
+	_address(address),
+	_type(type),
+	_related_address(related),
+	_tcptype(tcptype),
+	_generation(generation)
+{}
+
+static std::string md5_hex(const std::string& key) {
+    MD5_CTX ctx;
+    unsigned char digest[MD5_DIGEST_LENGTH];
+
+    // MD5_Init(&ctx);
+    // MD5_Update(&ctx, key.data(), key.size());
+    // MD5_Final(digest, &ctx);
+
+	MD5((unsigned char*)key.data(), key.size(), digest);
+
+    std::stringstream ss;
+    for (int i = 0; i < MD5_DIGEST_LENGTH; ++i) {
+		ss << std::hex << std::setw(2) << std::setfill('0') << static_cast<unsigned int>(digest[i]);
+    }
+
+    return ss.str();
+}
+
+std::string candidate_foundation(
+	candidate_type type,
+	std::string_view transport,
+	const net::ip::address& base_address)
+{
+	std::string key;
+	std::string_view type_str = to_string(type);
+	std::string addr_str = base_address.to_string();
+	key.reserve(type_str.size() + 2 + transport.size() + addr_str.size());
+	key += type_str;
+	key += '|';
+	key += transport;
+	key += '|';
+	key += addr_str;
+	return md5_hex(key);
+}
+
+uint32_t candidate_priority(
+	uint8_t component,
+	candidate_type type,
+    uint32_t preference)noexcept
+{
+	uint32_t type_pref = [type] {
+		switch (type) {
+		case candidate_type::host:
+			return 126;
+		case candidate_type::srflx:
+			return 100;
+		case candidate_type::prflx:
+			return 110;
+		default:
+			return 0;
+		}
+	}();
+	return (uint32_t{1} << 24) * type_pref + (uint32_t{1} << 8) * preference + (256 - component);
+}
+
+} // namespace ice

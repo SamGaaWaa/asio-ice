@@ -1,0 +1,12 @@
+#pragma once
+
+#define CPPMDNS_USE_BOOST 0
+
+#ifdef NDEBUG
+    #define CPPMDNS_DEBUG 0
+#else
+    #define CPPMDNS_DEBUG 1
+#endif
+
+#define CPPMDNS_IN_DEBUG if constexpr(! CPPMDNS_DEBUG){} else
+

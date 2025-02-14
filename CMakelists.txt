@@ -1,0 +1,94 @@
+cmake_minimum_required(VERSION 3.22)
+
+project(asio-ice)
+
+option(ICE_TEST "Build test" ON)
+
+set(CMAKE_CXX_STANDARD 23)
+set(STANDALONE_ASIO_DIR "E:\\openSource\\asio" CACHE STRING "STANDALONE_ASIO_DIR")
+set(STDEXEC_DIR "E:\\openSource\\asio2exec\\stdexec" CACHE STRING "STDEXEC_DIR")
+set(BOOST_DIR "E:\\openSource\\boost_1_86_0\\stage\\lib\\cmake\\Boost-1.86.0" CACHE STRING "BOOST_DIR")
+option(USE_BOOST ON)
+set(OPENSSL_DIR "E:\\openSource\\openssl-3.1.0\\x64" CACHE STRING "OPENSSL_DIR")
+set(OPENSSL_LIB_DIR ${OPENSSL_DIR}/lib CACHE STRING "OPENSSL_LIB_DIR")
+set(OPENSSL_INCLUDE_DIR ${OPENSSL_DIR}/include CACHE STRING "OPENSSL_INCLUDE_DIR")
+
+find_library(
+    OPENSSL_SSL_LIB 
+    NAMES ssl
+    PATHS ${OPENSSL_LIB_DIR}
+)
+find_library(
+    OPENSSL_CRYPTO_LIB 
+    NAMES crypto
+    PATHS ${OPENSSL_LIB_DIR}
+)
+if(NOT OPENSSL_SSL_LIB OR NOT OPENSSL_CRYPTO_LIB)
+    message(FATAL_ERROR "Could not find OpenSSL libraries in ${OPENSSL_LIB_DIR}")
+else()
+    message(STATUS "Found OpenSSL.")
+endif()
+
+if(USE_BOOST)
+    set(ASIOICE_USE_BOOST 1)
+    find_package(Boost CONFIG REQUIRED PATHS ${BOOST_DIR})
+    if(Boost_FOUND)
+        message(STATUS "Boost found")
+    endif()
+else()
+    set(ASIOICE_USE_BOOST 0)
+    add_subdirectory(third_party/tiny-boost)
+endif()
+configure_file("${CMAKE_CURRENT_SOURCE_DIR}/include/config.hpp.in" "${CMAKE_CURRENT_SOURCE_DIR}/include/config.hpp")
+
+add_subdirectory(cppmdns)
+
+file(GLOB ICE_SRC_FILES 
+    src/ice.cpp
+    src/stun.cpp
+    src/base64.cpp
+    src/udp_proxy.cpp
+    src/stun_client.cpp
+    src/address.cpp
+    src/candidate.cpp
+)
+add_library(libice STATIC ${ICE_SRC_FILES})
+
+target_link_libraries(libice PRIVATE cppmdns ${OPENSSL_SSL_LIB} ${OPENSSL_CRYPTO_LIB})
+if(USE_BOOST)
+    target_link_libraries(libice PUBLIC Boost::boost)
+else()
+    target_link_libraries(libice PRIVATE tiny_boost)
+    target_include_directories(libice PUBLIC ${STANDALONE_ASIO_DIR}/asio/include)
+endif()
+target_include_directories(libice PUBLIC ${STDEXEC_DIR})
+target_include_directories(libice PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)
+target_include_directories(libice PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
+target_include_directories(libice PRIVATE ${OPENSSL_INCLUDE_DIR})
+
+add_library(test_flags INTERFACE)
+target_link_libraries(test_flags INTERFACE cppmdns ${OPENSSL_SSL_LIB} ${OPENSSL_CRYPTO_LIB})
+if(USE_BOOST)
+    target_link_libraries(test_flags INTERFACE Boost::boost)
+else()
+    target_link_libraries(test_flags INTERFACE tiny_boost)
+    target_include_directories(test_flags INTERFACE ${STANDALONE_ASIO_DIR}/asio/include)
+endif()
+target_link_libraries(test_flags INTERFACE libice)
+target_include_directories(test_flags INTERFACE ${STDEXEC_DIR})
+target_include_directories(test_flags INTERFACE ${CMAKE_CURRENT_SOURCE_DIR}/include)
+target_include_directories(test_flags INTERFACE ${CMAKE_CURRENT_SOURCE_DIR}/src)
+target_include_directories(test_flags INTERFACE ${OPENSSL_INCLUDE_DIR})
+
+file(GLOB TEST_SOURCES "src/*_test.cpp")
+if(ICE_TEST)
+    foreach(TEST_FILE ${TEST_SOURCES})
+        get_filename_component(EXECUTABLE_NAME ${TEST_FILE} NAME_WE)
+        add_executable(${EXECUTABLE_NAME} ${TEST_FILE})  # 为每个测试文件生成可执行程序
+        target_link_libraries(${EXECUTABLE_NAME} PRIVATE test_flags)
+    endforeach()
+endif()
+
+add_executable(ice_test main.cpp)
+target_link_libraries(ice_test cppmdns ${OPENSSL_SSL_LIB} ${OPENSSL_CRYPTO_LIB} libice)
+target_include_directories(ice_test PRIVATE ${OPENSSL_INCLUDE_DIR})
