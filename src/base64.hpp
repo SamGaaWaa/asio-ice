@@ -11,32 +11,23 @@
 #define BOOST_BEAST_DETAIL_BASE64_HPP
 
 #include <cctype>
-#include <utility>
 #include <string>
 #include <string_view>
+#include <utility>
 
 namespace ice {
 namespace base64 {
 
-char const*
-get_alphabet();
+char const *get_alphabet();
 
-signed char const*
-get_inverse();
+signed char const *get_inverse();
 
 /// Returns max chars needed to encode a base64 string
-std::size_t constexpr
-encoded_size(std::size_t n)
-{
-    return 4 * ((n + 2) / 3);
-}
+std::size_t constexpr encoded_size(std::size_t n) { return 4 * ((n + 2) / 3); }
 
 /// Returns max bytes needed to decode a base64 string
-inline
-std::size_t constexpr
-decoded_size(std::size_t n)
-{
-    return n / 4 * 3; // requires n&3==0, smaller
+inline std::size_t constexpr decoded_size(std::size_t n) {
+  return n / 4 * 3; // requires n&3==0, smaller
 }
 
 /** Encode a series of octets as a padded, base64 string.
@@ -51,11 +42,9 @@ decoded_size(std::size_t n)
     @return The number of characters written to `out`. This
     will exclude any null termination.
 */
-std::size_t
-encode(void* dest, void const* src, std::size_t len);
+std::size_t encode(void *dest, void const *src, std::size_t len);
 
-std::string 
-encode(void const* src, std::size_t len);
+std::string encode(void const *src, std::size_t len);
 
 /** Decode a padded base64 string into a series of octets.
 
@@ -68,11 +57,11 @@ encode(void const* src, std::size_t len);
     the number of characters read from the input string,
     expressed as a pair.
 */
-std::pair<std::size_t, std::size_t>
-decode(void* dest, char const* src, std::size_t len);
+std::pair<std::size_t, std::size_t> decode(void *dest, char const *src,
+                                           std::size_t len);
 
-} // base64
+} // namespace base64
 
-} // ice
+} // namespace ice
 
 #endif

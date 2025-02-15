@@ -1,6 +1,6 @@
 #pragma once
 
-namespace ice{
+namespace ice {
 
 const char *version();
 

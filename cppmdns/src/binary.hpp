@@ -1255,7 +1255,7 @@ namespace binary {
                     return[]<size_t ...Idx>(std::index_sequence<Idx...>)constexpr {
                         constexpr char c = Term::value;
                         return (
-                            empty_list{} + ... + list<term<c, (Idx, 1)>>{}
+                            empty_list{} + ... + list<term<c, (true ? 1 : Idx)>>{}
                         );
                     }(std::make_index_sequence<count>{});
                 }
@@ -1276,7 +1276,7 @@ namespace binary {
                             return[]<size_t ...Idx>(std::index_sequence<Idx...>)constexpr {
                                 constexpr char c = Terms::value;
                                 return (
-                                    empty_list{} + ... + list<term<c, (Idx, 1)>>{}
+                                    empty_list{} + ... + list<term<c, (true ? 1 : Idx)>>{}
                                 );
                             }(std::make_index_sequence<count>{});
                         }

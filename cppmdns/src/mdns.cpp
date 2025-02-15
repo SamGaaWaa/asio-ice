@@ -434,9 +434,9 @@ server::impl_t::publishAddr(std::string name, std::string ip, int seconds, std::
     co_await stdexec::schedule(asio2exec::scheduler_t{ ctx });
 
     dns::record_t record{
-        .name{std::move(name)},
-        .cls{dns::record_class::INTERNET},
-        .ttl{seconds},
+        .name = std::move(name),
+        .cls = dns::record_class::INTERNET,
+        .ttl = seconds
     };
 
     service_ptr service = std::make_shared<service_t>(std::move(record), self);
