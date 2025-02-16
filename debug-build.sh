@@ -10,5 +10,5 @@ cmake .. -DSTANDALONE_ASIO_DIR=/mnt/e/openSource/asio \
  	-DCMAKE_C_COMPILER=clang \
 	-DCMAKE_CXX_FLAGS="-stdlib=libc++ -O0 -g -fsanitize=address" \
 	-DCMAKE_CXX_COMPILER=clang++
-make -j4
+make -j8
 popd

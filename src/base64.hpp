@@ -27,7 +27,7 @@ std::size_t constexpr encoded_size(std::size_t n) { return 4 * ((n + 2) / 3); }
 
 /// Returns max bytes needed to decode a base64 string
 inline std::size_t constexpr decoded_size(std::size_t n) {
-  return n / 4 * 3; // requires n&3==0, smaller
+    return n / 4 * 3; // requires n&3==0, smaller
 }
 
 /** Encode a series of octets as a padded, base64 string.

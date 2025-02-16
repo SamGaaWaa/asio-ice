@@ -9,5 +9,5 @@
 #endif
 
 #define ICE_IN_DEBUG                                                           \
-  if constexpr (!ICE_DEBUG) {                                                  \
-  } else
+    if constexpr (!ICE_DEBUG) {                                                \
+    } else

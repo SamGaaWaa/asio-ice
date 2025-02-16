@@ -1,13 +1,14 @@
 #include "stun.hpp"
 #include "base64.hpp"
 #include "binary.hpp"
+#include "hash.hpp"
 #include "scope_guard.hpp"
 
 #include "json.hpp"
 #include <boost/crc.hpp>
-#include <openssl/hmac.h>
-#include <openssl/md5.h>
-#include <openssl/sha.h>
+// #include <openssl/hmac.h>
+// #include <openssl/md5.h>
+// #include <openssl/sha.h>
 
 #include <algorithm>
 #include <cstring>
@@ -39,10 +40,10 @@ namespace ice::stun {
 #define STUN_TRANSACTION_ID_SIZE 12
 
 struct header_t {
-  uint16_t type{0};
-  uint16_t length{0};
-  uint32_t magic{0};
-  uint8_t transaction_id[STUN_TRANSACTION_ID_SIZE];
+    uint16_t type{0};
+    uint16_t length{0};
+    uint32_t magic{0};
+    uint8_t transaction_id[STUN_TRANSACTION_ID_SIZE];
 };
 
 static_assert(sizeof(header_t) == 20,
@@ -77,87 +78,87 @@ static_assert(sizeof(header_t) == 20,
  * +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
  */
 struct attr_t {
-  uint16_t type;
-  uint16_t length;
+    uint16_t type;
+    uint16_t length;
 
-  const uint8_t *value() const {
-    return reinterpret_cast<const uint8_t *>(this) + 4;
-  }
+    const uint8_t *value() const {
+        return reinterpret_cast<const uint8_t *>(this) + 4;
+    }
 
-  uint8_t *value() { return reinterpret_cast<uint8_t *>(this) + 4; }
+    uint8_t *value() { return reinterpret_cast<uint8_t *>(this) + 4; }
 
-  uint8_t operator[](std::size_t i) const { return value()[i]; }
+    uint8_t operator[](std::size_t i) const { return value()[i]; }
 
-  uint8_t &operator[](std::size_t i) { return value()[i]; }
+    uint8_t &operator[](std::size_t i) { return value()[i]; }
 };
 
 static_assert(sizeof(attr_t) == 4,
               "STUN attribute header size must be 4 bytes");
 
 struct attr_type_t {
-  // Comprehension-required
-  static constexpr uint16_t STUN_ATTR_MAPPED_ADDRESS = 0x0001;
-  static constexpr uint16_t STUN_ATTR_USERNAME = 0x0006;
-  static constexpr uint16_t STUN_ATTR_MESSAGE_INTEGRITY = 0x0008;
-  static constexpr uint16_t STUN_ATTR_ERROR_CODE = 0x0009;
-  static constexpr uint16_t STUN_ATTR_UNKNOWN_ATTRIBUTES = 0x000A;
-  static constexpr uint16_t STUN_ATTR_REALM = 0x0014;
-  static constexpr uint16_t STUN_ATTR_NONCE = 0x0015;
-  static constexpr uint16_t STUN_ATTR_MESSAGE_INTEGRITY_SHA256 = 0x001C;
-  static constexpr uint16_t STUN_ATTR_PASSWORD_ALGORITHM = 0x001D;
-  static constexpr uint16_t STUN_ATTR_USERHASH = 0x001E;
-  static constexpr uint16_t STUN_ATTR_XOR_MAPPED_ADDRESS = 0x0020;
-  static constexpr uint16_t STUN_ATTR_PRIORITY = 0x0024;
-  static constexpr uint16_t STUN_ATTR_USE_CANDIDATE = 0x0025;
+    // Comprehension-required
+    static constexpr uint16_t STUN_ATTR_MAPPED_ADDRESS = 0x0001;
+    static constexpr uint16_t STUN_ATTR_USERNAME = 0x0006;
+    static constexpr uint16_t STUN_ATTR_MESSAGE_INTEGRITY = 0x0008;
+    static constexpr uint16_t STUN_ATTR_ERROR_CODE = 0x0009;
+    static constexpr uint16_t STUN_ATTR_UNKNOWN_ATTRIBUTES = 0x000A;
+    static constexpr uint16_t STUN_ATTR_REALM = 0x0014;
+    static constexpr uint16_t STUN_ATTR_NONCE = 0x0015;
+    static constexpr uint16_t STUN_ATTR_MESSAGE_INTEGRITY_SHA256 = 0x001C;
+    static constexpr uint16_t STUN_ATTR_PASSWORD_ALGORITHM = 0x001D;
+    static constexpr uint16_t STUN_ATTR_USERHASH = 0x001E;
+    static constexpr uint16_t STUN_ATTR_XOR_MAPPED_ADDRESS = 0x0020;
+    static constexpr uint16_t STUN_ATTR_PRIORITY = 0x0024;
+    static constexpr uint16_t STUN_ATTR_USE_CANDIDATE = 0x0025;
 
-  // Comprehension-optional
-  static constexpr uint16_t STUN_ATTR_PASSWORD_ALGORITHMS = 0x8002;
-  static constexpr uint16_t STUN_ATTR_ALTERNATE_DOMAIN = 0x8003;
-  static constexpr uint16_t STUN_ATTR_SOFTWARE = 0x8022;
-  static constexpr uint16_t STUN_ATTR_ALTERNATE_SERVER = 0x8023;
-  static constexpr uint16_t STUN_ATTR_FINGERPRINT = 0x8028;
-  static constexpr uint16_t STUN_ATTR_ICE_CONTROLLED = 0x8029;
-  static constexpr uint16_t STUN_ATTR_ICE_CONTROLLING = 0x802A;
+    // Comprehension-optional
+    static constexpr uint16_t STUN_ATTR_PASSWORD_ALGORITHMS = 0x8002;
+    static constexpr uint16_t STUN_ATTR_ALTERNATE_DOMAIN = 0x8003;
+    static constexpr uint16_t STUN_ATTR_SOFTWARE = 0x8022;
+    static constexpr uint16_t STUN_ATTR_ALTERNATE_SERVER = 0x8023;
+    static constexpr uint16_t STUN_ATTR_FINGERPRINT = 0x8028;
+    static constexpr uint16_t STUN_ATTR_ICE_CONTROLLED = 0x8029;
+    static constexpr uint16_t STUN_ATTR_ICE_CONTROLLING = 0x802A;
 
-  // Attributes for TURN
-  // See https://www.rfc-editor.org/rfc/rfc8656.html#section-18
-  static constexpr uint16_t STUN_ATTR_CHANNEL_NUMBER = 0x000C;
-  static constexpr uint16_t STUN_ATTR_LIFETIME = 0x000D;
-  static constexpr uint16_t STUN_ATTR_XOR_PEER_ADDRESS = 0x0012;
-  static constexpr uint16_t STUN_ATTR_DATA = 0x0013;
-  static constexpr uint16_t STUN_ATTR_XOR_RELAYED_ADDRESS = 0x0016;
-  static constexpr uint16_t STUN_ATTR_EVEN_PORT = 0x0018;
-  static constexpr uint16_t STUN_ATTR_REQUESTED_TRANSPORT = 0x0019;
-  static constexpr uint16_t STUN_ATTR_DONT_FRAGMENT = 0x001A;
-  static constexpr uint16_t STUN_ATTR_RESERVATION_TOKEN = 0x0022;
+    // Attributes for TURN
+    // See https://www.rfc-editor.org/rfc/rfc8656.html#section-18
+    static constexpr uint16_t STUN_ATTR_CHANNEL_NUMBER = 0x000C;
+    static constexpr uint16_t STUN_ATTR_LIFETIME = 0x000D;
+    static constexpr uint16_t STUN_ATTR_XOR_PEER_ADDRESS = 0x0012;
+    static constexpr uint16_t STUN_ATTR_DATA = 0x0013;
+    static constexpr uint16_t STUN_ATTR_XOR_RELAYED_ADDRESS = 0x0016;
+    static constexpr uint16_t STUN_ATTR_EVEN_PORT = 0x0018;
+    static constexpr uint16_t STUN_ATTR_REQUESTED_TRANSPORT = 0x0019;
+    static constexpr uint16_t STUN_ATTR_DONT_FRAGMENT = 0x001A;
+    static constexpr uint16_t STUN_ATTR_RESERVATION_TOKEN = 0x0022;
 
-  constexpr attr_type_t() : _val(0) {}
-  constexpr attr_type_t(uint16_t val) : _val(val) {}
+    constexpr attr_type_t() : _val(0) {}
+    constexpr attr_type_t(uint16_t val) : _val(val) {}
 
-  constexpr operator uint16_t() const { return _val; }
-  constexpr operator uint16_t &() { return _val; }
+    constexpr operator uint16_t() const { return _val; }
+    constexpr operator uint16_t &() { return _val; }
 
-private:
-  uint16_t _val;
+  private:
+    uint16_t _val;
 };
 
 constexpr bool is_optional_attr(uint16_t attr_type) {
-  return !!(attr_type & 0x8000);
+    return !!(attr_type & 0x8000);
 }
 
 struct address_family_t {
-  static constexpr uint8_t STUN_ADDRESS_FAMILY_IPV4 = 0x01;
-  static constexpr uint8_t STUN_ADDRESS_FAMILY_IPV6 = 0x02;
+    static constexpr uint8_t STUN_ADDRESS_FAMILY_IPV4 = 0x01;
+    static constexpr uint8_t STUN_ADDRESS_FAMILY_IPV6 = 0x02;
 
-  constexpr address_family_t() : _val(0) {}
-  constexpr address_family_t(uint8_t val) : _val(val) {}
+    constexpr address_family_t() : _val(0) {}
+    constexpr address_family_t(uint8_t val) : _val(val) {}
 
-  constexpr operator uint8_t() const { return _val; }
+    constexpr operator uint8_t() const { return _val; }
 
-  constexpr operator uint8_t &() { return _val; }
+    constexpr operator uint8_t &() { return _val; }
 
-private:
-  uint8_t _val;
+  private:
+    uint8_t _val;
 };
 
 /*
@@ -173,24 +174,24 @@ private:
  */
 struct value_error_code_t {
 #ifdef __ICE_BIG_ENDIAN__
-  uint32_t reserved : 21 {0};
-  uint32_t code_class : 3 {0};
-  uint32_t code_number : 8 {0};
+    uint32_t reserved : 21 {0};
+    uint32_t code_class : 3 {0};
+    uint32_t code_number : 8 {0};
 #else
-  uint32_t code_number : 8 {0};
-  uint32_t code_class : 3 {0};
-  uint32_t reserved : 21 {0};
+    uint32_t code_number : 8 {0};
+    uint32_t code_class : 3 {0};
+    uint32_t reserved : 21 {0};
 #endif
 
-  const char *reason() const {
-    return reinterpret_cast<const char *>(this + 4);
-  }
+    const char *reason() const {
+        return reinterpret_cast<const char *>(this + 4);
+    }
 
-  char *reason() { return reinterpret_cast<char *>(this + 4); }
+    char *reason() { return reinterpret_cast<char *>(this + 4); }
 
-  char operator[](size_t i) const { return reason()[i]; }
+    char operator[](size_t i) const { return reason()[i]; }
 
-  char &operator[](size_t i) { return reason()[i]; }
+    char &operator[](size_t i) { return reason()[i]; }
 };
 
 static_assert(sizeof(value_error_code_t) == 4,
@@ -208,8 +209,8 @@ static_assert(sizeof(value_error_code_t) == 4,
  * +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
  */
 struct value_channel_number_t {
-  uint16_t channel_number{0};
-  uint16_t reserved{0};
+    uint16_t channel_number{0};
+    uint16_t reserved{0};
 };
 
 static_assert(sizeof(value_channel_number_t) == 4,
@@ -226,11 +227,11 @@ static_assert(sizeof(value_channel_number_t) == 4,
  */
 struct value_even_port_t {
 #ifdef __ICE_BIG_ENDIAN__
-  uint8_t r : 1 {0};
-  uint8_t reserved : 7 {0};
+    uint8_t r : 1 {0};
+    uint8_t reserved : 7 {0};
 #else
-  uint8_t reserved : 7 {0};
-  uint8_t r : 1 {0};
+    uint8_t reserved : 7 {0};
+    uint8_t r : 1 {0};
 #endif
 };
 
@@ -247,9 +248,9 @@ static_assert(sizeof(value_even_port_t) == 1,
  * +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
  */
 struct value_requested_transport_t {
-  uint8_t protocol{0};
-  uint8_t reserved1{0};
-  uint16_t reserved2{0};
+    uint8_t protocol{0};
+    uint8_t reserved1{0};
+    uint16_t reserved2{0};
 };
 
 static_assert(sizeof(value_requested_transport_t) == 4,
@@ -272,18 +273,18 @@ static_assert(sizeof(value_requested_transport_t) == 4,
  * |                                                             ...
  */
 struct value_password_algorithm_t {
-  uint16_t algorithm{0};
-  uint16_t parameters_length{0};
+    uint16_t algorithm{0};
+    uint16_t parameters_length{0};
 
-  const uint8_t *parameters() const {
-    return reinterpret_cast<const uint8_t *>(this) + 4;
-  }
+    const uint8_t *parameters() const {
+        return reinterpret_cast<const uint8_t *>(this) + 4;
+    }
 
-  uint8_t *parameters() { return reinterpret_cast<uint8_t *>(this) + 4; }
+    uint8_t *parameters() { return reinterpret_cast<uint8_t *>(this) + 4; }
 
-  uint8_t operator[](std::size_t i) const { return parameters()[i]; }
+    uint8_t operator[](std::size_t i) const { return parameters()[i]; }
 
-  uint8_t &operator[](std::size_t i) { return parameters()[i]; }
+    uint8_t &operator[](std::size_t i) { return parameters()[i]; }
 };
 
 static_assert(sizeof(value_password_algorithm_t) == 4,
@@ -303,19 +304,21 @@ static_assert(sizeof(value_password_algorithm_t) == 4,
  * +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
  */
 struct value_mapped_address_t {
-  uint8_t pad{0};
-  uint8_t family{0};
-  uint16_t port{0};
+    uint8_t pad{0};
+    uint8_t family{0};
+    uint16_t port{0};
 
-  const uint8_t *address() const noexcept {
-    return reinterpret_cast<const uint8_t *>(this) + 4;
-  }
+    const uint8_t *address() const noexcept {
+        return reinterpret_cast<const uint8_t *>(this) + 4;
+    }
 
-  uint8_t *address() noexcept { return reinterpret_cast<uint8_t *>(this) + 4; }
+    uint8_t *address() noexcept {
+        return reinterpret_cast<uint8_t *>(this) + 4;
+    }
 
-  uint8_t operator[](std::size_t i) const noexcept { return address()[i]; }
+    uint8_t operator[](std::size_t i) const noexcept { return address()[i]; }
 
-  uint8_t &operator[](std::size_t i) noexcept { return address()[i]; }
+    uint8_t &operator[](std::size_t i) noexcept { return address()[i]; }
 };
 
 static_assert(sizeof(value_mapped_address_t) == 4);
@@ -323,104 +326,104 @@ static_assert(sizeof(value_mapped_address_t) == 4);
 #pragma pack(pop)
 
 struct attr_iterator_sentinel_t {
-  attr_iterator_sentinel_t() noexcept {
-    _end = std::numeric_limits<std::uintptr_t>::max();
-  }
+    attr_iterator_sentinel_t() noexcept {
+        _end = std::numeric_limits<std::uintptr_t>::max();
+    }
 
-  attr_iterator_sentinel_t(const void *p) noexcept
-      : _end{reinterpret_cast<std::uintptr_t>(p)} {}
+    attr_iterator_sentinel_t(const void *p) noexcept
+        : _end{reinterpret_cast<std::uintptr_t>(p)} {}
 
-  const uint8_t *data() const noexcept {
-    return reinterpret_cast<const uint8_t *>(_end);
-  }
+    const uint8_t *data() const noexcept {
+        return reinterpret_cast<const uint8_t *>(_end);
+    }
 
-private:
-  friend struct attr_iterator_t;
-  friend struct const_attr_iterator_t;
+  private:
+    friend struct attr_iterator_t;
+    friend struct const_attr_iterator_t;
 
-  std::uintptr_t _end;
+    std::uintptr_t _end;
 };
 
 struct attr_iterator_t {
-  using difference_type = std::ptrdiff_t;
-  using value_type = attr_t;
-  using reference = attr_t &;
-  using const_reference = const attr_t &;
+    using difference_type = std::ptrdiff_t;
+    using value_type = attr_t;
+    using reference = attr_t &;
+    using const_reference = const attr_t &;
 
-  attr_iterator_t(void *attr = nullptr) noexcept
-      : _current{reinterpret_cast<attr_t *>(attr)} {}
+    attr_iterator_t(void *attr = nullptr) noexcept
+        : _current{reinterpret_cast<attr_t *>(attr)} {}
 
-  attr_t &operator*() const noexcept { return *_current; }
+    attr_t &operator*() const noexcept { return *_current; }
 
-  const attr_t *operator->() const noexcept { return _current; }
+    const attr_t *operator->() const noexcept { return _current; }
 
-  attr_t *operator->() noexcept { return _current; }
+    attr_t *operator->() noexcept { return _current; }
 
-  attr_iterator_t &operator++() noexcept {
-    uint16_t len = binary::ntoh<uint16_t>(_current->length) + 4;
-    if (len & 0x3)
-      len += 4 - (len & 0x3);
-    _current =
-        reinterpret_cast<attr_t *>(reinterpret_cast<uint8_t *>(_current) + len);
-    return *this;
-  }
+    attr_iterator_t &operator++() noexcept {
+        uint16_t len = binary::ntoh<uint16_t>(_current->length) + 4;
+        if (len & 0x3)
+            len += 4 - (len & 0x3);
+        _current = reinterpret_cast<attr_t *>(
+            reinterpret_cast<uint8_t *>(_current) + len);
+        return *this;
+    }
 
-  attr_iterator_t operator++(int) noexcept {
-    auto tmp = *this;
-    ++*this;
-    return tmp;
-  }
+    attr_iterator_t operator++(int) noexcept {
+        auto tmp = *this;
+        ++*this;
+        return tmp;
+    }
 
-  bool operator==(const attr_iterator_sentinel_t &s) const noexcept {
-    return reinterpret_cast<std::uintptr_t>(_current) + 4 > s._end;
-  }
+    bool operator==(const attr_iterator_sentinel_t &s) const noexcept {
+        return reinterpret_cast<std::uintptr_t>(_current) + 4 > s._end;
+    }
 
-  uint8_t *data() noexcept { return reinterpret_cast<uint8_t *>(_current); }
-  const uint8_t *data() const noexcept {
-    return reinterpret_cast<const uint8_t *>(_current);
-  }
+    uint8_t *data() noexcept { return reinterpret_cast<uint8_t *>(_current); }
+    const uint8_t *data() const noexcept {
+        return reinterpret_cast<const uint8_t *>(_current);
+    }
 
-private:
-  attr_t *_current;
+  private:
+    attr_t *_current;
 };
 
 struct const_attr_iterator_t {
-  using difference_type = std::ptrdiff_t;
-  using value_type = attr_t;
-  using const_reference = const attr_t &;
+    using difference_type = std::ptrdiff_t;
+    using value_type = attr_t;
+    using const_reference = const attr_t &;
 
-  const_attr_iterator_t(const void *attr = nullptr) noexcept
-      : _current{reinterpret_cast<const attr_t *>(attr)} {}
+    const_attr_iterator_t(const void *attr = nullptr) noexcept
+        : _current{reinterpret_cast<const attr_t *>(attr)} {}
 
-  const attr_t &operator*() const noexcept { return *_current; }
+    const attr_t &operator*() const noexcept { return *_current; }
 
-  const attr_t *operator->() const noexcept { return _current; }
+    const attr_t *operator->() const noexcept { return _current; }
 
-  const_attr_iterator_t &operator++() noexcept {
-    uint16_t len = binary::ntoh<uint16_t>(_current->length) + 4;
-    if (len & 0x3)
-      len += 4 - (len & 0x3);
-    _current = reinterpret_cast<const attr_t *>(
-        reinterpret_cast<const uint8_t *>(_current) + len);
-    return *this;
-  }
+    const_attr_iterator_t &operator++() noexcept {
+        uint16_t len = binary::ntoh<uint16_t>(_current->length) + 4;
+        if (len & 0x3)
+            len += 4 - (len & 0x3);
+        _current = reinterpret_cast<const attr_t *>(
+            reinterpret_cast<const uint8_t *>(_current) + len);
+        return *this;
+    }
 
-  const_attr_iterator_t operator++(int) noexcept {
-    auto tmp = *this;
-    ++*this;
-    return tmp;
-  }
+    const_attr_iterator_t operator++(int) noexcept {
+        auto tmp = *this;
+        ++*this;
+        return tmp;
+    }
 
-  bool operator==(const attr_iterator_sentinel_t &s) const noexcept {
-    return reinterpret_cast<std::uintptr_t>(_current) + 4 > s._end;
-  }
+    bool operator==(const attr_iterator_sentinel_t &s) const noexcept {
+        return reinterpret_cast<std::uintptr_t>(_current) + 4 > s._end;
+    }
 
-  const uint8_t *data() const noexcept {
-    return reinterpret_cast<const uint8_t *>(_current);
-  }
+    const uint8_t *data() const noexcept {
+        return reinterpret_cast<const uint8_t *>(_current);
+    }
 
-private:
-  const attr_t *_current;
+  private:
+    const attr_t *_current;
 };
 
 static_assert(std::input_iterator<attr_iterator_t>);
@@ -431,1035 +434,1066 @@ static_assert(
 
 static int parse_address(const void *data, std::size_t buf_size,
                          message::endpoint_t &address) {
-  uint8_t pad = 0;
-  uint8_t protocol = 0;
-  uint16_t port = 0;
-  std::error_code ec;
-  if (binary::unpack<"!BBH">(data, buf_size, ec, pad, protocol, port);
-      ec || pad != 0)
+    uint8_t pad = 0;
+    uint8_t protocol = 0;
+    uint16_t port = 0;
+    std::error_code ec;
+    if (binary::unpack<"!BBH">(data, buf_size, ec, pad, protocol, port);
+        ec || pad != 0)
+        return -1;
+    const uint8_t *iter = reinterpret_cast<const uint8_t *>(data) + 4;
+    const uint8_t *const end =
+        reinterpret_cast<const uint8_t *>(data) + buf_size;
+    if (protocol == 1) {
+        // IPv4
+        if (iter + 4 > end)
+            return -1;
+        net::ip::address_v4::bytes_type bytes;
+        std::copy(iter, iter + 4, bytes.begin());
+        address.address = net::ip::address_v4(bytes);
+        address.port = port;
+        return 8;
+    } else if (protocol == 2) {
+        // IPv6
+        if (iter + 16 > end)
+            return -1;
+        net::ip::address_v6::bytes_type bytes;
+        std::copy(iter, iter + 16, bytes.data());
+        address.address = net::ip::address_v6(bytes);
+        address.port = port;
+        return 4 + 16;
+    }
     return -1;
-  const uint8_t *iter = reinterpret_cast<const uint8_t *>(data) + 4;
-  const uint8_t *const end = reinterpret_cast<const uint8_t *>(data) + buf_size;
-  if (protocol == 1) {
-    // IPv4
-    if (iter + 4 > end)
-      return -1;
-    net::ip::address_v4::bytes_type bytes;
-    std::copy(iter, iter + 4, bytes.begin());
-    address.address = net::ip::address_v4(bytes);
-    address.port = port;
-    return 8;
-  } else if (protocol == 2) {
-    // IPv6
-    if (iter + 16 > end)
-      return -1;
-    net::ip::address_v6::bytes_type bytes;
-    std::copy(iter, iter + 16, bytes.data());
-    address.address = net::ip::address_v6(bytes);
-    address.port = port;
-    return 4 + 16;
-  }
-  return -1;
 }
 
 static int parse_xor_address(const void *data, std::size_t buf_size,
                              const header_t *header,
                              message::endpoint_t &address) {
-  if (buf_size < 4)
+    if (buf_size < 4)
+        return -1;
+    const value_mapped_address_t *mapped_address =
+        reinterpret_cast<const value_mapped_address_t *>(data);
+    if (mapped_address->pad != 0)
+        return -1;
+    if (binary::ntoh<uint8_t>(mapped_address->family) == 1) {
+        // IPv4
+        if (4 + 4 > buf_size)
+            return -1;
+        address.port = binary::ntoh<uint16_t>(
+            mapped_address->port ^
+            *reinterpret_cast<const uint16_t *>(&header->magic));
+        address.address = net::ip::address_v4(binary::ntoh<uint32_t>(
+            *reinterpret_cast<const uint32_t *>(mapped_address->address()) ^
+            header->magic));
+        return 4 + 4;
+    } else if (binary::ntoh<uint8_t>(mapped_address->family) == 2) {
+        // IPv6
+        if (4 + 16 > buf_size)
+            return -1;
+        net::ip::address_v6::bytes_type bytes;
+        address.port = binary::ntoh<uint16_t>(
+            mapped_address->port ^
+            *reinterpret_cast<const uint16_t *>(&header->magic));
+        const uint32_t *v32 =
+            reinterpret_cast<const uint32_t *>(mapped_address->address());
+        uint32_t *a32 = reinterpret_cast<uint32_t *>(bytes.data());
+        const uint32_t *mask =
+            reinterpret_cast<const uint32_t *>(&header->magic);
+        for (int i = 0; i < 4; ++i)
+            a32[i] = v32[i] ^ mask[i];
+        address.address = net::ip::address_v6(bytes);
+        return 4 + 16;
+    }
     return -1;
-  const value_mapped_address_t *mapped_address =
-      reinterpret_cast<const value_mapped_address_t *>(data);
-  if (mapped_address->pad != 0)
-    return -1;
-  if (binary::ntoh<uint8_t>(mapped_address->family) == 1) {
-    // IPv4
-    if (4 + 4 > buf_size)
-      return -1;
-    address.port = binary::ntoh<uint16_t>(
-        mapped_address->port ^
-        *reinterpret_cast<const uint16_t *>(&header->magic));
-    address.address = net::ip::address_v4(binary::ntoh<uint32_t>(
-        *reinterpret_cast<const uint32_t *>(mapped_address->address()) ^
-        header->magic));
-    return 4 + 4;
-  } else if (binary::ntoh<uint8_t>(mapped_address->family) == 2) {
-    // IPv6
-    if (4 + 16 > buf_size)
-      return -1;
-    net::ip::address_v6::bytes_type bytes;
-    address.port = binary::ntoh<uint16_t>(
-        mapped_address->port ^
-        *reinterpret_cast<const uint16_t *>(&header->magic));
-    const uint32_t *v32 =
-        reinterpret_cast<const uint32_t *>(mapped_address->address());
-    uint32_t *a32 = reinterpret_cast<uint32_t *>(bytes.data());
-    const uint32_t *mask = reinterpret_cast<const uint32_t *>(&header->magic);
-    for (int i = 0; i < 4; ++i)
-      a32[i] = v32[i] ^ mask[i];
-    address.address = net::ip::address_v6(bytes);
-    return 4 + 16;
-  }
-  return -1;
 }
 
 bool message::integrity_t::verify(std::string_view key) {
-  ICE_IN_DEBUG {
-    std::cout << "Check message integrity with key: " << key << '\n';
-  };
-  uint16_t tmp_len = *reinterpret_cast<const uint16_t *>(_msg + 2);
-  binary::write_big<uint16_t>(const_cast<std::byte *>(_msg) + 2,
-                              _hash_value.data() - _msg - sizeof(header_t) +
-                                  _hash_value.size());
-  ::HMAC_CTX *ctx = ::HMAC_CTX_new();
-  if (!ctx)
-    return false;
-  ::HMAC_Init(ctx, key.data(), key.size(),
-              _algo == SHA1 ? ::EVP_sha1() : ::EVP_sha256());
-  ::HMAC_Update(ctx, reinterpret_cast<const unsigned char *>(_msg),
-                _hash_value.data() - _msg - 4);
-  unsigned char res[32];
-  unsigned int res_len;
-  ::HMAC_Final(ctx, res, &res_len);
-  ::HMAC_CTX_free(ctx);
-  *reinterpret_cast<uint16_t *>(const_cast<std::byte *>(_msg) + 2) = tmp_len;
-  return res_len == _hash_value.size() &&
-         std::memcmp(res, _hash_value.data(), res_len) == 0;
+    ICE_IN_DEBUG {
+        std::cout << "Check message integrity with key: " << key << '\n';
+    };
+    uint16_t tmp_len = *reinterpret_cast<const uint16_t *>(_msg + 2);
+    binary::write_big<uint16_t>(const_cast<std::byte *>(_msg) + 2,
+                                _hash_value.data() - _msg - sizeof(header_t) +
+                                    _hash_value.size());
+    unsigned char res[32];
+    std::size_t res_len = 0;
+    if (_algo == SHA1) {
+        hash::hmac_context<hash::sha1> ctx(key);
+        ctx.update(_msg, _hash_value.data() - _msg - 4);
+        ctx.final(res, sizeof(res), &res_len);
+    } else {
+        hash::hmac_context<hash::sha256> ctx(key);
+        ctx.update(_msg, _hash_value.data() - _msg - 4);
+        ctx.final(res, sizeof(res), &res_len);
+    }
+    *reinterpret_cast<uint16_t *>(const_cast<std::byte *>(_msg) + 2) = tmp_len;
+    bool success = res_len == _hash_value.size() &&
+                   std::memcmp(res, _hash_value.data(), res_len) == 0;
+    ICE_IN_DEBUG {
+        std::cout << "Message integrity check: "
+                  << (success ? "success" : "fail") << '\n';
+    }
+    return success;
 }
 
 std::string
 message::password_algorithm_t::get_hmac_key(std::string_view username,
                                             std::string_view realm,
                                             std::string_view password) {
-  std::string input;
-  input.resize_and_overwrite(
-      username.size() + realm.size() + password.size() + 2 + 32,
-      [&](char *p, std::size_t n) -> std::size_t {
-        p += 32;
-        p = std::copy(username.begin(), username.end(), p);
-        *p++ = ':';
-        p = std::copy(realm.begin(), realm.end(), p);
-        *p++ = ':';
-        p = std::copy(password.begin(), password.end(), p);
+    std::string input;
+    input.resize_and_overwrite(
+        username.size() + realm.size() + password.size() + 2 + 32,
+        [&](char *p, std::size_t n) -> std::size_t {
+            p += 32;
+            p = std::copy(username.begin(), username.end(), p);
+            *p++ = ':';
+            p = std::copy(realm.begin(), realm.end(), p);
+            *p++ = ':';
+            p = std::copy(password.begin(), password.end(), p);
 
-        unsigned char *key_end;
-        if (_algo == password_algorithm_t::SHA256) {
-          key_end = ::SHA256(
-              reinterpret_cast<const unsigned char *>(input.data() + 32),
-              p - input.data() - 32,
-              reinterpret_cast<unsigned char *>(input.data()));
-        } else {
-          key_end =
-              ::MD5(reinterpret_cast<const unsigned char *>(input.data() + 32),
-                    p - input.data() - 32,
-                    reinterpret_cast<unsigned char *>(input.data()));
-        }
-        return reinterpret_cast<char *>(key_end) - input.data();
-      });
-  return input;
+            if (_algo == password_algorithm_t::SHA256) {
+                hash::SHA256(input.data(),
+                             std::string_view{input.data() + 32,
+                                              static_cast<std::size_t>(
+                                                  p - input.data() - 32)});
+            } else {
+                hash::MD5(input.data(),
+                          std::string_view{
+                              input.data() + 32,
+                              static_cast<std::size_t>(p - input.data() - 32)});
+            }
+            return _algo == password_algorithm_t::SHA256 ? 32 : 16;
+        });
+    return input;
 }
 
 bool message::parse(const void *data, std::size_t buf_size,
                     std::size_t *offset) noexcept {
-  if (offset) {
-    if (*offset >= buf_size)
-      return false;
-    data = reinterpret_cast<const char *>(data) + *offset;
-    buf_size -= *offset;
-  }
-  if (buf_size < sizeof(header_t))
-    return false;
-  const header_t *header = reinterpret_cast<const header_t *>(data);
-  const std::size_t len = binary::ntoh<uint16_t>(header->length);
-  if (len + sizeof(header_t) > buf_size)
-    return false;
-  if (binary::ntoh<uint32_t>(header->magic) != STUN_MAGIC)
-    return false;
-  uint16_t type = binary::ntoh<uint16_t>(header->type);
-  this->cls = type & STUN_CLASS_MASK;
-  this->method = type & ~STUN_CLASS_MASK;
-  std::copy(header->transaction_id, header->transaction_id + 12,
-            transaction_id.data());
+    if (offset) {
+        if (*offset >= buf_size)
+            return false;
+        data = reinterpret_cast<const char *>(data) + *offset;
+        buf_size -= *offset;
+    }
+    if (buf_size < sizeof(header_t))
+        return false;
+    const header_t *header = reinterpret_cast<const header_t *>(data);
+    const std::size_t len = binary::ntoh<uint16_t>(header->length);
+    if (len + sizeof(header_t) > buf_size)
+        return false;
+    if (binary::ntoh<uint32_t>(header->magic) != STUN_MAGIC)
+        return false;
+    uint16_t type = binary::ntoh<uint16_t>(header->type);
+    this->cls = type & STUN_CLASS_MASK;
+    this->method = type & ~STUN_CLASS_MASK;
+    std::copy(header->transaction_id, header->transaction_id + 12,
+              transaction_id.data());
 
-  const uint8_t *begin = reinterpret_cast<const uint8_t *>(data);
-  const_attr_iterator_t iter{begin + 20};
-  const attr_iterator_sentinel_t end{begin + 20 + len};
-  bool fingerprint = false;
+    const uint8_t *begin = reinterpret_cast<const uint8_t *>(data);
+    const_attr_iterator_t iter{begin + 20};
+    const attr_iterator_sentinel_t end{begin + 20 + len};
+    bool fingerprint = false;
 
-  for (; iter != end; ++iter) {
-    utils::scope_guard update_offset{[&]() noexcept {
-      if (offset) {
-        *offset += (iter.data() - begin);
-      }
-    }};
-    if (fingerprint)
-      return false;
-    const attr_t &attr = *iter;
-    const uint16_t attr_type = binary::ntoh<uint16_t>(attr.type);
-    const uint16_t attr_len = binary::ntoh<uint16_t>(attr.length);
-    if (attr_len + 4 + iter.data() > end.data())
-      return false;
-    if (!this->integrities.empty() &&
-        attr_type != attr_type_t::STUN_ATTR_MESSAGE_INTEGRITY &&
-        attr_type != attr_type_t::STUN_ATTR_MESSAGE_INTEGRITY_SHA256 &&
-        attr_type != attr_type_t::STUN_ATTR_FINGERPRINT) {
-      return true;
-    }
-    switch (attr_type) {
-    case attr_type_t::STUN_ATTR_MAPPED_ADDRESS: {
-      if ((attr_len != 8 && attr_len != 20) ||
-          parse_address(attr.value(), end.data() - attr.value(),
-                        this->mapped_address.emplace()) != attr_len)
-        return false;
-      break;
-    }
-    case attr_type_t::STUN_ATTR_XOR_MAPPED_ADDRESS: {
-      if ((attr_len != 8 && attr_len != 20) ||
-          parse_xor_address(attr.value(), end.data() - attr.value(), header,
-                            this->xor_mapped_address.emplace()) != attr_len)
-        return false;
-      break;
-    }
-    case attr_type_t::STUN_ATTR_ALTERNATE_SERVER: {
-      if ((attr_len != 8 && attr_len != 20) ||
-          parse_address(attr.value(), end.data() - attr.value(),
-                        this->alternate_server.emplace()) != attr_len)
-        return false;
-      break;
-    }
-    case attr_type_t::STUN_ATTR_ERROR_CODE: {
-      if (attr_len < sizeof(value_error_code_t))
-        return false;
-      this->error_code.emplace();
-      auto *ec = reinterpret_cast<const value_error_code_t *>(attr.value());
-      this->error_code->code = ec->code_class * 100 + ec->code_number;
-      if (attr_len > sizeof(value_error_code_t) + 762)
-        return false;
-      if (attr_len > sizeof(value_error_code_t))
-        this->error_code->reason = std::string_view{
-            ec->reason(), static_cast<std::size_t>(attr_len - 4)};
-      break;
-    }
-    case attr_type_t::STUN_ATTR_UNKNOWN_ATTRIBUTES: {
-      break;
-    }
-    case attr_type_t::STUN_ATTR_USERNAME: {
-      if (attr_len > 513)
-        return false;
-      this->username = std::string_view{
-          reinterpret_cast<const char *>(attr.value()), attr_len};
-      break;
-    }
-    case attr_type_t::STUN_ATTR_MESSAGE_INTEGRITY: {
-      if (attr_len == 0 || attr_len != 20)
-        return false;
-      integrity_t integrity;
-      integrity._algo = integrity_t::SHA1;
-      integrity._msg = reinterpret_cast<const std::byte *>(begin);
-      integrity._hash_value = std::span<const std::byte>{
-          reinterpret_cast<const std::byte *>(attr.value()), attr_len};
-      this->integrities.emplace_back(integrity);
-      break;
-    }
-    case attr_type_t::STUN_ATTR_MESSAGE_INTEGRITY_SHA256: {
-      if (attr_len == 0 || attr_len != 32)
-        return false;
-      integrity_t integrity;
-      integrity._algo = integrity_t::SHA256;
-      integrity._msg = reinterpret_cast<const std::byte *>(begin);
-      integrity._hash_value = std::span<const std::byte>{
-          reinterpret_cast<const std::byte *>(attr.value()), attr_len};
-      this->integrities.emplace_back(integrity);
-      break;
-    }
-    case attr_type_t::STUN_ATTR_FINGERPRINT: {
-      ICE_IN_DEBUG { std::cout << "Check fingerprint\n"; }
-      if (attr_len != 4)
-        return false;
-      fingerprint = true;
-      uint16_t tmp_len = binary::hton<uint16_t>(iter.data() - begin -
-                                                sizeof(header_t) + 4 + 4);
-      boost::crc_32_type crc;
-      crc.process_bytes(begin, 2);
-      crc.process_bytes(&tmp_len, 2);
-      crc.process_bytes(begin + 4, iter.data() - begin - 4);
-      if ((crc.checksum() ^ 0x5354554e) !=
-          binary::read_big<uint32_t>(attr.value())) {
-        ICE_IN_DEBUG { std::cerr << "STUN fingerprint check failed.\n"; }
-        return false;
-      }
-      this->_checked_fingerprint = true;
-      break;
-    }
-    case attr_type_t::STUN_ATTR_REALM: {
-      if (attr_len > 763 || attr_len == 0)
-        return false;
-      this->realm = std::string_view{
-          reinterpret_cast<const char *>(attr.value()), attr_len};
-      break;
-    }
-    case attr_type_t::STUN_ATTR_NONCE: {
-      if (attr_len > 763 || attr_len == 0)
-        return false;
-      this->nonce = std::string_view{
-          reinterpret_cast<const char *>(attr.value()), attr_len};
-      break;
-    }
-    case attr_type_t::STUN_ATTR_PASSWORD_ALGORITHM: //
-    case attr_type_t::STUN_ATTR_PASSWORD_ALGORITHMS: {
-      const_attr_iterator_t pwd_it{attr.value()};
-      const attr_iterator_sentinel_t pwd_end{attr.value() + attr_len};
-      for (; pwd_it != pwd_end; ++pwd_it) {
-        const auto *value_pwd_algo =
-            reinterpret_cast<const value_password_algorithm_t *>(pwd_it.data());
-        const uint16_t pwd_algo_type =
-            binary::ntoh<uint16_t>(value_pwd_algo->algorithm);
-        const auto pwd_algo_len =
-            binary::ntoh<uint16_t>(value_pwd_algo->parameters_length);
-        if (pwd_algo_len > 256)
-          return false;
-        if (pwd_algo_type != password_algorithm_t::MD5 &&
-            pwd_algo_type != password_algorithm_t::SHA256) {
-          ICE_IN_DEBUG {
-            std::cerr << "Unknown password algorithm:" << pwd_algo_type << '\n';
-          }
-          continue;
+    for (; iter != end; ++iter) {
+        utils::scope_guard update_offset{[&]() noexcept {
+            if (offset) {
+                *offset += (iter.data() - begin);
+            }
+        }};
+        if (fingerprint)
+            return false;
+        const attr_t &attr = *iter;
+        const uint16_t attr_type = binary::ntoh<uint16_t>(attr.type);
+        const uint16_t attr_len = binary::ntoh<uint16_t>(attr.length);
+        if (attr_len + 4 + iter.data() > end.data())
+            return false;
+        if (!this->integrities.empty() &&
+            attr_type != attr_type_t::STUN_ATTR_MESSAGE_INTEGRITY &&
+            attr_type != attr_type_t::STUN_ATTR_MESSAGE_INTEGRITY_SHA256 &&
+            attr_type != attr_type_t::STUN_ATTR_FINGERPRINT) {
+            return true;
         }
-        this->password_algorithms.emplace_back(
-            pwd_algo_type,
-            std::span<const std::byte>{reinterpret_cast<const std::byte *>(
+        switch (attr_type) {
+        case attr_type_t::STUN_ATTR_MAPPED_ADDRESS: {
+            if ((attr_len != 8 && attr_len != 20) ||
+                parse_address(attr.value(), end.data() - attr.value(),
+                              this->mapped_address.emplace()) != attr_len)
+                return false;
+            break;
+        }
+        case attr_type_t::STUN_ATTR_XOR_MAPPED_ADDRESS: {
+            if ((attr_len != 8 && attr_len != 20) ||
+                parse_xor_address(attr.value(), end.data() - attr.value(),
+                                  header, this->xor_mapped_address.emplace()) !=
+                    attr_len)
+                return false;
+            break;
+        }
+        case attr_type_t::STUN_ATTR_ALTERNATE_SERVER: {
+            if ((attr_len != 8 && attr_len != 20) ||
+                parse_address(attr.value(), end.data() - attr.value(),
+                              this->alternate_server.emplace()) != attr_len)
+                return false;
+            break;
+        }
+        case attr_type_t::STUN_ATTR_ERROR_CODE: {
+            if (attr_len < sizeof(value_error_code_t))
+                return false;
+            this->error_code.emplace();
+            auto *ec =
+                reinterpret_cast<const value_error_code_t *>(attr.value());
+            this->error_code->code = ec->code_class * 100 + ec->code_number;
+            if (attr_len > sizeof(value_error_code_t) + 762)
+                return false;
+            if (attr_len > sizeof(value_error_code_t))
+                this->error_code->reason = std::string_view{
+                    ec->reason(), static_cast<std::size_t>(attr_len - 4)};
+            break;
+        }
+        case attr_type_t::STUN_ATTR_UNKNOWN_ATTRIBUTES: {
+            break;
+        }
+        case attr_type_t::STUN_ATTR_USERNAME: {
+            if (attr_len > 513)
+                return false;
+            this->username = std::string_view{
+                reinterpret_cast<const char *>(attr.value()), attr_len};
+            break;
+        }
+        case attr_type_t::STUN_ATTR_MESSAGE_INTEGRITY: {
+            if (attr_len == 0 || attr_len != 20)
+                return false;
+            integrity_t integrity;
+            integrity._algo = integrity_t::SHA1;
+            integrity._msg = reinterpret_cast<const std::byte *>(begin);
+            integrity._hash_value = std::span<const std::byte>{
+                reinterpret_cast<const std::byte *>(attr.value()), attr_len};
+            this->integrities.emplace_back(integrity);
+            break;
+        }
+        case attr_type_t::STUN_ATTR_MESSAGE_INTEGRITY_SHA256: {
+            if (attr_len == 0 || attr_len != 32)
+                return false;
+            integrity_t integrity;
+            integrity._algo = integrity_t::SHA256;
+            integrity._msg = reinterpret_cast<const std::byte *>(begin);
+            integrity._hash_value = std::span<const std::byte>{
+                reinterpret_cast<const std::byte *>(attr.value()), attr_len};
+            this->integrities.emplace_back(integrity);
+            break;
+        }
+        case attr_type_t::STUN_ATTR_FINGERPRINT: {
+            ICE_IN_DEBUG { std::cout << "Check fingerprint\n"; }
+            if (attr_len != 4)
+                return false;
+            fingerprint = true;
+            uint16_t tmp_len = binary::hton<uint16_t>(iter.data() - begin -
+                                                      sizeof(header_t) + 4 + 4);
+            boost::crc_32_type crc;
+            crc.process_bytes(begin, 2);
+            crc.process_bytes(&tmp_len, 2);
+            crc.process_bytes(begin + 4, iter.data() - begin - 4);
+            if ((crc.checksum() ^ 0x5354554e) !=
+                binary::read_big<uint32_t>(attr.value())) {
+                ICE_IN_DEBUG {
+                    std::cerr << "STUN fingerprint check failed.\n";
+                }
+                return false;
+            }
+            this->_checked_fingerprint = true;
+            break;
+        }
+        case attr_type_t::STUN_ATTR_REALM: {
+            if (attr_len > 763 || attr_len == 0)
+                return false;
+            this->realm = std::string_view{
+                reinterpret_cast<const char *>(attr.value()), attr_len};
+            break;
+        }
+        case attr_type_t::STUN_ATTR_NONCE: {
+            if (attr_len > 763 || attr_len == 0)
+                return false;
+            this->nonce = std::string_view{
+                reinterpret_cast<const char *>(attr.value()), attr_len};
+            break;
+        }
+        case attr_type_t::STUN_ATTR_PASSWORD_ALGORITHM: //
+        case attr_type_t::STUN_ATTR_PASSWORD_ALGORITHMS: {
+            const_attr_iterator_t pwd_it{attr.value()};
+            const attr_iterator_sentinel_t pwd_end{attr.value() + attr_len};
+            for (; pwd_it != pwd_end; ++pwd_it) {
+                const auto *value_pwd_algo =
+                    reinterpret_cast<const value_password_algorithm_t *>(
+                        pwd_it.data());
+                const uint16_t pwd_algo_type =
+                    binary::ntoh<uint16_t>(value_pwd_algo->algorithm);
+                const auto pwd_algo_len =
+                    binary::ntoh<uint16_t>(value_pwd_algo->parameters_length);
+                if (pwd_algo_len > 256)
+                    return false;
+                if (pwd_algo_type != password_algorithm_t::MD5 &&
+                    pwd_algo_type != password_algorithm_t::SHA256) {
+                    ICE_IN_DEBUG {
+                        std::cerr
+                            << "Unknown password algorithm:" << pwd_algo_type
+                            << '\n';
+                    }
+                    continue;
+                }
+                this->password_algorithms.emplace_back(
+                    pwd_algo_type, std::span<const std::byte>{
+                                       reinterpret_cast<const std::byte *>(
                                            value_pwd_algo->parameters()),
                                        pwd_algo_len});
-      }
-      if (pwd_it.data() != pwd_end.data())
-        return false;
-      break;
+            }
+            if (pwd_it.data() != pwd_end.data())
+                return false;
+            break;
+        }
+        case attr_type_t::STUN_ATTR_USERHASH: {
+            if (attr_len != USERHASH_SIZE)
+                return false;
+            std::copy_n(attr.value(), USERHASH_SIZE,
+                        this->userhash.emplace().data());
+            break;
+        }
+        case attr_type_t::STUN_ATTR_SOFTWARE: {
+            if (attr_len > 763)
+                return false;
+            this->software = std::string_view{
+                reinterpret_cast<const char *>(attr.value()), attr_len};
+            break;
+        }
+        case attr_type_t::STUN_ATTR_PRIORITY: {
+            if (attr_len != 4)
+                return false;
+            this->priority = binary::read_big<uint32_t>(attr.value());
+            break;
+        }
+        case attr_type_t::STUN_ATTR_USE_CANDIDATE: {
+            if (attr_len != 0)
+                return false;
+            this->use_candidate = true;
+            break;
+        }
+        case attr_type_t::STUN_ATTR_ICE_CONTROLLING: {
+            if (attr_len != 8)
+                return false;
+            this->ice_controlling =
+                (static_cast<uint64_t>(binary::read_big<uint32_t>(attr.value()))
+                 << 32) |
+                binary::read_big<uint32_t>(attr.value() + 4);
+            break;
+        }
+        case attr_type_t::STUN_ATTR_ICE_CONTROLLED: {
+            if (attr_len != 8)
+                return false;
+            const uint32_t *v32 =
+                reinterpret_cast<const uint32_t *>(attr.value());
+            this->ice_controlled =
+                (static_cast<uint64_t>(binary::ntoh<uint32_t>(v32[0])) << 32) |
+                binary::ntoh<uint32_t>(v32[1]);
+            break;
+        }
+        case attr_type_t::STUN_ATTR_CHANNEL_NUMBER: {
+            if (attr_len != sizeof(value_channel_number_t))
+                return false;
+            const auto *channel_num =
+                reinterpret_cast<const value_channel_number_t *>(attr.value());
+            if (channel_num->reserved != 0)
+                return false;
+            this->channel_number =
+                binary::ntoh<uint16_t>(channel_num->channel_number);
+            break;
+        }
+        case attr_type_t::STUN_ATTR_LIFETIME: {
+            if (attr_len != 4)
+                return false;
+            this->lifetime = binary::ntoh<uint32_t>(
+                *reinterpret_cast<const uint32_t *>(attr.value()));
+            break;
+        }
+        case attr_type_t::STUN_ATTR_XOR_PEER_ADDRESS: {
+            if ((attr_len != 8 && attr_len != 20) ||
+                parse_xor_address(attr.value(), end.data() - attr.value(),
+                                  header,
+                                  this->xor_peer_address.emplace()) != attr_len)
+                return false;
+            break;
+        }
+        case attr_type_t::STUN_ATTR_XOR_RELAYED_ADDRESS: {
+            if ((attr_len != 8 && attr_len != 20) ||
+                parse_xor_address(
+                    attr.value(), end.data() - attr.value(), header,
+                    this->xor_relayed_address.emplace()) != attr_len)
+                return false;
+            break;
+        }
+        case attr_type_t::STUN_ATTR_DATA: {
+            break;
+        }
+        case attr_type_t::STUN_ATTR_EVEN_PORT: {
+            if (attr_len < 1)
+                return false;
+            const value_even_port_t *e =
+                reinterpret_cast<const value_even_port_t *>(attr.value());
+            if (e->reserved != 0)
+                return false;
+            this->even_port = e->r & 0x80;
+            break;
+        }
+        case attr_type_t::STUN_ATTR_REQUESTED_TRANSPORT: {
+            if (attr_len != sizeof(value_requested_transport_t))
+                return false;
+            const auto *r =
+                reinterpret_cast<const value_requested_transport_t *>(attr_len);
+            if (r->reserved1 != 0 || r->reserved2 != 0)
+                return false;
+            if (r->protocol != 17)
+                return false;
+            this->requested_transport = true;
+            break;
+        }
+        case attr_type_t::STUN_ATTR_DONT_FRAGMENT: {
+            if (attr_len != 0)
+                return false;
+            this->dont_fragment = true;
+            break;
+        }
+        case attr_type_t::STUN_ATTR_RESERVATION_TOKEN: {
+            if (attr_len != 8)
+                return false;
+            const uint32_t *v32 =
+                reinterpret_cast<const uint32_t *>(attr.value());
+            this->reservation_token =
+                (static_cast<uint64_t>(binary::ntoh<uint32_t>(v32[0])) << 32) |
+                binary::ntoh<uint32_t>(v32[1]);
+            break;
+        }
+        default:
+            // Ignore
+            break;
+        }
+        update_offset.dismiss();
+        if (offset)
+            *offset += (iter.data() - begin) + attr_len + 4;
     }
-    case attr_type_t::STUN_ATTR_USERHASH: {
-      if (attr_len != USERHASH_SIZE)
-        return false;
-      std::copy_n(attr.value(), USERHASH_SIZE, this->userhash.emplace().data());
-      break;
-    }
-    case attr_type_t::STUN_ATTR_SOFTWARE: {
-      if (attr_len > 763)
-        return false;
-      this->software = std::string_view{
-          reinterpret_cast<const char *>(attr.value()), attr_len};
-      break;
-    }
-    case attr_type_t::STUN_ATTR_PRIORITY: {
-      if (attr_len != 4)
-        return false;
-      this->priority = binary::read_big<uint32_t>(attr.value());
-      break;
-    }
-    case attr_type_t::STUN_ATTR_USE_CANDIDATE: {
-      if (attr_len != 0)
-        return false;
-      this->use_candidate = true;
-      break;
-    }
-    case attr_type_t::STUN_ATTR_ICE_CONTROLLING: {
-      if (attr_len != 8)
-        return false;
-      this->ice_controlling =
-          (static_cast<uint64_t>(binary::read_big<uint32_t>(attr.value()))
-           << 32) |
-          binary::read_big<uint32_t>(attr.value() + 4);
-      break;
-    }
-    case attr_type_t::STUN_ATTR_ICE_CONTROLLED: {
-      if (attr_len != 8)
-        return false;
-      const uint32_t *v32 = reinterpret_cast<const uint32_t *>(attr.value());
-      this->ice_controlled =
-          (static_cast<uint64_t>(binary::ntoh<uint32_t>(v32[0])) << 32) |
-          binary::ntoh<uint32_t>(v32[1]);
-      break;
-    }
-    case attr_type_t::STUN_ATTR_CHANNEL_NUMBER: {
-      if (attr_len != sizeof(value_channel_number_t))
-        return false;
-      const auto *channel_num =
-          reinterpret_cast<const value_channel_number_t *>(attr.value());
-      if (channel_num->reserved != 0)
-        return false;
-      this->channel_number =
-          binary::ntoh<uint16_t>(channel_num->channel_number);
-      break;
-    }
-    case attr_type_t::STUN_ATTR_LIFETIME: {
-      if (attr_len != 4)
-        return false;
-      this->lifetime = binary::ntoh<uint32_t>(
-          *reinterpret_cast<const uint32_t *>(attr.value()));
-      break;
-    }
-    case attr_type_t::STUN_ATTR_XOR_PEER_ADDRESS: {
-      if ((attr_len != 8 && attr_len != 20) ||
-          parse_xor_address(attr.value(), end.data() - attr.value(), header,
-                            this->xor_peer_address.emplace()) != attr_len)
-        return false;
-      break;
-    }
-    case attr_type_t::STUN_ATTR_XOR_RELAYED_ADDRESS: {
-      if ((attr_len != 8 && attr_len != 20) ||
-          parse_xor_address(attr.value(), end.data() - attr.value(), header,
-                            this->xor_relayed_address.emplace()) != attr_len)
-        return false;
-      break;
-    }
-    case attr_type_t::STUN_ATTR_DATA: {
-      break;
-    }
-    case attr_type_t::STUN_ATTR_EVEN_PORT: {
-      if (attr_len < 1)
-        return false;
-      const value_even_port_t *e =
-          reinterpret_cast<const value_even_port_t *>(attr.value());
-      if (e->reserved != 0)
-        return false;
-      this->even_port = e->r & 0x80;
-      break;
-    }
-    case attr_type_t::STUN_ATTR_REQUESTED_TRANSPORT: {
-      if (attr_len != sizeof(value_requested_transport_t))
-        return false;
-      const auto *r =
-          reinterpret_cast<const value_requested_transport_t *>(attr_len);
-      if (r->reserved1 != 0 || r->reserved2 != 0)
-        return false;
-      if (r->protocol != 17)
-        return false;
-      this->requested_transport = true;
-      break;
-    }
-    case attr_type_t::STUN_ATTR_DONT_FRAGMENT: {
-      if (attr_len != 0)
-        return false;
-      this->dont_fragment = true;
-      break;
-    }
-    case attr_type_t::STUN_ATTR_RESERVATION_TOKEN: {
-      if (attr_len != 8)
-        return false;
-      const uint32_t *v32 = reinterpret_cast<const uint32_t *>(attr.value());
-      this->reservation_token =
-          (static_cast<uint64_t>(binary::ntoh<uint32_t>(v32[0])) << 32) |
-          binary::ntoh<uint32_t>(v32[1]);
-      break;
-    }
-    default:
-      // Ignore
-      break;
-    }
-    update_offset.dismiss();
-    if (offset)
-      *offset += (iter.data() - begin) + attr_len + 4;
-  }
 
-  return iter.data() - begin == len + sizeof(header_t);
+    return iter.data() - begin == len + sizeof(header_t);
 }
 
 static int write_header(void *buf, size_t size, class_t cls, method_t method,
                         const uint8_t *transaction_id) {
-  if (size < sizeof(header_t))
-    return -1;
+    if (size < sizeof(header_t))
+        return -1;
 
-  uint16_t type = static_cast<uint16_t>(cls) | static_cast<uint16_t>(method);
+    uint16_t type = static_cast<uint16_t>(cls) | static_cast<uint16_t>(method);
 
-  header_t *header = reinterpret_cast<header_t *>(buf);
-  header->type = binary::hton<uint16_t>(type);
-  header->length = 0;
-  header->magic = binary::hton<uint32_t>(0x2112A442);
-  std::memcpy(header->transaction_id, transaction_id, STUN_TRANSACTION_ID_SIZE);
+    header_t *header = reinterpret_cast<header_t *>(buf);
+    header->type = binary::hton<uint16_t>(type);
+    header->length = 0;
+    header->magic = binary::hton<uint32_t>(0x2112A442);
+    std::memcpy(header->transaction_id, transaction_id,
+                STUN_TRANSACTION_ID_SIZE);
 
-  return sizeof(header_t);
+    return sizeof(header_t);
 }
 
 static int write_address(void *data, std::size_t buf_size,
                          const message::endpoint_t &address) {
-  if (buf_size < sizeof(value_mapped_address_t))
+    if (buf_size < sizeof(value_mapped_address_t))
+        return -1;
+    value_mapped_address_t *mapped =
+        reinterpret_cast<value_mapped_address_t *>(data);
+    mapped->port = binary::hton<uint16_t>(address.port);
+    mapped->pad = 0;
+    if (address.address.is_v4()) {
+        if (4 + 4 > buf_size)
+            return -1;
+        mapped->family = 1;
+        binary::write_big<uint32_t>(mapped->address(),
+                                    address.address.to_v4().to_uint());
+        return 4 + 4;
+    } else if (address.address.is_v6()) {
+        if (4 + 16 > buf_size)
+            return -1;
+        mapped->family = 2;
+        auto bytes = address.address.to_v6().to_bytes();
+        std::memcpy(mapped->address(), bytes.data(), bytes.size());
+        return 4 + 16;
+    }
     return -1;
-  value_mapped_address_t *mapped =
-      reinterpret_cast<value_mapped_address_t *>(data);
-  mapped->port = binary::hton<uint16_t>(address.port);
-  mapped->pad = 0;
-  if (address.address.is_v4()) {
-    if (4 + 4 > buf_size)
-      return -1;
-    mapped->family = 1;
-    binary::write_big<uint32_t>(mapped->address(),
-                                address.address.to_v4().to_uint());
-    return 4 + 4;
-  } else if (address.address.is_v6()) {
-    if (4 + 16 > buf_size)
-      return -1;
-    mapped->family = 2;
-    auto bytes = address.address.to_v6().to_bytes();
-    std::memcpy(mapped->address(), bytes.data(), bytes.size());
-    return 4 + 16;
-  }
-  return -1;
 }
 
 static int write_xor_address(void *data, std::size_t buf_size,
                              const header_t *header,
                              const message::endpoint_t &address) {
-  if (buf_size < sizeof(value_mapped_address_t))
+    if (buf_size < sizeof(value_mapped_address_t))
+        return -1;
+    value_mapped_address_t *mapped =
+        reinterpret_cast<value_mapped_address_t *>(data);
+    mapped->port = header->magic ^ binary::hton<uint16_t>(address.port);
+    mapped->pad = 0;
+    if (address.address.is_v4()) {
+        if (4 + 4 > buf_size)
+            return -1;
+        mapped->family = 1;
+        uint32_t *value = reinterpret_cast<uint32_t *>(mapped->address());
+        *value = header->magic ^
+                 binary::hton<uint32_t>(address.address.to_v4().to_uint());
+        return 4 + 4;
+    } else if (address.address.is_v6()) {
+        if (4 + 16 > buf_size)
+            return -1;
+        mapped->family = 2;
+        auto bytes = address.address.to_v6().to_bytes();
+        const uint32_t *mask =
+            reinterpret_cast<const uint32_t *>(&header->magic);
+        uint32_t *value = reinterpret_cast<uint32_t *>(mapped->address());
+        for (int i = 0; i < 4; ++i)
+            value[i] =
+                mask[i] ^ reinterpret_cast<const uint32_t *>(bytes.data())[i];
+        return 4 + 16;
+    }
     return -1;
-  value_mapped_address_t *mapped =
-      reinterpret_cast<value_mapped_address_t *>(data);
-  mapped->port = header->magic ^ binary::hton<uint16_t>(address.port);
-  mapped->pad = 0;
-  if (address.address.is_v4()) {
-    if (4 + 4 > buf_size)
-      return -1;
-    mapped->family = 1;
-    uint32_t *value = reinterpret_cast<uint32_t *>(mapped->address());
-    *value = header->magic ^
-             binary::hton<uint32_t>(address.address.to_v4().to_uint());
-    return 4 + 4;
-  } else if (address.address.is_v6()) {
-    if (4 + 16 > buf_size)
-      return -1;
-    mapped->family = 2;
-    auto bytes = address.address.to_v6().to_bytes();
-    const uint32_t *mask = reinterpret_cast<const uint32_t *>(&header->magic);
-    uint32_t *value = reinterpret_cast<uint32_t *>(mapped->address());
-    for (int i = 0; i < 4; ++i)
-      value[i] = mask[i] ^ reinterpret_cast<const uint32_t *>(bytes.data())[i];
-    return 4 + 16;
-  }
-  return -1;
 }
 
 int message::write_to(void *buf, size_t length) const noexcept {
-  int len = write_header(buf, length, this->cls, this->method,
-                         this->transaction_id.data());
-  if (len < 0)
-    return -1;
-  header_t *header = reinterpret_cast<header_t *>(buf);
-  uint8_t *const buf_begin = reinterpret_cast<uint8_t *>(buf);
-  const uint8_t *const buf_end = buf_begin + length;
+    int len = write_header(buf, length, this->cls, this->method,
+                           this->transaction_id.data());
+    if (len < 0)
+        return -1;
+    header_t *header = reinterpret_cast<header_t *>(buf);
+    uint8_t *const buf_begin = reinterpret_cast<uint8_t *>(buf);
+    const uint8_t *const buf_end = buf_begin + length;
 
-  attr_iterator_t iter{buf_begin + len};
-  attr_iterator_sentinel_t end{buf_end};
+    attr_iterator_t iter{buf_begin + len};
+    attr_iterator_sentinel_t end{buf_end};
 
-  if (this->error_code) {
-    if (iter == end)
-      goto overflow;
-    uint16_t attr_size =
-        sizeof(value_error_code_t) + this->error_code->reason.size();
-    if (iter->value() + attr_size > buf_end)
-      goto overflow;
-    iter->type = binary::hton<uint16_t>(attr_type_t::STUN_ATTR_ERROR_CODE);
-    iter->length = binary::hton<uint16_t>(attr_size);
+    if (this->error_code) {
+        if (iter == end)
+            goto overflow;
+        uint16_t attr_size =
+            sizeof(value_error_code_t) + this->error_code->reason.size();
+        if (iter->value() + attr_size > buf_end)
+            goto overflow;
+        iter->type = binary::hton<uint16_t>(attr_type_t::STUN_ATTR_ERROR_CODE);
+        iter->length = binary::hton<uint16_t>(attr_size);
 
-    value_error_code_t *ec =
-        reinterpret_cast<value_error_code_t *>(iter.data());
-    ec->reserved = 0;
-    auto r = std::div(this->error_code->code, 100);
-    ec->code_class = r.quot & 0x07;
-    ec->code_number = r.rem;
-    std::ranges::copy(this->error_code->reason, ec->reason());
-    ++iter;
-  }
+        value_error_code_t *ec =
+            reinterpret_cast<value_error_code_t *>(iter.data());
+        ec->reserved = 0;
+        auto r = std::div(this->error_code->code, 100);
+        ec->code_class = r.quot & 0x07;
+        ec->code_number = r.rem;
+        std::ranges::copy(this->error_code->reason, ec->reason());
+        ++iter;
+    }
 
-  if (this->mapped_address) {
-    if (iter == end)
-      goto overflow;
-    iter->type = binary::hton<uint16_t>(attr_type_t::STUN_ATTR_MAPPED_ADDRESS);
-    auto attr_size = write_address(iter->value(), buf_end - iter->value(),
-                                   *this->mapped_address);
-    if (attr_size < 0)
-      goto overflow;
-    iter->length = binary::hton<uint16_t>(static_cast<uint16_t>(attr_size));
-    ++iter;
-  }
+    if (this->mapped_address) {
+        if (iter == end)
+            goto overflow;
+        iter->type =
+            binary::hton<uint16_t>(attr_type_t::STUN_ATTR_MAPPED_ADDRESS);
+        auto attr_size = write_address(iter->value(), buf_end - iter->value(),
+                                       *this->mapped_address);
+        if (attr_size < 0)
+            goto overflow;
+        iter->length = binary::hton<uint16_t>(static_cast<uint16_t>(attr_size));
+        ++iter;
+    }
 
-  if (this->xor_mapped_address) {
-    if (iter == end)
-      goto overflow;
-    iter->type =
-        binary::hton<uint16_t>(attr_type_t::STUN_ATTR_XOR_MAPPED_ADDRESS);
-    auto attr_size = write_xor_address(iter->value(), buf_end - iter->value(),
-                                       header, *this->xor_mapped_address);
-    if (attr_size < 0)
-      goto overflow;
-    iter->length = binary::hton<uint16_t>(static_cast<uint16_t>(attr_size));
-    ++iter;
-  }
+    if (this->xor_mapped_address) {
+        if (iter == end)
+            goto overflow;
+        iter->type =
+            binary::hton<uint16_t>(attr_type_t::STUN_ATTR_XOR_MAPPED_ADDRESS);
+        auto attr_size =
+            write_xor_address(iter->value(), buf_end - iter->value(), header,
+                              *this->xor_mapped_address);
+        if (attr_size < 0)
+            goto overflow;
+        iter->length = binary::hton<uint16_t>(static_cast<uint16_t>(attr_size));
+        ++iter;
+    }
 
-  if (this->priority) {
-    if (iter == end)
-      goto overflow;
-    if (iter->value() + 4 > buf_end)
-      goto overflow;
-    iter->type = binary::hton<uint16_t>(attr_type_t::STUN_ATTR_PRIORITY);
-    iter->length = binary::hton<uint16_t>(4);
-    binary::write_big<uint16_t>(iter->value(), *this->priority);
-    ++iter;
-  }
+    if (this->priority) {
+        if (iter == end)
+            goto overflow;
+        if (iter->value() + 4 > buf_end)
+            goto overflow;
+        iter->type = binary::hton<uint16_t>(attr_type_t::STUN_ATTR_PRIORITY);
+        iter->length = binary::hton<uint16_t>(4);
+        binary::write_big<uint16_t>(iter->value(), *this->priority);
+        ++iter;
+    }
 
-  if (this->use_candidate) {
-    if (iter == end)
-      goto overflow;
-    iter->type = binary::hton<uint16_t>(attr_type_t::STUN_ATTR_USE_CANDIDATE);
-    iter->length = 0;
-    ++iter;
-  }
+    if (this->use_candidate) {
+        if (iter == end)
+            goto overflow;
+        iter->type =
+            binary::hton<uint16_t>(attr_type_t::STUN_ATTR_USE_CANDIDATE);
+        iter->length = 0;
+        ++iter;
+    }
 
-  if (this->ice_controlling) {
-    if (iter == end)
-      goto overflow;
-    if (iter->value() + 8 > buf_end)
-      goto overflow;
-    iter->type = binary::hton<uint16_t>(attr_type_t::STUN_ATTR_ICE_CONTROLLING);
-    iter->length = binary::hton<uint16_t>(8);
-    binary::write_big<uint64_t>(iter->value(), *this->ice_controlling);
-    ++iter;
-  }
+    if (this->ice_controlling) {
+        if (iter == end)
+            goto overflow;
+        if (iter->value() + 8 > buf_end)
+            goto overflow;
+        iter->type =
+            binary::hton<uint16_t>(attr_type_t::STUN_ATTR_ICE_CONTROLLING);
+        iter->length = binary::hton<uint16_t>(8);
+        binary::write_big<uint64_t>(iter->value(), *this->ice_controlling);
+        ++iter;
+    }
 
-  if (this->ice_controlled) {
-    if (iter == end)
-      goto overflow;
-    if (iter->value() + 8 > buf_end)
-      goto overflow;
-    iter->type = binary::hton<uint16_t>(attr_type_t::STUN_ATTR_ICE_CONTROLLED);
-    iter->length = binary::hton<uint16_t>(8);
-    binary::write_big<uint64_t>(iter->value(), *this->ice_controlled);
-    ++iter;
-  }
+    if (this->ice_controlled) {
+        if (iter == end)
+            goto overflow;
+        if (iter->value() + 8 > buf_end)
+            goto overflow;
+        iter->type =
+            binary::hton<uint16_t>(attr_type_t::STUN_ATTR_ICE_CONTROLLED);
+        iter->length = binary::hton<uint16_t>(8);
+        binary::write_big<uint64_t>(iter->value(), *this->ice_controlled);
+        ++iter;
+    }
 
-  if (this->channel_number) {
-    if (iter == end)
-      goto overflow;
-    if (iter->value() + sizeof(value_channel_number_t) > buf_end)
-      goto overflow;
-    iter->type = binary::hton<uint16_t>(attr_type_t::STUN_ATTR_CHANNEL_NUMBER);
-    iter->length = binary::hton<uint16_t>(sizeof(value_channel_number_t));
+    if (this->channel_number) {
+        if (iter == end)
+            goto overflow;
+        if (iter->value() + sizeof(value_channel_number_t) > buf_end)
+            goto overflow;
+        iter->type =
+            binary::hton<uint16_t>(attr_type_t::STUN_ATTR_CHANNEL_NUMBER);
+        iter->length = binary::hton<uint16_t>(sizeof(value_channel_number_t));
 
-    auto *cn = reinterpret_cast<value_channel_number_t *>(iter->value());
-    cn->channel_number = binary::hton<uint16_t>(*this->channel_number);
-    cn->reserved = 0;
-    ++iter;
-  }
+        auto *cn = reinterpret_cast<value_channel_number_t *>(iter->value());
+        cn->channel_number = binary::hton<uint16_t>(*this->channel_number);
+        cn->reserved = 0;
+        ++iter;
+    }
 
-  if (this->lifetime) {
-    if (iter == end)
-      goto overflow;
-    if (iter->value() + 4 > buf_end)
-      goto overflow;
-    iter->type = binary::hton<uint16_t>(attr_type_t::STUN_ATTR_LIFETIME);
-    iter->length = binary::hton<uint16_t>(4);
-    binary::write_big<uint32_t>(iter->value(), *this->lifetime);
-    ++iter;
-  }
+    if (this->lifetime) {
+        if (iter == end)
+            goto overflow;
+        if (iter->value() + 4 > buf_end)
+            goto overflow;
+        iter->type = binary::hton<uint16_t>(attr_type_t::STUN_ATTR_LIFETIME);
+        iter->length = binary::hton<uint16_t>(4);
+        binary::write_big<uint32_t>(iter->value(), *this->lifetime);
+        ++iter;
+    }
 
-  if (this->xor_peer_address) {
-    if (iter == end)
-      goto overflow;
-    iter->type =
-        binary::hton<uint16_t>(attr_type_t::STUN_ATTR_XOR_PEER_ADDRESS);
-    auto attr_size = write_xor_address(iter->value(), buf_end - iter->value(),
-                                       header, *this->xor_peer_address);
-    if (attr_size < 0)
-      goto overflow;
-    iter->length = binary::hton<uint16_t>(static_cast<uint16_t>(attr_size));
-    ++iter;
-  }
+    if (this->xor_peer_address) {
+        if (iter == end)
+            goto overflow;
+        iter->type =
+            binary::hton<uint16_t>(attr_type_t::STUN_ATTR_XOR_PEER_ADDRESS);
+        auto attr_size =
+            write_xor_address(iter->value(), buf_end - iter->value(), header,
+                              *this->xor_peer_address);
+        if (attr_size < 0)
+            goto overflow;
+        iter->length = binary::hton<uint16_t>(static_cast<uint16_t>(attr_size));
+        ++iter;
+    }
 
-  if (this->xor_relayed_address) {
-    if (iter == end)
-      goto overflow;
-    iter->type =
-        binary::hton<uint16_t>(attr_type_t::STUN_ATTR_XOR_RELAYED_ADDRESS);
-    auto attr_size = write_xor_address(iter->value(), buf_end - iter->value(),
-                                       header, *this->xor_relayed_address);
-    if (attr_size < 0)
-      goto overflow;
-    iter->length = binary::hton<uint16_t>(static_cast<uint16_t>(attr_size));
-    ++iter;
-  }
+    if (this->xor_relayed_address) {
+        if (iter == end)
+            goto overflow;
+        iter->type =
+            binary::hton<uint16_t>(attr_type_t::STUN_ATTR_XOR_RELAYED_ADDRESS);
+        auto attr_size =
+            write_xor_address(iter->value(), buf_end - iter->value(), header,
+                              *this->xor_relayed_address);
+        if (attr_size < 0)
+            goto overflow;
+        iter->length = binary::hton<uint16_t>(static_cast<uint16_t>(attr_size));
+        ++iter;
+    }
 
-  if (this->even_port) {
-    if (iter == end)
-      goto overflow;
-    if (iter->value() + sizeof(value_even_port_t) > buf_end)
-      goto overflow;
-    iter->type = binary::hton<uint16_t>(attr_type_t::STUN_ATTR_EVEN_PORT);
-    iter->length = binary::hton<uint16_t>(sizeof(value_even_port_t));
+    if (this->even_port) {
+        if (iter == end)
+            goto overflow;
+        if (iter->value() + sizeof(value_even_port_t) > buf_end)
+            goto overflow;
+        iter->type = binary::hton<uint16_t>(attr_type_t::STUN_ATTR_EVEN_PORT);
+        iter->length = binary::hton<uint16_t>(sizeof(value_even_port_t));
 
-    auto *ep = reinterpret_cast<value_even_port_t *>(iter->value());
+        auto *ep = reinterpret_cast<value_even_port_t *>(iter->value());
+        // TODO
+    }
+
+    if (this->requested_transport) {
+        if (iter == end)
+            goto overflow;
+        if (iter->value() + sizeof(value_requested_transport_t) > buf_end)
+            goto overflow;
+        iter->type =
+            binary::hton<uint16_t>(attr_type_t::STUN_ATTR_REQUESTED_TRANSPORT);
+        iter->length =
+            binary::hton<uint16_t>(sizeof(value_requested_transport_t));
+
+        auto *rt =
+            reinterpret_cast<value_requested_transport_t *>(iter->value());
+        rt->protocol = 17;
+        rt->reserved1 = 0;
+        rt->reserved2 = 0;
+        ++iter;
+    }
+
+    if (this->dont_fragment) {
+        if (iter == end)
+            goto overflow;
+        iter->type =
+            binary::hton<uint16_t>(attr_type_t::STUN_ATTR_DONT_FRAGMENT);
+        iter->length = 0;
+        ++iter;
+    }
+
+    if (this->reservation_token) {
+        if (iter == end)
+            goto overflow;
+        if (iter->value() + 8 > buf_end)
+            goto overflow;
+        iter->type =
+            binary::hton<uint16_t>(attr_type_t::STUN_ATTR_RESERVATION_TOKEN);
+        iter->length = binary::hton<uint16_t>(8);
+        binary::write_big<uint64_t>(iter->value(), *this->reservation_token);
+        ++iter;
+    }
+
+    if (iter != end) {
+        static constexpr std::string_view sw = "asio-ice";
+        if (iter->value() + sw.size() <= buf_end) {
+            iter->type =
+                binary::hton<uint16_t>(attr_type_t::STUN_ATTR_SOFTWARE);
+            iter->length = binary::hton<uint16_t>(sw.size());
+            std::ranges::copy(sw, iter->value());
+            ++iter;
+        }
+    }
+
+    for (const auto &algo : _integrity_algos) {
+        if (iter == end)
+            goto overflow;
+        uint16_t attr_size;
+        switch (algo) {
+        case integrity_t::SHA1:
+            iter->type = binary::hton<uint16_t>(
+                attr_type_t::STUN_ATTR_MESSAGE_INTEGRITY);
+            attr_size = 20;
+            iter->length = binary::hton<uint16_t>(20);
+            break;
+        case integrity_t::SHA256:
+            iter->type = binary::hton<uint16_t>(
+                attr_type_t::STUN_ATTR_MESSAGE_INTEGRITY_SHA256);
+            attr_size = 32;
+            iter->length = binary::hton<uint16_t>(32);
+            break;
+        default:
+            ICE_IN_DEBUG {
+                std::cerr << "Unknown integrity algorithm: " << algo << '\n';
+            }
+            continue;
+        }
+        if (iter->value() + attr_size > buf_end)
+            goto overflow;
+        header->length = binary::hton<uint16_t>(
+            (iter.data() - buf_begin) - sizeof(header_t) + 4 + attr_size);
+        if (algo == integrity_t::SHA1) {
+            hash::hmac_context<hash::sha1> ctx(_hmac_key);
+            ctx.update(buf_begin, iter.data() - buf_begin);
+            ctx.final(iter->value(), attr_size);
+        } else {
+            hash::hmac_context<hash::sha256> ctx(_hmac_key);
+            ctx.update(buf_begin, iter.data() - buf_begin);
+            ctx.final(iter->value(), attr_size);
+        }
+
+        integrity_t integrity;
+        integrity._algo = algo;
+        integrity._hash_value = std::span<const std::byte>(
+            reinterpret_cast<const std::byte *>(iter->value()), attr_size);
+        integrity._msg = reinterpret_cast<const std::byte *>(buf_begin);
+        integrities.push_back(integrity);
+
+        ++iter;
+    }
+
+    if (_use_fingerprint) {
+        if (iter == end)
+            goto overflow;
+        if (iter->value() + 4 > buf_end)
+            goto overflow;
+        iter->type = binary::hton<uint16_t>(attr_type_t::STUN_ATTR_FINGERPRINT);
+        iter->length = binary::hton<uint16_t>(4);
+
+        header->length = binary::hton<uint16_t>((iter.data() - buf_begin) -
+                                                sizeof(header_t) + 4 + 4);
+        boost::crc_32_type crc;
+        crc.process_bytes(buf_begin, iter.data() - buf_begin);
+        binary::write_big<uint32_t>(iter->value(), crc.checksum() ^ 0x5354554e);
+        ++iter;
+    }
+
     // TODO
-  }
+    if (iter.data() > buf_end)
+        goto overflow;
 
-  if (this->requested_transport) {
-    if (iter == end)
-      goto overflow;
-    if (iter->value() + sizeof(value_requested_transport_t) > buf_end)
-      goto overflow;
-    iter->type =
-        binary::hton<uint16_t>(attr_type_t::STUN_ATTR_REQUESTED_TRANSPORT);
-    iter->length = binary::hton<uint16_t>(sizeof(value_requested_transport_t));
-
-    auto *rt = reinterpret_cast<value_requested_transport_t *>(iter->value());
-    rt->protocol = 17;
-    rt->reserved1 = 0;
-    rt->reserved2 = 0;
-    ++iter;
-  }
-
-  if (this->dont_fragment) {
-    if (iter == end)
-      goto overflow;
-    iter->type = binary::hton<uint16_t>(attr_type_t::STUN_ATTR_DONT_FRAGMENT);
-    iter->length = 0;
-    ++iter;
-  }
-
-  if (this->reservation_token) {
-    if (iter == end)
-      goto overflow;
-    if (iter->value() + 8 > buf_end)
-      goto overflow;
-    iter->type =
-        binary::hton<uint16_t>(attr_type_t::STUN_ATTR_RESERVATION_TOKEN);
-    iter->length = binary::hton<uint16_t>(8);
-    binary::write_big<uint64_t>(iter->value(), *this->reservation_token);
-    ++iter;
-  }
-
-  if (iter != end) {
-    static constexpr std::string_view sw = "asio-ice";
-    if (iter->value() + sw.size() <= buf_end) {
-      iter->type = binary::hton<uint16_t>(attr_type_t::STUN_ATTR_SOFTWARE);
-      iter->length = binary::hton<uint16_t>(sw.size());
-      std::ranges::copy(sw, iter->value());
-      ++iter;
-    }
-  }
-
-  for (const auto &algo : _integrity_algos) {
-    if (iter == end)
-      goto overflow;
-    uint16_t attr_size;
-    switch (algo) {
-    case integrity_t::SHA1:
-      iter->type =
-          binary::hton<uint16_t>(attr_type_t::STUN_ATTR_MESSAGE_INTEGRITY);
-      attr_size = 20;
-      iter->length = binary::hton<uint16_t>(20);
-      break;
-    case integrity_t::SHA256:
-      iter->type = binary::hton<uint16_t>(
-          attr_type_t::STUN_ATTR_MESSAGE_INTEGRITY_SHA256);
-      attr_size = 32;
-      iter->length = binary::hton<uint16_t>(32);
-      break;
-    default:
-      ICE_IN_DEBUG {
-        std::cerr << "Unknown integrity algorithm: " << algo << '\n';
-      }
-      continue;
-    }
-    if (iter->value() + attr_size > buf_end)
-      goto overflow;
-    header->length = binary::hton<uint16_t>((iter.data() - buf_begin) -
-                                            sizeof(header_t) + 4 + attr_size);
-    ::HMAC_CTX *ctx = ::HMAC_CTX_new();
-    if (!ctx)
-      continue;
-    ::HMAC_Init(ctx, _hmac_key.data(), (int)_hmac_key.size(),
-                algo == integrity_t::SHA1 ? ::EVP_sha1() : ::EVP_sha256());
-    ::HMAC_Update(ctx, (const unsigned char *)buf_begin,
-                  iter.data() - buf_begin);
-    unsigned int hash_len = attr_size;
-    ::HMAC_Final(ctx, (unsigned char *)iter->value(), &hash_len);
-    assert(hash_len == attr_size);
-    ::HMAC_CTX_free(ctx);
-
-    integrity_t integrity;
-    integrity._algo = algo;
-    integrity._hash_value = std::span<const std::byte>(
-        reinterpret_cast<const std::byte *>(iter->value()), attr_size);
-    integrity._msg = reinterpret_cast<const std::byte *>(buf_begin);
-    integrities.push_back(integrity);
-
-    ++iter;
-  }
-
-  if (_use_fingerprint) {
-    if (iter == end)
-      goto overflow;
-    if (iter->value() + 4 > buf_end)
-      goto overflow;
-    iter->type = binary::hton<uint16_t>(attr_type_t::STUN_ATTR_FINGERPRINT);
-    iter->length = binary::hton<uint16_t>(4);
-
-    header->length = binary::hton<uint16_t>((iter.data() - buf_begin) -
-                                            sizeof(header_t) + 4 + 4);
-    boost::crc_32_type crc;
-    crc.process_bytes(buf_begin, iter.data() - buf_begin);
-    binary::write_big<uint32_t>(iter->value(), crc.checksum() ^ 0x5354554e);
-    ++iter;
-  }
-
-  // TODO
-  if (iter.data() > buf_end)
-    goto overflow;
-
-  binary::write_big<uint16_t>(&header->length,
-                              iter.data() - buf_begin - sizeof(header_t));
-  return iter.data() - buf_begin;
+    binary::write_big<uint16_t>(&header->length,
+                                iter.data() - buf_begin - sizeof(header_t));
+    return iter.data() - buf_begin;
 overflow:
-  ICE_IN_DEBUG { std::cerr << "Buffer is too small.\n"; };
-  return -1;
+    ICE_IN_DEBUG { std::cerr << "Buffer is too small.\n"; };
+    return -1;
 }
 
 bool message::is_not_stun(const void *data, std::size_t length) noexcept {
-  if (!data || length < sizeof(header_t))
-    return true;
-  if (*reinterpret_cast<const uint8_t *>(data) & 0xC0)
-    return true;
-  const auto *header = reinterpret_cast<const header_t *>(data);
-  if (binary::ntoh<uint32_t>(header->magic) != STUN_MAGIC)
-    return true;
-  const uint16_t len = binary::ntoh<uint16_t>(header->length);
-  if (len & 0x3)
-    return true;
-  if (len + sizeof(header_t) != length)
-    return true;
-  return false;
+    if (!data || length < sizeof(header_t))
+        return true;
+    if (*reinterpret_cast<const uint8_t *>(data) & 0xC0)
+        return true;
+    const auto *header = reinterpret_cast<const header_t *>(data);
+    if (binary::ntoh<uint32_t>(header->magic) != STUN_MAGIC)
+        return true;
+    const uint16_t len = binary::ntoh<uint16_t>(header->length);
+    if (len & 0x3)
+        return true;
+    if (len + sizeof(header_t) != length)
+        return true;
+    return false;
 }
 
 void message::reset() noexcept {
-  cls = 0;
-  method = 0;
-  transaction_id.fill(0);
-  mapped_address.reset();
-  xor_mapped_address.reset();
-  username.clear();
-  integrities.clear();
-  password_algorithms.clear();
-  error_code.reset();
-  realm.clear();
-  nonce.clear();
-  software.clear();
-  userhash.reset();
-  priority.reset();
-  ice_controlling.reset();
-  ice_controlled.reset();
-  use_candidate = false;
-  changed_address.reset();
-  channel_number.reset();
-  lifetime.reset();
-  xor_peer_address.reset();
-  xor_relayed_address.reset();
-  requested_transport = false;
-  response_origin.reset();
-  other_address.reset();
-  alternate_server.reset();
-  even_port = false;
-  next_port = false;
-  dont_fragment = false;
-  reservation_token.reset();
-  password.clear();
-  _checked_fingerprint = false;
-  _hmac_key.clear();
-  _use_message_integrity = false;
-  _use_fingerprint = false;
-  _integrity_algos.clear();
+    cls = 0;
+    method = 0;
+    transaction_id.fill(0);
+    mapped_address.reset();
+    xor_mapped_address.reset();
+    username.clear();
+    integrities.clear();
+    password_algorithms.clear();
+    error_code.reset();
+    realm.clear();
+    nonce.clear();
+    software.clear();
+    userhash.reset();
+    priority.reset();
+    ice_controlling.reset();
+    ice_controlled.reset();
+    use_candidate = false;
+    changed_address.reset();
+    channel_number.reset();
+    lifetime.reset();
+    xor_peer_address.reset();
+    xor_relayed_address.reset();
+    requested_transport = false;
+    response_origin.reset();
+    other_address.reset();
+    alternate_server.reset();
+    even_port = false;
+    next_port = false;
+    dont_fragment = false;
+    reservation_token.reset();
+    password.clear();
+    _checked_fingerprint = false;
+    _hmac_key.clear();
+    _use_message_integrity = false;
+    _use_fingerprint = false;
+    _integrity_algos.clear();
 }
 
 static nlohmann::json to_json(const message::endpoint_t &ep) {
-  nlohmann::json obj;
-  obj["family"] = ep.address.is_v4() ? "ipv4" : "ipv6";
-  obj["port"] = ep.port;
-  obj["address"] = ep.address.to_string();
-  return obj;
+    nlohmann::json obj;
+    obj["family"] = ep.address.is_v4() ? "ipv4" : "ipv6";
+    obj["port"] = ep.port;
+    obj["address"] = ep.address.to_string();
+    return obj;
 }
 
 static const char *algo_name(uint16_t algo) noexcept {
-  switch (algo) {
-  case message::password_algorithm_t::MD5:
-    return "md5";
-  case message::password_algorithm_t::SHA256:
-    return "sha256";
-  default:
-    return "unknown";
-  }
+    switch (algo) {
+    case message::password_algorithm_t::MD5:
+        return "md5";
+    case message::password_algorithm_t::SHA256:
+        return "sha256";
+    default:
+        return "unknown";
+    }
 }
 
 static const char *algo_name(message::integrity_t::algo_t algo) noexcept {
-  switch (algo) {
-  case message::integrity_t::algo_t::SHA1:
-    return "sha1";
-  case message::integrity_t::algo_t::SHA256:
-    return "sha256";
-  default:
-    return "unknown";
-  }
+    switch (algo) {
+    case message::integrity_t::algo_t::SHA1:
+        return "sha1";
+    case message::integrity_t::algo_t::SHA256:
+        return "sha256";
+    default:
+        return "unknown";
+    }
 }
 
 static nlohmann::json
 to_json(const message::password_algorithm_t &pa) noexcept {
-  nlohmann::json obj;
-  obj["type"] = "password_algorithm";
-  obj["algo"] = algo_name(pa.algo());
-  auto param = pa.parameter();
-  obj["parameter"] = base64::encode(param.data(), param.size());
-  return obj;
+    nlohmann::json obj;
+    obj["type"] = "password_algorithm";
+    obj["algo"] = algo_name(pa.algo());
+    auto param = pa.parameter();
+    obj["parameter"] = base64::encode(param.data(), param.size());
+    return obj;
 }
 
 std::string message::to_string() {
-  nlohmann::json obj;
+    nlohmann::json obj;
 
-  obj["transaction_id"] =
-      base64::encode(transaction_id.data(), transaction_id.size());
+    obj["transaction_id"] =
+        base64::encode(transaction_id.data(), transaction_id.size());
 
-  nlohmann::json attributes = nlohmann::json::array();
-  if (this->mapped_address) {
-    nlohmann::json mapped_address_obj;
-    mapped_address_obj["type"] = "mapped_address";
-    mapped_address_obj["value"] = to_json(*this->mapped_address);
-    attributes.emplace_back(std::move(mapped_address_obj));
-  }
-  if (this->xor_mapped_address) {
-    nlohmann::json xor_mapped_address_obj;
-    xor_mapped_address_obj["type"] = "xor_mapped_address";
-    xor_mapped_address_obj["value"] = to_json(*this->xor_mapped_address);
-    attributes.emplace_back(std::move(xor_mapped_address_obj));
-  }
-  if (this->xor_peer_address) {
-    nlohmann::json xor_peer_address_obj;
-    xor_peer_address_obj["type"] = "xor_peer_address";
-    xor_peer_address_obj["value"] = to_json(*this->xor_peer_address);
-    attributes.emplace_back(std::move(xor_peer_address_obj));
-  }
-  if (!this->software.empty()) {
-    nlohmann::json software_obj;
-    software_obj["type"] = "software";
-    software_obj["value"] = this->software;
-    attributes.emplace_back(std::move(software_obj));
-  }
-  if (this->priority) {
-    nlohmann::json priority_obj;
-    priority_obj["type"] = "priority";
-    priority_obj["value"] = *this->priority;
-    attributes.emplace_back(std::move(priority_obj));
-  }
-  if (!this->username.empty()) {
-    nlohmann::json username_obj;
-    username_obj["type"] = "username";
-    username_obj["value"] = this->username;
-    attributes.emplace_back(std::move(username_obj));
-  }
-  if (this->ice_controlling) {
-    nlohmann::json ice_controlling_obj;
-    ice_controlling_obj["type"] = "ice_controlling";
-    ice_controlling_obj["value"] = *this->ice_controlling;
-    attributes.emplace_back(std::move(ice_controlling_obj));
-  }
-  if (this->use_candidate) {
-    nlohmann::json use_candidate_obj;
-    use_candidate_obj["type"] = "use_candidate";
-    attributes.emplace_back(std::move(use_candidate_obj));
-  }
-  if (this->ice_controlled) {
-    nlohmann::json ice_controlled_obj;
-    ice_controlled_obj["type"] = "ice_controlled";
-    ice_controlled_obj["value"] = *this->ice_controlled;
-    attributes.emplace_back(std::move(ice_controlled_obj));
-  }
-  if (this->error_code) {
-    nlohmann::json error_code_obj;
-    error_code_obj["type"] = "error_code";
-    nlohmann::json ec;
-    ec["code"] = this->error_code->code;
-    ec["reason"] = this->error_code->reason;
-    error_code_obj["value"] = std::move(ec);
-    attributes.emplace_back(std::move(error_code_obj));
-  }
-  if (!this->realm.empty()) {
-    nlohmann::json realm_obj;
-    realm_obj["type"] = "realm";
-    realm_obj["value"] = this->realm;
-    attributes.emplace_back(std::move(realm_obj));
-  }
-  if (!this->nonce.empty()) {
-    nlohmann::json nonce_obj;
-    nonce_obj["type"] = "nonce";
-    nonce_obj["value"] = this->nonce;
-    attributes.emplace_back(std::move(nonce_obj));
-  }
-  if (!this->password_algorithms.empty()) {
-    nlohmann::json pwd_algos_obj;
-    pwd_algos_obj["type"] = "password_algorithms";
-    nlohmann::json algos = nlohmann::json::array();
-    for (const auto &pwd_algo : this->password_algorithms) {
-      algos.emplace_back(to_json(pwd_algo));
+    nlohmann::json attributes = nlohmann::json::array();
+    if (this->mapped_address) {
+        nlohmann::json mapped_address_obj;
+        mapped_address_obj["type"] = "mapped_address";
+        mapped_address_obj["value"] = to_json(*this->mapped_address);
+        attributes.emplace_back(std::move(mapped_address_obj));
     }
-    pwd_algos_obj["value"] = std::move(algos);
-    attributes.emplace_back(std::move(pwd_algos_obj));
-  }
-  if (this->userhash) {
-    nlohmann::json userhash_obj;
-    userhash_obj["type"] = "userhash";
-    userhash_obj["value"] =
-        base64::encode(this->userhash->data(), USERHASH_SIZE);
-    attributes.emplace_back(std::move(userhash_obj));
-  }
-  if (this->channel_number) {
-    nlohmann::json channel_num_obj;
-    channel_num_obj["type"] = "channel_number";
-    channel_num_obj["value"] = *this->channel_number;
-    attributes.emplace_back(std::move(channel_num_obj));
-  }
-  if (this->lifetime) {
-    nlohmann::json lifetime_obj;
-    lifetime_obj["type"] = "lifetime";
-    lifetime_obj["value"] = *this->lifetime;
-    attributes.emplace_back(std::move(lifetime_obj));
-  }
-  if (this->even_port) {
-    nlohmann::json even_port_obj;
-    even_port_obj["type"] = "even_port";
-    even_port_obj["vaLue"] = this->even_port;
-    attributes.emplace_back(std::move(even_port_obj));
-  }
-  if (this->requested_transport) {
-    nlohmann::json requested_transport_obj;
-    requested_transport_obj["type"] = "requested_transport";
-    attributes.emplace_back(std::move(requested_transport_obj));
-  }
-  if (this->dont_fragment) {
-    nlohmann::json dont_fragment_obj;
-    dont_fragment_obj["type"] = "dont_fragment";
-    attributes.emplace_back(std::move(dont_fragment_obj));
-  }
-  if (this->reservation_token) {
-    nlohmann::json reservation_token_obj;
-    reservation_token_obj["type"] = "reservation_token";
-    reservation_token_obj["value"] = *this->reservation_token;
-  }
-  for (const auto &integrity : this->integrities) {
-    nlohmann::json integrity_obj;
-    integrity_obj["type"] =
-        std::string{"integrity_"} + algo_name(integrity.algo());
-    auto hash = integrity.hash_value();
-    integrity_obj["value"] = base64::encode(hash.data(), hash.size());
-    attributes.emplace_back(std::move(integrity_obj));
-  }
-  if (this->_checked_fingerprint) {
-    nlohmann::json fingerprint_obj;
-    fingerprint_obj["type"] = "fingerprint";
-    attributes.emplace_back(std::move(fingerprint_obj));
-  }
-  obj["attributes"] = std::move(attributes);
+    if (this->xor_mapped_address) {
+        nlohmann::json xor_mapped_address_obj;
+        xor_mapped_address_obj["type"] = "xor_mapped_address";
+        xor_mapped_address_obj["value"] = to_json(*this->xor_mapped_address);
+        attributes.emplace_back(std::move(xor_mapped_address_obj));
+    }
+    if (this->xor_peer_address) {
+        nlohmann::json xor_peer_address_obj;
+        xor_peer_address_obj["type"] = "xor_peer_address";
+        xor_peer_address_obj["value"] = to_json(*this->xor_peer_address);
+        attributes.emplace_back(std::move(xor_peer_address_obj));
+    }
+    if (!this->software.empty()) {
+        nlohmann::json software_obj;
+        software_obj["type"] = "software";
+        software_obj["value"] = this->software;
+        attributes.emplace_back(std::move(software_obj));
+    }
+    if (this->priority) {
+        nlohmann::json priority_obj;
+        priority_obj["type"] = "priority";
+        priority_obj["value"] = *this->priority;
+        attributes.emplace_back(std::move(priority_obj));
+    }
+    if (!this->username.empty()) {
+        nlohmann::json username_obj;
+        username_obj["type"] = "username";
+        username_obj["value"] = this->username;
+        attributes.emplace_back(std::move(username_obj));
+    }
+    if (this->ice_controlling) {
+        nlohmann::json ice_controlling_obj;
+        ice_controlling_obj["type"] = "ice_controlling";
+        ice_controlling_obj["value"] = *this->ice_controlling;
+        attributes.emplace_back(std::move(ice_controlling_obj));
+    }
+    if (this->use_candidate) {
+        nlohmann::json use_candidate_obj;
+        use_candidate_obj["type"] = "use_candidate";
+        attributes.emplace_back(std::move(use_candidate_obj));
+    }
+    if (this->ice_controlled) {
+        nlohmann::json ice_controlled_obj;
+        ice_controlled_obj["type"] = "ice_controlled";
+        ice_controlled_obj["value"] = *this->ice_controlled;
+        attributes.emplace_back(std::move(ice_controlled_obj));
+    }
+    if (this->error_code) {
+        nlohmann::json error_code_obj;
+        error_code_obj["type"] = "error_code";
+        nlohmann::json ec;
+        ec["code"] = this->error_code->code;
+        ec["reason"] = this->error_code->reason;
+        error_code_obj["value"] = std::move(ec);
+        attributes.emplace_back(std::move(error_code_obj));
+    }
+    if (!this->realm.empty()) {
+        nlohmann::json realm_obj;
+        realm_obj["type"] = "realm";
+        realm_obj["value"] = this->realm;
+        attributes.emplace_back(std::move(realm_obj));
+    }
+    if (!this->nonce.empty()) {
+        nlohmann::json nonce_obj;
+        nonce_obj["type"] = "nonce";
+        nonce_obj["value"] = this->nonce;
+        attributes.emplace_back(std::move(nonce_obj));
+    }
+    if (!this->password_algorithms.empty()) {
+        nlohmann::json pwd_algos_obj;
+        pwd_algos_obj["type"] = "password_algorithms";
+        nlohmann::json algos = nlohmann::json::array();
+        for (const auto &pwd_algo : this->password_algorithms) {
+            algos.emplace_back(to_json(pwd_algo));
+        }
+        pwd_algos_obj["value"] = std::move(algos);
+        attributes.emplace_back(std::move(pwd_algos_obj));
+    }
+    if (this->userhash) {
+        nlohmann::json userhash_obj;
+        userhash_obj["type"] = "userhash";
+        userhash_obj["value"] =
+            base64::encode(this->userhash->data(), USERHASH_SIZE);
+        attributes.emplace_back(std::move(userhash_obj));
+    }
+    if (this->channel_number) {
+        nlohmann::json channel_num_obj;
+        channel_num_obj["type"] = "channel_number";
+        channel_num_obj["value"] = *this->channel_number;
+        attributes.emplace_back(std::move(channel_num_obj));
+    }
+    if (this->lifetime) {
+        nlohmann::json lifetime_obj;
+        lifetime_obj["type"] = "lifetime";
+        lifetime_obj["value"] = *this->lifetime;
+        attributes.emplace_back(std::move(lifetime_obj));
+    }
+    if (this->even_port) {
+        nlohmann::json even_port_obj;
+        even_port_obj["type"] = "even_port";
+        even_port_obj["vaLue"] = this->even_port;
+        attributes.emplace_back(std::move(even_port_obj));
+    }
+    if (this->requested_transport) {
+        nlohmann::json requested_transport_obj;
+        requested_transport_obj["type"] = "requested_transport";
+        attributes.emplace_back(std::move(requested_transport_obj));
+    }
+    if (this->dont_fragment) {
+        nlohmann::json dont_fragment_obj;
+        dont_fragment_obj["type"] = "dont_fragment";
+        attributes.emplace_back(std::move(dont_fragment_obj));
+    }
+    if (this->reservation_token) {
+        nlohmann::json reservation_token_obj;
+        reservation_token_obj["type"] = "reservation_token";
+        reservation_token_obj["value"] = *this->reservation_token;
+    }
+    for (const auto &integrity : this->integrities) {
+        nlohmann::json integrity_obj;
+        integrity_obj["type"] =
+            std::string{"integrity_"} + algo_name(integrity.algo());
+        auto hash = integrity.hash_value();
+        integrity_obj["value"] = base64::encode(hash.data(), hash.size());
+        attributes.emplace_back(std::move(integrity_obj));
+    }
+    if (this->_checked_fingerprint) {
+        nlohmann::json fingerprint_obj;
+        fingerprint_obj["type"] = "fingerprint";
+        attributes.emplace_back(std::move(fingerprint_obj));
+    }
+    obj["attributes"] = std::move(attributes);
 
-  return obj.dump(2);
+    return obj.dump(2);
 }
 
 } // namespace ice::stun

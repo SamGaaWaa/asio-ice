@@ -114,213 +114,219 @@ static constexpr unsigned char packet_bytes5[] = {
 };
 
 void parse_test1() {
-  const auto begin = std::chrono::high_resolution_clock::now();
-  ice::stun::message resp;
-  bool success = resp.parse(packet_bytes1, sizeof(packet_bytes1));
-  const auto end = std::chrono::high_resolution_clock::now();
-  if (!success)
-    std::cout << "Parse response1 failed!\n";
-  else {
-    std::cout << "Success!\n";
-    std::cout << resp.to_string() << '\n';
-  }
-  auto dura = std::chrono::duration_cast<std::chrono::nanoseconds>(end - begin);
-  std::cout << "Parsing a stun message takes " << dura.count() << "ns.\n";
+    const auto begin = std::chrono::high_resolution_clock::now();
+    ice::stun::message resp;
+    bool success = resp.parse(packet_bytes1, sizeof(packet_bytes1));
+    const auto end = std::chrono::high_resolution_clock::now();
+    if (!success)
+        std::cout << "Parse response1 failed!\n";
+    else {
+        std::cout << "Success!\n";
+        std::cout << resp.to_string() << '\n';
+    }
+    auto dura =
+        std::chrono::duration_cast<std::chrono::nanoseconds>(end - begin);
+    std::cout << "Parsing a stun message takes " << dura.count() << "ns.\n";
 }
 
 void parse_test2() {
-  const auto begin = std::chrono::high_resolution_clock::now();
-  ice::stun::message resp;
-  bool success = resp.parse(packet_bytes2, sizeof(packet_bytes2));
-  const auto end = std::chrono::high_resolution_clock::now();
-  if (!success)
-    std::cout << "Parse response2 failed!\n";
-  else {
-    std::cout << "Success!\n";
-    std::cout << resp.to_string() << '\n';
-  }
-  auto dura = std::chrono::duration_cast<std::chrono::nanoseconds>(end - begin);
-  std::cout << "Parsing a stun message takes " << dura.count() << "ns.\n";
+    const auto begin = std::chrono::high_resolution_clock::now();
+    ice::stun::message resp;
+    bool success = resp.parse(packet_bytes2, sizeof(packet_bytes2));
+    const auto end = std::chrono::high_resolution_clock::now();
+    if (!success)
+        std::cout << "Parse response2 failed!\n";
+    else {
+        std::cout << "Success!\n";
+        std::cout << resp.to_string() << '\n';
+    }
+    auto dura =
+        std::chrono::duration_cast<std::chrono::nanoseconds>(end - begin);
+    std::cout << "Parsing a stun message takes " << dura.count() << "ns.\n";
 }
 
 void parse_test3() {
-  const auto begin = std::chrono::high_resolution_clock::now();
-  ice::stun::message resp;
-  bool success = resp.parse(packet_bytes3, sizeof(packet_bytes3));
-  const auto end = std::chrono::high_resolution_clock::now();
-  if (!success)
-    std::cout << "Parse response3 failed!\n";
-  else {
-    std::cout << "Success!\n";
-    std::cout << resp.to_string() << '\n';
-  }
-  auto dura = std::chrono::duration_cast<std::chrono::nanoseconds>(end - begin);
-  std::cout << "Parsing a stun message takes " << dura.count() << "ns.\n";
+    const auto begin = std::chrono::high_resolution_clock::now();
+    ice::stun::message resp;
+    bool success = resp.parse(packet_bytes3, sizeof(packet_bytes3));
+    const auto end = std::chrono::high_resolution_clock::now();
+    if (!success)
+        std::cout << "Parse response3 failed!\n";
+    else {
+        std::cout << "Success!\n";
+        std::cout << resp.to_string() << '\n';
+    }
+    auto dura =
+        std::chrono::duration_cast<std::chrono::nanoseconds>(end - begin);
+    std::cout << "Parsing a stun message takes " << dura.count() << "ns.\n";
 }
 
 void parse_test4() {
-  const auto begin = std::chrono::high_resolution_clock::now();
-  ice::stun::message resp;
-  bool success = resp.parse(packet_bytes4, sizeof(packet_bytes4));
-  const auto end = std::chrono::high_resolution_clock::now();
-  if (!success)
-    std::cout << "Parse response4 failed!\n";
-  else {
-    std::cout << "Success!\n";
-    std::cout << resp.to_string() << '\n';
-  }
-  auto dura = std::chrono::duration_cast<std::chrono::nanoseconds>(end - begin);
-  std::cout << "Parsing a stun message takes " << dura.count() << "ns.\n";
+    const auto begin = std::chrono::high_resolution_clock::now();
+    ice::stun::message resp;
+    bool success = resp.parse(packet_bytes4, sizeof(packet_bytes4));
+    const auto end = std::chrono::high_resolution_clock::now();
+    if (!success)
+        std::cout << "Parse response4 failed!\n";
+    else {
+        std::cout << "Success!\n";
+        std::cout << resp.to_string() << '\n';
+    }
+    auto dura =
+        std::chrono::duration_cast<std::chrono::nanoseconds>(end - begin);
+    std::cout << "Parsing a stun message takes " << dura.count() << "ns.\n";
 }
 
 void parse_test5() {
-  const auto begin = std::chrono::high_resolution_clock::now();
-  ice::stun::message resp;
-  bool success = resp.parse(packet_bytes5, sizeof(packet_bytes5));
-  const auto end = std::chrono::high_resolution_clock::now();
-  if (!success)
-    std::cout << "Parse response5 failed!\n";
-  else {
-    std::cout << "Success!\n";
-    std::cout << resp.to_string() << '\n';
-  }
-  auto dura = std::chrono::duration_cast<std::chrono::nanoseconds>(end - begin);
-  std::cout << "Parsing a stun message takes " << dura.count() << "ns.\n";
+    const auto begin = std::chrono::high_resolution_clock::now();
+    ice::stun::message resp;
+    bool success = resp.parse(packet_bytes5, sizeof(packet_bytes5));
+    const auto end = std::chrono::high_resolution_clock::now();
+    if (!success)
+        std::cout << "Parse response5 failed!\n";
+    else {
+        std::cout << "Success!\n";
+        std::cout << resp.to_string() << '\n';
+    }
+    auto dura =
+        std::chrono::duration_cast<std::chrono::nanoseconds>(end - begin);
+    std::cout << "Parsing a stun message takes " << dura.count() << "ns.\n";
 }
 
 void parse_base64() {
-  std::cout << "\nBase64:" << std::ends;
-  std::string b64;
-  std::cin >> b64;
-  std::vector<std::byte> raw;
-  raw.resize(ice::base64::decoded_size(b64.size()));
-  raw.resize(ice::base64::decode(raw.data(), b64.data(), b64.size()).first);
+    std::cout << "\nBase64:" << std::ends;
+    std::string b64;
+    std::cin >> b64;
+    std::vector<std::byte> raw;
+    raw.resize(ice::base64::decoded_size(b64.size()));
+    raw.resize(ice::base64::decode(raw.data(), b64.data(), b64.size()).first);
 
-  const auto begin = std::chrono::high_resolution_clock::now();
-  ice::stun::message resp;
-  bool success = resp.parse(raw.data(), raw.size());
-  const auto end = std::chrono::high_resolution_clock::now();
-  if (!success)
-    std::cout << "Parse base64 failed!\n";
-  else {
-    std::cout << "Success!\n";
-    std::cout << resp.to_string() << '\n';
-  }
-  auto dura = std::chrono::duration_cast<std::chrono::nanoseconds>(end - begin);
-  std::cout << "Parsing a stun message takes " << dura.count() << "ns.\n";
+    const auto begin = std::chrono::high_resolution_clock::now();
+    ice::stun::message resp;
+    bool success = resp.parse(raw.data(), raw.size());
+    const auto end = std::chrono::high_resolution_clock::now();
+    if (!success)
+        std::cout << "Parse base64 failed!\n";
+    else {
+        std::cout << "Success!\n";
+        std::cout << resp.to_string() << '\n';
+    }
+    auto dura =
+        std::chrono::duration_cast<std::chrono::nanoseconds>(end - begin);
+    std::cout << "Parsing a stun message takes " << dura.count() << "ns.\n";
 }
 
 void write_test() {
-  ice::stun::message msg, parsed;
-  msg.reset();
-  parsed.reset();
-  msg.mapped_address.emplace(ice::net::ip::address_v4::from_string("127.0.0.1"),
-                             8080);
-  msg.add_message_integrity(ice::stun::message::integrity_t::SHA1);
-  msg.add_message_integrity(ice::stun::message::integrity_t::SHA256);
-  msg.use_fingerprint(true);
-  msg.set_hmac_key("Hello");
+    ice::stun::message msg, parsed;
+    msg.reset();
+    parsed.reset();
+    msg.mapped_address.emplace(
+        ice::net::ip::address_v4::from_string("127.0.0.1"), 8080);
+    msg.add_message_integrity(ice::stun::message::integrity_t::SHA1);
+    msg.add_message_integrity(ice::stun::message::integrity_t::SHA256);
+    msg.use_fingerprint(true);
+    msg.set_hmac_key("Hello");
 
-  char buf[20 + 4 + 4 + 4 + 4 + 20 + 4 + 32 + 4 + 4 + 4 + 8];
-  int ret = msg.write_to(buf, sizeof(buf));
-  if (ret < 0) {
-    std::cerr << "Write test failed.\n";
-    return;
-  }
-  if (!parsed.parse(buf, ret)) {
-    std::cerr << "Re-parse failed.\n";
-    return;
-  }
-  auto str = parsed.to_string();
-  // if (str != msg.to_string()) {
-  //     std::cerr << "to_string error.\n";
-  //     return;
-  // }
-  for (auto &integrity : parsed.integrities) {
-    if (!integrity.verify("Hello")) {
-      std::cerr << "Message integrity check failed.\n";
-      return;
+    char buf[20 + 4 + 4 + 4 + 4 + 20 + 4 + 32 + 4 + 4 + 4 + 8];
+    int ret = msg.write_to(buf, sizeof(buf));
+    if (ret < 0) {
+        std::cerr << "Write test failed.\n";
+        return;
     }
-  }
-  std::cout << "Msg:\n" << str << '\n';
-  std::cout << "Success, write " << ret << " bytes.\n";
+    if (!parsed.parse(buf, ret)) {
+        std::cerr << "Re-parse failed.\n";
+        return;
+    }
+    auto str = parsed.to_string();
+    // if (str != msg.to_string()) {
+    //     std::cerr << "to_string error.\n";
+    //     return;
+    // }
+    for (auto &integrity : parsed.integrities) {
+        if (!integrity.verify("Hello")) {
+            std::cerr << "Message integrity check failed.\n";
+            return;
+        }
+    }
+    std::cout << "Msg:\n" << str << '\n';
+    std::cout << "Success, write " << ret << " bytes.\n";
 }
 
 void request_test() {
-  using namespace ice;
+    using namespace ice;
 
-  net::io_context ctx;
-  net::ip::udp::resolver resolver(ctx);
+    net::io_context ctx;
+    net::ip::udp::resolver resolver(ctx);
 
-  // auto resolve_result = resolver.resolve("stun.l.google.com", "19302");
-  auto resolve_result = resolver.resolve("0.0.0.0", "13478");
-  if (resolve_result.empty()) {
-    std::cerr << "Resolve error\n";
-    return;
-  }
+    // auto resolve_result = resolver.resolve("stun.l.google.com", "19302");
+    auto resolve_result = resolver.resolve("0.0.0.0", "13478");
+    if (resolve_result.empty()) {
+        std::cerr << "Resolve error\n";
+        return;
+    }
 
-  const auto &ep = resolve_result->endpoint();
-  std::cout << "STUN server: " << ep.address().to_string() << ':' << ep.port()
-            << '\n';
-
-  net::ip::udp::socket sock(ctx, net::ip::udp::v4());
-
-  stun::message req;
-  req.method = stun::method_t::STUN_METHOD_BINDING;
-  req.cls = stun::class_t::STUN_CLASS_REQUEST;
-  req.use_fingerprint(true);
-  req.transaction_id = {1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12};
-
-  char buf[1500];
-  int n = req.write_to(buf, sizeof(buf));
-  if (n < 0) {
-    std::cerr << "Write buffer error\n";
-    return;
-  }
-  std::cout << "Write " << n << " bytes to buffer\n";
-
-  try {
-    sock.send_to(net::buffer(buf, n), ep);
-  } catch (const std::exception &e) {
-    std::cerr << e.what() << '\n';
-    return;
-  }
-  std::cout << "Finish\n";
-
-  net::ip::udp::endpoint server_ep;
-  std::size_t nread;
-  try {
-    nread = sock.receive_from(net::buffer(buf, sizeof(buf)), server_ep);
-    std::cout << "Read " << nread << " bytes from "
-              << server_ep.address().to_string() << ':' << server_ep.port()
+    const auto &ep = resolve_result->endpoint();
+    std::cout << "STUN server: " << ep.address().to_string() << ':' << ep.port()
               << '\n';
-  } catch (const std::exception &e) {
-    std::cerr << e.what() << '\n';
-    return;
-  }
-  stun::message resp;
-  if (!resp.parse(buf, nread)) {
-    std::cerr << "Parse response failed\n";
-    return;
-  }
-  std::cout << resp.to_string() << '\n';
-  std::cout << "Finish\n";
+
+    net::ip::udp::socket sock(ctx, net::ip::udp::v4());
+
+    stun::message req;
+    req.method = stun::method_t::STUN_METHOD_BINDING;
+    req.cls = stun::class_t::STUN_CLASS_REQUEST;
+    req.use_fingerprint(true);
+    req.transaction_id = {1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12};
+
+    char buf[1500];
+    int n = req.write_to(buf, sizeof(buf));
+    if (n < 0) {
+        std::cerr << "Write buffer error\n";
+        return;
+    }
+    std::cout << "Write " << n << " bytes to buffer\n";
+
+    try {
+        sock.send_to(net::buffer(buf, n), ep);
+    } catch (const std::exception &e) {
+        std::cerr << e.what() << '\n';
+        return;
+    }
+    std::cout << "Finish\n";
+
+    net::ip::udp::endpoint server_ep;
+    std::size_t nread;
+    try {
+        nread = sock.receive_from(net::buffer(buf, sizeof(buf)), server_ep);
+        std::cout << "Read " << nread << " bytes from "
+                  << server_ep.address().to_string() << ':' << server_ep.port()
+                  << '\n';
+    } catch (const std::exception &e) {
+        std::cerr << e.what() << '\n';
+        return;
+    }
+    stun::message resp;
+    if (!resp.parse(buf, nread)) {
+        std::cerr << "Parse response failed\n";
+        return;
+    }
+    std::cout << resp.to_string() << '\n';
+    std::cout << "Finish\n";
 }
 
 int main() {
-  std::cout << "This is stun test.\n";
+    std::cout << "This is stun test.\n";
 
-  //   parse_test1();
-  //   parse_test2();
-  //   parse_test3();
-  //   parse_test4();
-  //   parse_test5();
-  // parse_test1();
-  //
-  // write_test();
-  // while (true)
-  //{
-  //    parse_base64();
-  //}
-  request_test();
+    parse_test1();
+    parse_test2();
+    parse_test3();
+    parse_test4();
+    parse_test5();
+    parse_test1();
+
+    write_test();
+    // while (true)
+    //{
+    //    parse_base64();
+    //}
+    request_test();
 }
