@@ -4,8 +4,10 @@
 #include <openssl/evp.h>
 #include <openssl/params.h>
 
+#include <cassert>
 #include <cstdint>
 #include <stdexcept>
+#include <string>
 #include <utility>
 
 namespace ice::hash {
@@ -13,14 +15,10 @@ namespace ice::hash {
 namespace __detail {
 
 struct EVP_MD_CTX_ptr {
-    EVP_MD_CTX_ptr(const ::EVP_MD *md) {
+    EVP_MD_CTX_ptr() {
         _ctx = ::EVP_MD_CTX_new();
         if (!_ctx) {
             throw std::bad_alloc();
-        }
-        if (!::EVP_DigestInit_ex2(_ctx, md, nullptr)) {
-            ::EVP_MD_CTX_free(_ctx);
-            throw std::runtime_error("EVP_DigestInit_ex2 failed");
         }
     }
 
@@ -124,26 +122,35 @@ struct EVP_MAC_CTX_ptr {
     ::EVP_MAC_CTX *_ctx = nullptr;
 };
 
-static thread_local EVP_MD_CTX_ptr s_md5_ctx(::EVP_md5());
-static thread_local EVP_MD_CTX_ptr s_sha1_ctx(::EVP_sha1());
-static thread_local EVP_MD_CTX_ptr s_sha256_ctx(::EVP_sha256());
-static thread_local EVP_MD_CTX_ptr s_sha512_ctx(::EVP_sha512());
+static thread_local EVP_MD_CTX_ptr s_md5_ctx;
+static thread_local EVP_MD_CTX_ptr s_sha1_ctx;
+static thread_local EVP_MD_CTX_ptr s_sha256_ctx;
+static thread_local EVP_MD_CTX_ptr s_sha512_ctx;
 
-static thread_local EVP_MAC_ptr s_hmac_md5("HMAC");
-static thread_local EVP_MAC_ptr s_hmac_sha1("HMAC");
-static thread_local EVP_MAC_ptr s_hmac_sha256("HMAC");
-static thread_local EVP_MAC_ptr s_hmac_sha512("HMAC");
+static thread_local EVP_MAC_ptr s_hmac("HMAC");
 
-static thread_local EVP_MAC_CTX_ptr s_hmac_md5_ctx(s_hmac_md5.get());
-static thread_local EVP_MAC_CTX_ptr s_hmac_sha1_ctx(s_hmac_sha1.get());
-static thread_local EVP_MAC_CTX_ptr s_hmac_sha256_ctx(s_hmac_sha256.get());
-static thread_local EVP_MAC_CTX_ptr s_hmac_sha512_ctx(s_hmac_sha512.get());
+static thread_local EVP_MAC_CTX_ptr s_hmac_md5_ctx(s_hmac.get());
+static thread_local EVP_MAC_CTX_ptr s_hmac_sha1_ctx(s_hmac.get());
+static thread_local EVP_MAC_CTX_ptr s_hmac_sha256_ctx(s_hmac.get());
+static thread_local EVP_MAC_CTX_ptr s_hmac_sha512_ctx(s_hmac.get());
+
+void md5_init() {
+    if (!::EVP_DigestInit_ex2(s_md5_ctx.get(), ::EVP_md5(), nullptr)) {
+        throw std::runtime_error("EVP_DigestInit_ex2 failed");
+    }
+}
 
 void md5_update(const void *data, std::size_t size) noexcept {
     ::EVP_DigestUpdate(s_md5_ctx.get(), data, size);
 }
 void md5_final(void *digest) noexcept {
     ::EVP_DigestFinal(s_md5_ctx.get(), (unsigned char *)digest, nullptr);
+}
+
+void sha1_init() {
+    if (!::EVP_DigestInit_ex2(s_sha1_ctx.get(), ::EVP_sha1(), nullptr)) {
+        throw std::runtime_error("EVP_DigestInit_ex2 failed");
+    }
 }
 
 void sha1_update(const void *data, std::size_t size) noexcept {
@@ -154,12 +161,24 @@ void sha1_final(void *digest) noexcept {
     ::EVP_DigestFinal(s_sha1_ctx.get(), (unsigned char *)digest, nullptr);
 }
 
+void sha256_init() {
+    if (!::EVP_DigestInit_ex2(s_sha256_ctx.get(), ::EVP_sha256(), nullptr)) {
+        throw std::runtime_error("EVP_DigestInit_ex2 failed");
+    }
+}
+
 void sha256_update(const void *data, std::size_t size) noexcept {
     ::EVP_DigestUpdate(s_sha256_ctx.get(), data, size);
 }
 
 void sha256_final(void *digest) noexcept {
     ::EVP_DigestFinal(s_sha256_ctx.get(), (unsigned char *)digest, nullptr);
+}
+
+void sha512_init() {
+    if (!::EVP_DigestInit_ex2(s_sha512_ctx.get(), ::EVP_sha512(), nullptr)) {
+        throw std::runtime_error("EVP_DigestInit_ex2 failed");
+    }
 }
 
 void sha512_update(const void *data, std::size_t size) noexcept {
@@ -301,6 +320,16 @@ void to_hex(const void *data, std::size_t size, char *out) noexcept {
         *out++ = "0123456789abcdef"[byte >> 4];
         *out++ = "0123456789abcdef"[byte & 0x0f];
     }
+}
+
+std::string to_hex(const void *data, std::size_t size) {
+    std::string res;
+    res.resize_and_overwrite(2 * size,
+                             [&](char *p, std::size_t n) -> std::size_t {
+                                 to_hex(data, size, p);
+                                 return 2 * size;
+                             });
+    return res;
 }
 
 } // namespace ice::hash

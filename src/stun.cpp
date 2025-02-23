@@ -1,14 +1,10 @@
 #include "stun.hpp"
-#include "base64.hpp"
 #include "binary.hpp"
 #include "hash.hpp"
 #include "scope_guard.hpp"
 
 #include "json.hpp"
 #include <boost/crc.hpp>
-// #include <openssl/hmac.h>
-// #include <openssl/md5.h>
-// #include <openssl/sha.h>
 
 #include <algorithm>
 #include <cstring>
@@ -81,15 +77,15 @@ struct attr_t {
     uint16_t type;
     uint16_t length;
 
-    const uint8_t *value() const {
+    const uint8_t *value() const noexcept {
         return reinterpret_cast<const uint8_t *>(this) + 4;
     }
 
-    uint8_t *value() { return reinterpret_cast<uint8_t *>(this) + 4; }
+    uint8_t *value() noexcept { return reinterpret_cast<uint8_t *>(this) + 4; }
 
-    uint8_t operator[](std::size_t i) const { return value()[i]; }
+    uint8_t operator[](std::size_t i) const noexcept { return value()[i]; }
 
-    uint8_t &operator[](std::size_t i) { return value()[i]; }
+    uint8_t &operator[](std::size_t i) noexcept { return value()[i]; }
 };
 
 static_assert(sizeof(attr_t) == 4,
@@ -183,15 +179,15 @@ struct value_error_code_t {
     uint32_t reserved : 21 {0};
 #endif
 
-    const char *reason() const {
+    const char *reason() const noexcept {
         return reinterpret_cast<const char *>(this + 4);
     }
 
-    char *reason() { return reinterpret_cast<char *>(this + 4); }
+    char *reason() noexcept { return reinterpret_cast<char *>(this + 4); }
 
-    char operator[](size_t i) const { return reason()[i]; }
+    char operator[](size_t i) const noexcept { return reason()[i]; }
 
-    char &operator[](size_t i) { return reason()[i]; }
+    char &operator[](size_t i) noexcept { return reason()[i]; }
 };
 
 static_assert(sizeof(value_error_code_t) == 4,
@@ -276,15 +272,17 @@ struct value_password_algorithm_t {
     uint16_t algorithm{0};
     uint16_t parameters_length{0};
 
-    const uint8_t *parameters() const {
+    const uint8_t *parameters() const noexcept {
         return reinterpret_cast<const uint8_t *>(this) + 4;
     }
 
-    uint8_t *parameters() { return reinterpret_cast<uint8_t *>(this) + 4; }
+    uint8_t *parameters() noexcept {
+        return reinterpret_cast<uint8_t *>(this) + 4;
+    }
 
-    uint8_t operator[](std::size_t i) const { return parameters()[i]; }
+    uint8_t operator[](std::size_t i) const noexcept { return parameters()[i]; }
 
-    uint8_t &operator[](std::size_t i) { return parameters()[i]; }
+    uint8_t &operator[](std::size_t i) noexcept { return parameters()[i]; }
 };
 
 static_assert(sizeof(value_password_algorithm_t) == 4,
@@ -433,7 +431,7 @@ static_assert(
     std::sentinel_for<attr_iterator_sentinel_t, const_attr_iterator_t>);
 
 static int parse_address(const void *data, std::size_t buf_size,
-                         message::endpoint_t &address) {
+                         message::endpoint &address) {
     uint8_t pad = 0;
     uint8_t protocol = 0;
     uint16_t port = 0;
@@ -468,7 +466,7 @@ static int parse_address(const void *data, std::size_t buf_size,
 
 static int parse_xor_address(const void *data, std::size_t buf_size,
                              const header_t *header,
-                             message::endpoint_t &address) {
+                             message::endpoint &address) {
     if (buf_size < 4)
         return -1;
     const value_mapped_address_t *mapped_address =
@@ -507,39 +505,94 @@ static int parse_xor_address(const void *data, std::size_t buf_size,
     return -1;
 }
 
-bool message::integrity_t::verify(std::string_view key) {
+static const attr_t *find_attr(const void *data, std::size_t size,
+                               uint16_t type) noexcept {
+    const uint8_t *begin = static_cast<const uint8_t *>(data);
+    const_attr_iterator_t iter{begin + 20};
+    const attr_iterator_sentinel_t end{begin + size};
+    for (; iter != end; ++iter) {
+        if (binary::ntoh<uint16_t>(iter->type) == type)
+            return &*iter;
+    }
+    return nullptr;
+}
+
+bool message::integrity::verify(std::string_view password, const void *data,
+                                std::size_t size) const {
     ICE_IN_DEBUG {
-        std::cout << "Check message integrity with key: " << key << '\n';
+        std::cout << "Check message integrity with key: " << password << '\n';
+        if (message::is_not_stun(data, size)) {
+            std::cout << "Not STUN message\n";
+            throw std::runtime_error("Not STUN message");
+        }
     };
-    uint16_t tmp_len = *reinterpret_cast<const uint16_t *>(_msg + 2);
-    binary::write_big<uint16_t>(const_cast<std::byte *>(_msg) + 2,
-                                _hash_value.data() - _msg - sizeof(header_t) +
-                                    _hash_value.size());
-    unsigned char res[32];
-    std::size_t res_len = 0;
-    if (_algo == SHA1) {
-        hash::hmac_context<hash::sha1> ctx(key);
-        ctx.update(_msg, _hash_value.data() - _msg - 4);
-        ctx.final(res, sizeof(res), &res_len);
+    const attr_t *attr =
+        find_attr(data, size,
+                  _algo == algo_t::SHA1
+                      ? attr_type_t::STUN_ATTR_MESSAGE_INTEGRITY
+                      : attr_type_t::STUN_ATTR_MESSAGE_INTEGRITY_SHA256);
+    if (!attr) {
+        ICE_IN_DEBUG { std::cout << "No message integrity attribute\n"; }
+        return false;
+    }
+    const uint8_t *begin = static_cast<const uint8_t *>(data);
+    const uint8_t *const end = begin + size;
+    const uint16_t hash_size = binary::ntoh<uint16_t>(attr->length);
+    if (hash_size + 4 + (const uint8_t *)attr > end) {
+        ICE_IN_DEBUG {
+            std::cout << "Message integrity attribute length is invalid\n";
+        }
+        return false;
+    }
+    uint16_t tmp_len = binary::hton<uint16_t>(
+        (uint16_t)((const uint8_t *)attr - begin - 20 + 4 + hash_size));
+    if (_algo == algo_t::SHA1) {
+        if (hash_size != hash::sha1::digest_size)
+            return false;
+        char res[hash::sha1::digest_size];
+        hash::hmac_context<hash::sha1> ctx(password);
+        ctx.update(begin, 2);
+        ctx.update(&tmp_len, 2);
+        ctx.update(begin + 4, (const uint8_t *)attr - begin - 4);
+        ctx.final(res, sizeof(res));
+        if (std::memcmp(res, attr->value(), hash_size) != 0)
+            return false;
+    } else if (_algo == algo_t::SHA256) {
+        if (hash_size != hash::sha256::digest_size)
+            return false;
+        char res[hash::sha256::digest_size];
+        hash::hmac_context<hash::sha256> ctx(password);
+        ctx.update(begin, 2);
+        ctx.update(&tmp_len, 2);
+        ctx.update(begin + 4, (const uint8_t *)attr - begin - 4);
+        ctx.final(res, sizeof(res));
+        if (std::memcmp(res, attr->value(), hash_size) != 0)
+            return false;
     } else {
-        hash::hmac_context<hash::sha256> ctx(key);
-        ctx.update(_msg, _hash_value.data() - _msg - 4);
-        ctx.final(res, sizeof(res), &res_len);
+        ICE_IN_DEBUG { std::cout << "Unknown message integrity algorithm\n"; }
+        return false;
     }
-    *reinterpret_cast<uint16_t *>(const_cast<std::byte *>(_msg) + 2) = tmp_len;
-    bool success = res_len == _hash_value.size() &&
-                   std::memcmp(res, _hash_value.data(), res_len) == 0;
+    ICE_IN_DEBUG { std::cout << "Message integrity check success\n" << '\n'; }
+    return true;
+}
+
+bool message::integrity::verify(std::string_view key,
+                                const message &msg) const {
     ICE_IN_DEBUG {
-        std::cout << "Message integrity check: "
-                  << (success ? "success" : "fail") << '\n';
+        if (msg._raw_data.empty() ||
+            is_not_stun(msg._raw_data.data(), msg._raw_data.size())) {
+            std::cout << "Message integrity check failed: not a STUN message\n";
+            throw std::runtime_error(
+                "Message integrity check failed: not a STUN message");
+        }
     }
-    return success;
+    return verify(key, msg._raw_data.data(), msg._raw_data.size());
 }
 
 std::string
-message::password_algorithm_t::get_hmac_key(std::string_view username,
+message::password_algorithm::get_hmac_key(std::string_view username,
                                             std::string_view realm,
-                                            std::string_view password) {
+                                            std::string_view password) const {
     std::string input;
     input.resize_and_overwrite(
         username.size() + realm.size() + password.size() + 2 + 32,
@@ -551,7 +604,7 @@ message::password_algorithm_t::get_hmac_key(std::string_view username,
             *p++ = ':';
             p = std::copy(password.begin(), password.end(), p);
 
-            if (_algo == password_algorithm_t::SHA256) {
+            if (_algo == password_algorithm::SHA256) {
                 hash::SHA256(input.data(),
                              std::string_view{input.data() + 32,
                                               static_cast<std::size_t>(
@@ -562,7 +615,9 @@ message::password_algorithm_t::get_hmac_key(std::string_view username,
                               input.data() + 32,
                               static_cast<std::size_t>(p - input.data() - 32)});
             }
-            return _algo == password_algorithm_t::SHA256 ? 32 : 16;
+            return _algo == password_algorithm::SHA256
+                       ? hash::sha256::digest_size
+                       : hash::md5::digest_size;
         });
     return input;
 }
@@ -577,7 +632,7 @@ bool message::parse(const void *data, std::size_t buf_size,
     }
     if (buf_size < sizeof(header_t))
         return false;
-    const header_t *header = reinterpret_cast<const header_t *>(data);
+    const header_t *header = static_cast<const header_t *>(data);
     const std::size_t len = binary::ntoh<uint16_t>(header->length);
     if (len + sizeof(header_t) > buf_size)
         return false;
@@ -611,7 +666,7 @@ bool message::parse(const void *data, std::size_t buf_size,
             attr_type != attr_type_t::STUN_ATTR_MESSAGE_INTEGRITY &&
             attr_type != attr_type_t::STUN_ATTR_MESSAGE_INTEGRITY_SHA256 &&
             attr_type != attr_type_t::STUN_ATTR_FINGERPRINT) {
-            return true;
+            goto END;
         }
         switch (attr_type) {
         case attr_type_t::STUN_ATTR_MAPPED_ADDRESS: {
@@ -661,25 +716,15 @@ bool message::parse(const void *data, std::size_t buf_size,
             break;
         }
         case attr_type_t::STUN_ATTR_MESSAGE_INTEGRITY: {
-            if (attr_len == 0 || attr_len != 20)
+            if (attr_len == 0 || attr_len != hash::sha1::digest_size)
                 return false;
-            integrity_t integrity;
-            integrity._algo = integrity_t::SHA1;
-            integrity._msg = reinterpret_cast<const std::byte *>(begin);
-            integrity._hash_value = std::span<const std::byte>{
-                reinterpret_cast<const std::byte *>(attr.value()), attr_len};
-            this->integrities.emplace_back(integrity);
+            this->integrities.emplace_back(integrity::SHA1);
             break;
         }
         case attr_type_t::STUN_ATTR_MESSAGE_INTEGRITY_SHA256: {
             if (attr_len == 0 || attr_len != 32)
                 return false;
-            integrity_t integrity;
-            integrity._algo = integrity_t::SHA256;
-            integrity._msg = reinterpret_cast<const std::byte *>(begin);
-            integrity._hash_value = std::span<const std::byte>{
-                reinterpret_cast<const std::byte *>(attr.value()), attr_len};
-            this->integrities.emplace_back(integrity);
+            this->integrities.emplace_back(integrity::SHA256);
             break;
         }
         case attr_type_t::STUN_ATTR_FINGERPRINT: {
@@ -731,8 +776,8 @@ bool message::parse(const void *data, std::size_t buf_size,
                     binary::ntoh<uint16_t>(value_pwd_algo->parameters_length);
                 if (pwd_algo_len > 256)
                     return false;
-                if (pwd_algo_type != password_algorithm_t::MD5 &&
-                    pwd_algo_type != password_algorithm_t::SHA256) {
+                if (pwd_algo_type != password_algorithm::MD5 &&
+                    pwd_algo_type != password_algorithm::SHA256) {
                     ICE_IN_DEBUG {
                         std::cerr
                             << "Unknown password algorithm:" << pwd_algo_type
@@ -879,7 +924,14 @@ bool message::parse(const void *data, std::size_t buf_size,
             *offset += (iter.data() - begin) + attr_len + 4;
     }
 
-    return iter.data() - begin == len + sizeof(header_t);
+    if (iter.data() - begin != len + sizeof(header_t))
+        return false;
+END:
+    if (!this->integrities.empty()) {
+        _raw_data.resize(sizeof(header_t) + len);
+        std::memcpy(_raw_data.data(), data, sizeof(header_t) + len);
+    }
+    return true;
 }
 
 static int write_header(void *buf, size_t size, class_t cls, method_t method,
@@ -900,7 +952,7 @@ static int write_header(void *buf, size_t size, class_t cls, method_t method,
 }
 
 static int write_address(void *data, std::size_t buf_size,
-                         const message::endpoint_t &address) {
+                         const message::endpoint &address) {
     if (buf_size < sizeof(value_mapped_address_t))
         return -1;
     value_mapped_address_t *mapped =
@@ -927,7 +979,7 @@ static int write_address(void *data, std::size_t buf_size,
 
 static int write_xor_address(void *data, std::size_t buf_size,
                              const header_t *header,
-                             const message::endpoint_t &address) {
+                             const message::endpoint &address) {
     if (buf_size < sizeof(value_mapped_address_t))
         return -1;
     value_mapped_address_t *mapped =
@@ -1177,34 +1229,32 @@ int message::write_to(void *buf, size_t length) const noexcept {
         }
     }
 
-    for (const auto &algo : _integrity_algos) {
+    for (const auto &algo : integrities) {
         if (iter == end)
             goto overflow;
         uint16_t attr_size;
-        switch (algo) {
-        case integrity_t::SHA1:
+        switch (algo.algo()) {
+        case integrity::SHA1:
             iter->type = binary::hton<uint16_t>(
                 attr_type_t::STUN_ATTR_MESSAGE_INTEGRITY);
-            attr_size = 20;
-            iter->length = binary::hton<uint16_t>(20);
+            attr_size = hash::sha1::digest_size;
+            iter->length = binary::hton<uint16_t>(hash::sha1::digest_size);
             break;
-        case integrity_t::SHA256:
+        case integrity::SHA256:
             iter->type = binary::hton<uint16_t>(
                 attr_type_t::STUN_ATTR_MESSAGE_INTEGRITY_SHA256);
-            attr_size = 32;
-            iter->length = binary::hton<uint16_t>(32);
+            attr_size = hash::sha256::digest_size;
+            iter->length = binary::hton<uint16_t>(hash::sha256::digest_size);
             break;
         default:
-            ICE_IN_DEBUG {
-                std::cerr << "Unknown integrity algorithm: " << algo << '\n';
-            }
+            ICE_IN_DEBUG { std::cerr << "Unknown integrity algorithm\n"; }
             continue;
         }
         if (iter->value() + attr_size > buf_end)
             goto overflow;
         header->length = binary::hton<uint16_t>(
             (iter.data() - buf_begin) - sizeof(header_t) + 4 + attr_size);
-        if (algo == integrity_t::SHA1) {
+        if (algo == integrity::SHA1) {
             hash::hmac_context<hash::sha1> ctx(_hmac_key);
             ctx.update(buf_begin, iter.data() - buf_begin);
             ctx.final(iter->value(), attr_size);
@@ -1213,13 +1263,6 @@ int message::write_to(void *buf, size_t length) const noexcept {
             ctx.update(buf_begin, iter.data() - buf_begin);
             ctx.final(iter->value(), attr_size);
         }
-
-        integrity_t integrity;
-        integrity._algo = algo;
-        integrity._hash_value = std::span<const std::byte>(
-            reinterpret_cast<const std::byte *>(iter->value()), attr_size);
-        integrity._msg = reinterpret_cast<const std::byte *>(buf_begin);
-        integrities.push_back(integrity);
 
         ++iter;
     }
@@ -1255,9 +1298,9 @@ overflow:
 bool message::is_not_stun(const void *data, std::size_t length) noexcept {
     if (!data || length < sizeof(header_t))
         return true;
-    if (*reinterpret_cast<const uint8_t *>(data) & 0xC0)
+    if (*static_cast<const uint8_t *>(data) & 0xC0)
         return true;
-    const auto *header = reinterpret_cast<const header_t *>(data);
+    const auto *header = static_cast<const header_t *>(data);
     if (binary::ntoh<uint32_t>(header->magic) != STUN_MAGIC)
         return true;
     const uint16_t len = binary::ntoh<uint16_t>(header->length);
@@ -1299,15 +1342,13 @@ void message::reset() noexcept {
     next_port = false;
     dont_fragment = false;
     reservation_token.reset();
-    password.clear();
+    _raw_data.clear();
     _checked_fingerprint = false;
     _hmac_key.clear();
-    _use_message_integrity = false;
     _use_fingerprint = false;
-    _integrity_algos.clear();
 }
 
-static nlohmann::json to_json(const message::endpoint_t &ep) {
+static nlohmann::json to_json(const message::endpoint &ep) {
     nlohmann::json obj;
     obj["family"] = ep.address.is_v4() ? "ipv4" : "ipv6";
     obj["port"] = ep.port;
@@ -1317,20 +1358,20 @@ static nlohmann::json to_json(const message::endpoint_t &ep) {
 
 static const char *algo_name(uint16_t algo) noexcept {
     switch (algo) {
-    case message::password_algorithm_t::MD5:
+    case message::password_algorithm::MD5:
         return "md5";
-    case message::password_algorithm_t::SHA256:
+    case message::password_algorithm::SHA256:
         return "sha256";
     default:
         return "unknown";
     }
 }
 
-static const char *algo_name(message::integrity_t::algo_t algo) noexcept {
+static const char *algo_name(message::integrity::algo_t algo) noexcept {
     switch (algo) {
-    case message::integrity_t::algo_t::SHA1:
+    case message::integrity::algo_t::SHA1:
         return "sha1";
-    case message::integrity_t::algo_t::SHA256:
+    case message::integrity::algo_t::SHA256:
         return "sha256";
     default:
         return "unknown";
@@ -1338,12 +1379,12 @@ static const char *algo_name(message::integrity_t::algo_t algo) noexcept {
 }
 
 static nlohmann::json
-to_json(const message::password_algorithm_t &pa) noexcept {
+to_json(const message::password_algorithm &pa) noexcept {
     nlohmann::json obj;
     obj["type"] = "password_algorithm";
     obj["algo"] = algo_name(pa.algo());
     auto param = pa.parameter();
-    obj["parameter"] = base64::encode(param.data(), param.size());
+    obj["parameter"] = hash::to_hex(param.data(), param.size());
     return obj;
 }
 
@@ -1351,7 +1392,7 @@ std::string message::to_string() {
     nlohmann::json obj;
 
     obj["transaction_id"] =
-        base64::encode(transaction_id.data(), transaction_id.size());
+        hash::to_hex(transaction_id.data(), transaction_id.size());
 
     nlohmann::json attributes = nlohmann::json::array();
     if (this->mapped_address) {
@@ -1442,7 +1483,7 @@ std::string message::to_string() {
         nlohmann::json userhash_obj;
         userhash_obj["type"] = "userhash";
         userhash_obj["value"] =
-            base64::encode(this->userhash->data(), USERHASH_SIZE);
+            hash::to_hex(this->userhash->data(), USERHASH_SIZE);
         attributes.emplace_back(std::move(userhash_obj));
     }
     if (this->channel_number) {
@@ -1478,13 +1519,26 @@ std::string message::to_string() {
         reservation_token_obj["type"] = "reservation_token";
         reservation_token_obj["value"] = *this->reservation_token;
     }
-    for (const auto &integrity : this->integrities) {
-        nlohmann::json integrity_obj;
-        integrity_obj["type"] =
-            std::string{"integrity_"} + algo_name(integrity.algo());
-        auto hash = integrity.hash_value();
-        integrity_obj["value"] = base64::encode(hash.data(), hash.size());
-        attributes.emplace_back(std::move(integrity_obj));
+    if (!this->_raw_data.empty() &&
+        !is_not_stun(this->_raw_data.data(), this->_raw_data.size())) {
+        for (const auto &integrity : this->integrities) {
+            const attr_t *attr = find_attr(
+                this->_raw_data.data(), this->_raw_data.size(),
+                integrity.algo() == integrity::algo_t::SHA1
+                    ? attr_type_t::STUN_ATTR_MESSAGE_INTEGRITY
+                    : attr_type_t::STUN_ATTR_MESSAGE_INTEGRITY_SHA256);
+            if (!attr || (const std::byte *)attr + 4 +
+                                 binary::ntoh<uint16_t>(attr->length) >
+                             this->_raw_data.data() + this->_raw_data.size()) {
+                continue;
+            }
+            nlohmann::json integrity_obj;
+            integrity_obj["type"] =
+                std::string{"integrity_"} + algo_name(integrity.algo());
+            integrity_obj["value"] = hash::to_hex(
+                attr->value(), binary::ntoh<uint16_t>(attr->length));
+            attributes.emplace_back(std::move(integrity_obj));
+        }
     }
     if (this->_checked_fingerprint) {
         nlohmann::json fingerprint_obj;

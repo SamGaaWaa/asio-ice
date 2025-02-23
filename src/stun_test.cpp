@@ -2,6 +2,8 @@
 #include <iostream>
 
 #include "base64.hpp"
+#include "hash.hpp"
+#include "json.hpp"
 #include "stun.hpp"
 #include "udp_connection.hpp"
 
@@ -126,7 +128,7 @@ void parse_test1() {
     }
     auto dura =
         std::chrono::duration_cast<std::chrono::nanoseconds>(end - begin);
-    std::cout << "Parsing a stun message takes " << dura.count() << "ns.\n";
+    std::cout << "Parsing a stun message takes " << dura.count() << "ns.\n\n";
 }
 
 void parse_test2() {
@@ -142,7 +144,7 @@ void parse_test2() {
     }
     auto dura =
         std::chrono::duration_cast<std::chrono::nanoseconds>(end - begin);
-    std::cout << "Parsing a stun message takes " << dura.count() << "ns.\n";
+    std::cout << "Parsing a stun message takes " << dura.count() << "ns.\n\n";
 }
 
 void parse_test3() {
@@ -158,7 +160,7 @@ void parse_test3() {
     }
     auto dura =
         std::chrono::duration_cast<std::chrono::nanoseconds>(end - begin);
-    std::cout << "Parsing a stun message takes " << dura.count() << "ns.\n";
+    std::cout << "Parsing a stun message takes " << dura.count() << "ns.\n\n";
 }
 
 void parse_test4() {
@@ -174,7 +176,7 @@ void parse_test4() {
     }
     auto dura =
         std::chrono::duration_cast<std::chrono::nanoseconds>(end - begin);
-    std::cout << "Parsing a stun message takes " << dura.count() << "ns.\n";
+    std::cout << "Parsing a stun message takes " << dura.count() << "ns.\n\n";
 }
 
 void parse_test5() {
@@ -190,7 +192,23 @@ void parse_test5() {
     }
     auto dura =
         std::chrono::duration_cast<std::chrono::nanoseconds>(end - begin);
-    std::cout << "Parsing a stun message takes " << dura.count() << "ns.\n";
+    std::cout << "Long-term authentication with password \"TheMatrIX\"\n";
+    const auto &algo = resp.password_algorithms.front();
+    std::string password = algo.get_hmac_key(
+        nlohmann::json::parse(R"("\u30DE\u30C8\u30EA\u30C3\u30AF\u30B9")")
+            .get<std::string>(),
+        resp.realm, "TheMatrIX");
+    for (const auto &i : resp.integrities) {
+        std::cout << "Integrity check with hmac key \""
+                  << ice::hash::to_hex(password.data(), password.size())
+                  << "\"\n";
+        if (i.verify(password, resp)) {
+            std::cout << "Check integrity success!\n";
+        } else {
+            std::cout << "Check integrity failed!\n";
+        }
+    }
+    std::cout << "Parsing a stun message takes " << dura.count() << "ns.\n\n";
 }
 
 void parse_base64() {
@@ -213,17 +231,15 @@ void parse_base64() {
     }
     auto dura =
         std::chrono::duration_cast<std::chrono::nanoseconds>(end - begin);
-    std::cout << "Parsing a stun message takes " << dura.count() << "ns.\n";
+    std::cout << "Parsing a stun message takes " << dura.count() << "ns.\n\n";
 }
 
 void write_test() {
     ice::stun::message msg, parsed;
-    msg.reset();
-    parsed.reset();
     msg.mapped_address.emplace(
         ice::net::ip::address_v4::from_string("127.0.0.1"), 8080);
-    msg.add_message_integrity(ice::stun::message::integrity_t::SHA1);
-    msg.add_message_integrity(ice::stun::message::integrity_t::SHA256);
+    msg.integrities.emplace_back(ice::stun::message::integrity::SHA1);
+    msg.integrities.emplace_back(ice::stun::message::integrity::SHA256);
     msg.use_fingerprint(true);
     msg.set_hmac_key("Hello");
 
@@ -233,23 +249,22 @@ void write_test() {
         std::cerr << "Write test failed.\n";
         return;
     }
+    std::cout << "Write " << ret << " bytes.\n";
     if (!parsed.parse(buf, ret)) {
         std::cerr << "Re-parse failed.\n";
         return;
     }
-    auto str = parsed.to_string();
-    // if (str != msg.to_string()) {
-    //     std::cerr << "to_string error.\n";
-    //     return;
-    // }
+    std::cout << "re-parse success!\n";
     for (auto &integrity : parsed.integrities) {
-        if (!integrity.verify("Hello")) {
+        if (!integrity.verify("Hello", parsed)) {
             std::cerr << "Message integrity check failed.\n";
             return;
         }
+        std::cout << "Integrity check success.\n";
     }
+    auto str = parsed.to_string();
     std::cout << "Msg:\n" << str << '\n';
-    std::cout << "Success, write " << ret << " bytes.\n";
+    std::cout << "Success, write " << ret << " bytes.\n\n";
 }
 
 void request_test() {
@@ -259,7 +274,9 @@ void request_test() {
     net::ip::udp::resolver resolver(ctx);
 
     // auto resolve_result = resolver.resolve("stun.l.google.com", "19302");
-    auto resolve_result = resolver.resolve("0.0.0.0", "13478");
+    // auto resolve_result = resolver.resolve("0.0.0.0", "13478");
+    // auto resolve_result = resolver.resolve("113.96.17.249", "20002");
+    auto resolve_result = resolver.resolve("14.29.112.241", "20002");
     if (resolve_result.empty()) {
         std::cerr << "Resolve error\n";
         return;
@@ -310,7 +327,7 @@ void request_test() {
         return;
     }
     std::cout << resp.to_string() << '\n';
-    std::cout << "Finish\n";
+    std::cout << "Finish\n\n";
 }
 
 int main() {
@@ -321,7 +338,6 @@ int main() {
     parse_test3();
     parse_test4();
     parse_test5();
-    parse_test1();
 
     write_test();
     // while (true)
