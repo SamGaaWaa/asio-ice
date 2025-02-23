@@ -41,25 +41,26 @@ bool client::dispatch(const net::ip::udp::endpoint &ep, const void *data,
     if (stun::message::is_not_stun(data, size))
         return false;
     auto msg = get_message(_msg_pool);
+    utils::scope_guard on_exit(
+        [this, &msg]() noexcept { _msg_pool.push_back(std::move(msg)); });
     if (!msg->parse(data, size) || !msg->is_response())
         return false;
     // TODO: handle message
     ICE_IN_DEBUG {
-        // std::cout << "STUN message from " << ep.address()
-        //           << ":" << ep.port()
-        //           << ":\n" << msg->to_string() << "\n";
+        std::cout << "STUN message from " << ep.address() << ":" << ep.port()
+                  << ":\n"
+                  << msg->to_string() << "\n";
     }
     auto it = _transactions.find(msg->transaction_id);
     if (it == _transactions.end()) {
-        ICE_IN_DEBUG {
-            // std::cout << "Unknown transaction id\n";
-        }
+        ICE_IN_DEBUG { std::cout << "Unknown transaction id\n"; }
         // TODO: May be a application message
         return false;
     }
     it->response = std::move(msg);
     it->response_from = ep;
     it->set_done();
+    on_exit.dismiss();
     return true;
 }
 
@@ -73,19 +74,19 @@ client::transaction_t::retry(std::chrono::milliseconds timeout,
     net::steady_timer timer{_client->context()};
     for (std::size_t i = 0; i < max_retries; ++i) {
         auto [err, n] = co_await _client->socket().async_send_to(
-            net::buffer(_buf, _buf_size), this->endpoint,
+            net::buffer(_buf.data(), _buf.size()), this->endpoint,
             asio2exec::use_sender);
         if (err) {
             ICE_IN_DEBUG {
-                // std::cerr << "STUN transaction failed: " << err.message() <<
-                // "\n";
+                std::cerr << "STUN transaction failed: " << err.message()
+                          << "\n";
             }
             co_return;
         }
-        if (n != _buf_size) {
+        if (n != _buf.size()) {
             ICE_IN_DEBUG {
-                // std::cerr << "STUN transaction failed: sent " << n << "
-                // bytes, expected " << _buf_size << "\n";
+                std::cerr << "STUN transaction failed: sent " << n
+                          << "bytes, expected " << _buf.size() << "\n";
             }
             co_return;
         }
@@ -94,8 +95,8 @@ client::transaction_t::retry(std::chrono::milliseconds timeout,
         err = co_await timer.async_wait(asio2exec::use_sender);
         if (err) {
             ICE_IN_DEBUG {
-                // std::cerr << "STUN transaction failed: " << err.message() <<
-                // "\n";
+                std::cerr << "STUN transaction failed: " << err.message()
+                          << "\n";
             }
             co_return;
         }
@@ -113,19 +114,17 @@ void client::transaction_t::run(std::chrono::milliseconds timeout,
 }
 
 inline_task<std::tuple<std::unique_ptr<stun::message>, net::ip::udp::endpoint>>
-client::request(net::ip::udp::endpoint ep, std::unique_ptr<stun::message> msg,
+client::request(const net::ip::udp::endpoint &ep, const stun::message &msg,
                 std::chrono::milliseconds timeout, std::size_t retries,
                 std::shared_ptr<client> self) {
     assert(_running);
-    auto state = _transactions.lower_bound(msg->transaction_id);
+    auto state = _transactions.lower_bound(msg.transaction_id);
     if (state != _transactions.end() &&
-        state->transaction_id == msg->transaction_id) {
-        ICE_IN_DEBUG {
-            // std::cout << "Transaction already in progress\n";
-        }
+        state->transaction_id == msg.transaction_id) {
+        ICE_IN_DEBUG { std::cout << "Transaction already in progress\n"; }
         throw std::runtime_error("Transaction already in progress");
     }
-    auto trans = std::make_shared<transaction_t>(*msg, ep, shared_from_this());
+    auto trans = std::make_shared<transaction_t>(msg, ep, shared_from_this());
     trans->run(timeout, retries);
     _transactions.insert(state, *trans);
     utils::scope_guard on_exit([&]() noexcept {

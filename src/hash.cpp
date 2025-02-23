@@ -3,6 +3,7 @@
 #include <openssl/core_names.h>
 #include <openssl/evp.h>
 #include <openssl/params.h>
+#include <openssl/rand.h>
 
 #include <cassert>
 #include <cstdint>
@@ -330,6 +331,11 @@ std::string to_hex(const void *data, std::size_t size) {
                                  return 2 * size;
                              });
     return res;
+}
+
+void random_bytes(void *out, std::size_t size) {
+    if (::RAND_bytes((unsigned char *)out, size) != 1)
+        throw std::runtime_error("RAND_bytes failed");
 }
 
 } // namespace ice::hash

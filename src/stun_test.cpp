@@ -243,6 +243,7 @@ void write_test() {
     msg.use_fingerprint(true);
     msg.set_hmac_key("Hello");
 
+    std::cout << "Should write " << msg.serialized_size() << " bytes.\n";
     char buf[20 + 4 + 4 + 4 + 4 + 20 + 4 + 32 + 4 + 4 + 4 + 8];
     int ret = msg.write_to(buf, sizeof(buf));
     if (ret < 0) {

@@ -591,8 +591,8 @@ bool message::integrity::verify(std::string_view key,
 
 std::string
 message::password_algorithm::get_hmac_key(std::string_view username,
-                                            std::string_view realm,
-                                            std::string_view password) const {
+                                          std::string_view realm,
+                                          std::string_view password) const {
     std::string input;
     input.resize_and_overwrite(
         username.size() + realm.size() + password.size() + 2 + 32,
@@ -1348,6 +1348,112 @@ void message::reset() noexcept {
     _use_fingerprint = false;
 }
 
+std::size_t message::serialized_size() const noexcept {
+    constexpr auto align_size = [](std::size_t size) {
+        return (size + 3) & ~3;
+    };
+
+    std::size_t total = sizeof(header_t);
+    if (this->error_code) {
+        total += align_size(4 + sizeof(value_error_code_t) +
+                            this->error_code->reason.size());
+    }
+
+    if (this->mapped_address) {
+        if (this->mapped_address->address.is_v4())
+            total += 4 + 4 + 4;
+        else
+            total += 4 + 4 + 16;
+    }
+
+    if (this->xor_mapped_address) {
+        if (this->xor_mapped_address->address.is_v4())
+            total += 4 + 4 + 4;
+        else
+            total += 4 + 4 + 16;
+    }
+
+    if (this->priority) {
+        total += 4 + 4;
+    }
+
+    if (this->use_candidate) {
+        total += 4;
+    }
+
+    if (this->ice_controlling) {
+        total += 4 + 8;
+    }
+
+    if (this->ice_controlled) {
+        total += 4 + 8;
+    }
+
+    if (this->channel_number) {
+        total += align_size(4 + sizeof(value_channel_number_t));
+    }
+
+    if (this->lifetime) {
+        total += 4 + 4;
+    }
+
+    if (this->xor_peer_address) {
+        if (this->xor_peer_address->address.is_v4())
+            total += 4 + 4 + 4;
+        else
+            total += 4 + 4 + 16;
+    }
+
+    if (this->xor_relayed_address) {
+        if (this->xor_relayed_address->address.is_v4())
+            total += 4 + 4 + 4;
+        else
+            total += 4 + 4 + 16;
+    }
+
+    if (this->even_port) {
+        total += align_size(4 + sizeof(value_even_port_t));
+    }
+
+    if (this->requested_transport) {
+        total += align_size(4 + sizeof(value_requested_transport_t));
+    }
+
+    if (this->dont_fragment) {
+        total += 4;
+    }
+
+    if (this->reservation_token) {
+        total += 4 + 8;
+    }
+
+    total += align_size(4 + std::string_view{"asio-ice"}.size());
+
+    for (const auto &algo : integrities) {
+        switch (algo.algo()) {
+        case integrity::SHA1:
+            total += align_size(4 + hash::sha1::digest_size);
+            break;
+        case integrity::SHA256:
+            total += align_size(4 + hash::sha256::digest_size);
+            break;
+        default:
+            continue;
+        }
+    }
+
+    if (_use_fingerprint) {
+        total += 4 + 4;
+    }
+
+    return total;
+}
+
+void message::fill_random_transaction_id() {
+    hash::random_bytes(this->transaction_id.data(),
+                       this->transaction_id.size());
+}
+
 static nlohmann::json to_json(const message::endpoint &ep) {
     nlohmann::json obj;
     obj["family"] = ep.address.is_v4() ? "ipv4" : "ipv6";
@@ -1378,8 +1484,7 @@ static const char *algo_name(message::integrity::algo_t algo) noexcept {
     }
 }
 
-static nlohmann::json
-to_json(const message::password_algorithm &pa) noexcept {
+static nlohmann::json to_json(const message::password_algorithm &pa) noexcept {
     nlohmann::json obj;
     obj["type"] = "password_algorithm";
     obj["algo"] = algo_name(pa.algo());

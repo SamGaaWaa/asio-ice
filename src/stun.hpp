@@ -122,8 +122,7 @@ struct message {
         static constexpr uint16_t MD5 = 1;
         static constexpr uint16_t SHA256 = 2;
 
-        password_algorithm(uint16_t algo_type,
-                             std::span<const std::byte> param)
+        password_algorithm(uint16_t algo_type, std::span<const std::byte> param)
             : _algo{algo_type}, _value(param.begin(), param.end()) {
             if (_value.size() > 256)
                 throw std::runtime_error{
@@ -144,7 +143,9 @@ struct message {
     };
 
     std::string to_string();
+    std::size_t serialized_size() const noexcept;
     void reset() noexcept;
+    void fill_random_transaction_id();
     const std::string &hmac_key() const noexcept { return _hmac_key; }
     void set_hmac_key(std::string_view key) noexcept { _hmac_key = key; }
     void use_fingerprint(bool use) noexcept { _use_fingerprint = use; }
@@ -163,8 +164,7 @@ struct message {
     std::optional<endpoint> xor_mapped_address;
     std::string username;
     boost::container::small_vector<integrity, 2> integrities{};
-    boost::container::small_vector<password_algorithm, 2>
-        password_algorithms{};
+    boost::container::small_vector<password_algorithm, 2> password_algorithms{};
     std::optional<error_code> error_code;
     std::string realm;
     std::string nonce;

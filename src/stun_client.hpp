@@ -7,6 +7,7 @@
 #include "stun.hpp"
 
 #include <boost/circular_buffer.hpp>
+#include <boost/container/small_vector.hpp>
 #include <boost/intrusive/set.hpp>
 
 #if ASIOICE_USE_BOOST > 0
@@ -48,7 +49,7 @@ class client : public std::enable_shared_from_this<client> {
 
     inline_task<
         std::tuple<std::unique_ptr<stun::message>, net::ip::udp::endpoint>>
-    request(net::ip::udp::endpoint ep, std::unique_ptr<stun::message> msg,
+    request(const net::ip::udp::endpoint &ep, const stun::message &msg,
             std::chrono::milliseconds timeout, std::size_t retries,
             std::shared_ptr<client> self = {});
 
@@ -69,11 +70,11 @@ class client : public std::enable_shared_from_this<client> {
                       std::shared_ptr<client> c)
             : transaction_id(msg.transaction_id), endpoint(ep),
               _client(std::move(c)) {
-            int ret = msg.write_to(_buf, sizeof(_buf));
-            if (ret < 0) {
+            _buf.resize(msg.serialized_size());
+            int ret = msg.write_to(_buf.data(), _buf.size());
+            if (ret < 0 || ret != _buf.size()) {
                 throw std::runtime_error("stun::message::write_to() failed");
             }
-            _buf_size = static_cast<std::size_t>(ret);
         }
 
         void run(std::chrono::milliseconds timeout, std::size_t max_retries);
@@ -101,8 +102,7 @@ class client : public std::enable_shared_from_this<client> {
                                 std::size_t max_retries,
                                 std::shared_ptr<transaction_t> self);
 
-        char _buf[2048];
-        std::size_t _buf_size;
+        boost::container::small_vector<std::byte, 576> _buf;
         std::shared_ptr<client> _client;
         shared_promise<void> _done_promise{};
         shared_promise<void> _stop_promise{};

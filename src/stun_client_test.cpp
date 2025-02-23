@@ -25,7 +25,7 @@ void request_test() {
     net::io_context ctx;
 
     net::ip::udp::resolver resolver(ctx);
-    auto resolve_result = resolver.resolve("0.0.0.0", "13478");
+    auto resolve_result = resolver.resolve("14.29.112.241", "20002");
     if (resolve_result.empty()) {
         std::cerr << "Resolve error\n";
         return;
@@ -58,13 +58,13 @@ void request_test() {
 
     auto request_coro = [&]() -> inline_task<void> {
         utils::scope_guard on_exit([&]() noexcept { client->stop(); });
-        auto req = std::make_unique<stun::message>();
-        req->method = stun::method_t::STUN_METHOD_BINDING;
-        req->cls = stun::class_t::STUN_CLASS_REQUEST;
-        req->use_fingerprint(true);
-        req->transaction_id = {1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12};
+        stun::message req;
+        req.method = stun::method_t::STUN_METHOD_BINDING;
+        req.cls = stun::class_t::STUN_CLASS_REQUEST;
+        req.use_fingerprint(true);
+        req.fill_random_transaction_id();
         auto [resp, from] = co_await client->request(
-            server_ep, std::move(req), std::chrono::milliseconds(1000), 3);
+            server_ep, req, std::chrono::milliseconds(1000), 3);
         if (!resp) {
             std::cerr << "Request error\n";
             co_return;

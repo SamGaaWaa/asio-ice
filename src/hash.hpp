@@ -101,7 +101,8 @@ template <class ALgo> struct hmac_context {
 };
 
 void to_hex(const void *data, std::size_t size, char *out) noexcept;
-
 std::string to_hex(const void *data, std::size_t size);
+
+void random_bytes(void *out, std::size_t size);
 
 } // namespace ice::hash
