@@ -431,7 +431,7 @@ static_assert(
     std::sentinel_for<attr_iterator_sentinel_t, const_attr_iterator_t>);
 
 static int parse_address(const void *data, std::size_t buf_size,
-                         message::endpoint &address) {
+                         endpoint &address) {
     uint8_t pad = 0;
     uint8_t protocol = 0;
     uint16_t port = 0;
@@ -465,8 +465,7 @@ static int parse_address(const void *data, std::size_t buf_size,
 }
 
 static int parse_xor_address(const void *data, std::size_t buf_size,
-                             const header_t *header,
-                             message::endpoint &address) {
+                             const header_t *header, endpoint &address) {
     if (buf_size < 4)
         return -1;
     const value_mapped_address_t *mapped_address =
@@ -952,7 +951,7 @@ static int write_header(void *buf, size_t size, class_t cls, method_t method,
 }
 
 static int write_address(void *data, std::size_t buf_size,
-                         const message::endpoint &address) {
+                         const endpoint &address) {
     if (buf_size < sizeof(value_mapped_address_t))
         return -1;
     value_mapped_address_t *mapped =
@@ -978,8 +977,7 @@ static int write_address(void *data, std::size_t buf_size,
 }
 
 static int write_xor_address(void *data, std::size_t buf_size,
-                             const header_t *header,
-                             const message::endpoint &address) {
+                             const header_t *header, const endpoint &address) {
     if (buf_size < sizeof(value_mapped_address_t))
         return -1;
     value_mapped_address_t *mapped =
@@ -1454,7 +1452,7 @@ void message::fill_random_transaction_id() {
                        this->transaction_id.size());
 }
 
-static nlohmann::json to_json(const message::endpoint &ep) {
+static nlohmann::json to_json(const endpoint &ep) {
     nlohmann::json obj;
     obj["family"] = ep.address.is_v4() ? "ipv4" : "ipv6";
     obj["port"] = ep.port;

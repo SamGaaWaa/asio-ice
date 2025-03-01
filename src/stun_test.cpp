@@ -1,6 +1,7 @@
 #include <chrono>
 #include <iostream>
 
+#include "address.hpp"
 #include "base64.hpp"
 #include "hash.hpp"
 #include "json.hpp"

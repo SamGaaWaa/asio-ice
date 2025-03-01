@@ -1,5 +1,6 @@
 #pragma once
 
+#include "address.hpp"
 #include "config.hpp"
 #include "endian.hpp"
 
@@ -89,10 +90,6 @@ struct method_t {
 #define STUN_MAX_PASSWORD_ALGORITHMS_VALUE_SIZE 256
 
 struct message {
-    struct endpoint {
-        net::ip::address address;
-        uint16_t port{0};
-    };
 
     struct error_code {
         uint16_t code;

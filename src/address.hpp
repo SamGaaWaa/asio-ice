@@ -18,6 +18,15 @@ namespace net = asio;
 
 namespace ice {
 
+struct endpoint {
+    net::ip::address address;
+    uint16_t port{0};
+
+    friend bool operator==(const endpoint &lhs, const endpoint &rhs) noexcept {
+        return lhs.address == rhs.address && lhs.port == rhs.port;
+    }
+};
+
 std::vector<net::ip::address> get_local_addresses();
 
 } // namespace ice

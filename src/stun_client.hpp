@@ -34,7 +34,8 @@ namespace ice::stun {
 class client : public std::enable_shared_from_this<client> {
   public:
     client(net::io_context &ctx, net::ip::udp::socket &sock) noexcept
-        : _ctx(ctx), _sock(sock), _msg_pool(16) {}
+        : _ctx(ctx), _sock(sock), _msg_pool(16), _local(sock.local_endpoint()) {
+    }
 
     client(const client &) = delete;
     client &operator=(const client &) = delete;
@@ -57,17 +58,17 @@ class client : public std::enable_shared_from_this<client> {
     auto &context() noexcept { return _ctx; }
     const auto &socket() const noexcept { return _sock; }
     auto &socket() noexcept { return _sock; }
+    const auto &local_endpoint() const noexcept { return _local; }
     auto &message_pool() noexcept { return _msg_pool; }
     const auto &message_pool() const noexcept { return _msg_pool; }
 
   private:
-    struct transaction_t
-        : std::enable_shared_from_this<transaction_t>,
+    struct transaction
+        : std::enable_shared_from_this<transaction>,
           boost::intrusive::set_base_hook<
               boost::intrusive::link_mode<boost::intrusive::safe_link>> {
-        transaction_t(const stun::message &msg,
-                      const net::ip::udp::endpoint &ep,
-                      std::shared_ptr<client> c)
+        transaction(const stun::message &msg, const net::ip::udp::endpoint &ep,
+                    std::shared_ptr<client> c)
             : transaction_id(msg.transaction_id), endpoint(ep),
               _client(std::move(c)) {
             _buf.resize(msg.serialized_size());
@@ -87,7 +88,7 @@ class client : public std::enable_shared_from_this<client> {
 
         struct comparer {
             using type = std::array<uint8_t, 12>;
-            const type &operator()(const transaction_t &t) const noexcept {
+            const type &operator()(const transaction &t) const noexcept {
                 return t.transaction_id;
             }
         };
@@ -100,7 +101,7 @@ class client : public std::enable_shared_from_this<client> {
       private:
         inline_task<void> retry(std::chrono::milliseconds timeout,
                                 std::size_t max_retries,
-                                std::shared_ptr<transaction_t> self);
+                                std::shared_ptr<transaction> self);
 
         boost::container::small_vector<std::byte, 576> _buf;
         std::shared_ptr<client> _client;
@@ -109,14 +110,17 @@ class client : public std::enable_shared_from_this<client> {
     };
 
     using transaction_set = boost::intrusive::set<
-        transaction_t, boost::intrusive::key_of_value<transaction_t::comparer>>;
+        transaction, boost::intrusive::key_of_value<transaction::comparer>>;
 
     net::io_context &_ctx;
     net::ip::udp::socket &_sock;
+    net::ip::udp::endpoint _local;
     transaction_set _transactions{};
     boost::circular_buffer<std::unique_ptr<stun::message>> _msg_pool;
     bool _running = true;
     shared_promise<void> _stop_promise{};
+    bool _is_polling = false;
+    shared_promise<void> _stop_polling_promise{};
 };
 
 } // namespace ice::stun

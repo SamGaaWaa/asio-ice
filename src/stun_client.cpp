@@ -66,9 +66,9 @@ bool client::dispatch(const net::ip::udp::endpoint &ep, const void *data,
 
 // exec::task<void>
 inline_task<void>
-client::transaction_t::retry(std::chrono::milliseconds timeout,
-                             std::size_t max_retries,
-                             std::shared_ptr<transaction_t> self) {
+client::transaction::retry(std::chrono::milliseconds timeout,
+                           std::size_t max_retries,
+                           std::shared_ptr<transaction> self) {
     utils::scope_guard on_exit(
         [this]() noexcept { _done_promise.set_value(); });
     net::steady_timer timer{_client->context()};
@@ -95,8 +95,8 @@ client::transaction_t::retry(std::chrono::milliseconds timeout,
         err = co_await timer.async_wait(asio2exec::use_sender);
         if (err) {
             ICE_IN_DEBUG {
-                std::cerr << "STUN transaction failed: " << err.message()
-                          << "\n";
+                std::cerr << "STUN transaction stopped: " << err.message()
+                          << '\n';
             }
             co_return;
         }
@@ -104,8 +104,8 @@ client::transaction_t::retry(std::chrono::milliseconds timeout,
     co_return;
 }
 
-void client::transaction_t::run(std::chrono::milliseconds timeout,
-                                std::size_t max_retries) {
+void client::transaction::run(std::chrono::milliseconds timeout,
+                              std::size_t max_retries) {
     asio2exec::scheduler_t sched{_client->context()};
     stdexec::start_detached(stdexec::starts_on(
         sched, stdexec::when_all(
@@ -124,7 +124,7 @@ client::request(const net::ip::udp::endpoint &ep, const stun::message &msg,
         ICE_IN_DEBUG { std::cout << "Transaction already in progress\n"; }
         throw std::runtime_error("Transaction already in progress");
     }
-    auto trans = std::make_shared<transaction_t>(msg, ep, shared_from_this());
+    auto trans = std::make_shared<transaction>(msg, ep, shared_from_this());
     trans->run(timeout, retries);
     _transactions.insert(state, *trans);
     utils::scope_guard on_exit([&]() noexcept {

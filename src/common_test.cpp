@@ -32,20 +32,11 @@ struct utf8_iterator {
     char *_ptr;
 };
 
-void get_local_candidate_test() { ice::debug_test(); }
+void ice_test() { ice::debug_test(); }
 
-void candidate_test() {
-    using namespace ice;
-    candidate c(
-        ice::candidate_foundation(candidate_type::host, "udp",
-                                  net::ip::address::from_string("127.0.0.1")),
-        1, "udp", 0,
-        net::ip::udp::endpoint(net::ip::address::from_string("127.0.0.1"),
-                               1234));
-    std::cout << c.foundation() << '\n';
-}
+void candidate_test() { using namespace ice; }
 
 int main() {
-    // get_local_candidate_test();
-    candidate_test();
+    ice_test();
+    // candidate_test();
 }

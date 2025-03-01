@@ -6,6 +6,7 @@
 #include <string>
 #include <string_view>
 
+#include "address.hpp"
 #include "config.hpp"
 
 #if ASIOICE_USE_BOOST > 0
@@ -27,29 +28,19 @@ enum struct candidate_type { host, srflx, prflx, relayed };
 std::string_view to_string(candidate_type type) noexcept;
 
 struct candidate {
-    candidate(std::string_view foundation, uint8_t component,
-              std::string_view transport, int priority,
-              net::ip::udp::endpoint address,
-              candidate_type type = candidate_type::host,
-              std::optional<net::ip::udp::endpoint> related = std::nullopt,
-              std::string_view tcptype = "",
-              std::optional<uint32_t> generation = std::nullopt);
+    std::string to_string();
+    friend bool operator==(const candidate &lhs,
+                           const candidate &rhs) noexcept = default;
 
-    friend bool operator==(const candidate &,
-                           const candidate &) noexcept = default;
-
-    const std::string &foundation() const noexcept { return _foundation; }
-
-  private:
-    std::string _foundation;
-    uint8_t _component = 0;
-    std::string _transport;
-    uint32_t _priority = 0;
-    net::ip::udp::endpoint _address;
-    candidate_type _type = candidate_type::host;
-    std::optional<net::ip::udp::endpoint> _related_address;
-    std::string _tcptype;
-    std::optional<uint32_t> _generation;
+    std::string foundation;
+    uint8_t component;
+    std::string transport;
+    uint32_t priority;
+    ice::endpoint endpoint;
+    candidate_type type;
+    std::optional<ice::endpoint> related;
+    std::string tcptype;
+    std::optional<uint32_t> generation;
 };
 
 static_assert(std::is_copy_constructible_v<candidate>);

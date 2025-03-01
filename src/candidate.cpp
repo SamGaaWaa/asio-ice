@@ -23,16 +23,6 @@ std::string_view to_string(candidate_type type) noexcept {
     return "unknown";
 }
 
-candidate::candidate(std::string_view foundation, uint8_t component,
-                     std::string_view transport, int priority,
-                     net::ip::udp::endpoint address, candidate_type type,
-                     std::optional<net::ip::udp::endpoint> related,
-                     std::string_view tcptype,
-                     std::optional<uint32_t> generation)
-    : _foundation(foundation), _component(component), _transport(transport),
-      _priority(priority), _address(address), _type(type),
-      _related_address(related), _tcptype(tcptype), _generation(generation) {}
-
 static std::string md5_hex(const std::string &key) {
     unsigned char digest[16];
     hash::MD5(digest, key);
