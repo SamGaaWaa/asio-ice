@@ -35,6 +35,7 @@ void request_test() {
               << server_ep.port() << '\n';
 
     net::ip::udp::socket sock(ctx, net::ip::udp::v4());
+    sock.bind(net::ip::udp::endpoint(net::ip::udp::v4(), 0));
     auto client = std::make_shared<stun::client>(ctx, sock);
 
     auto recv_coro = [&]() -> inline_task<void> {
@@ -64,7 +65,7 @@ void request_test() {
         req.use_fingerprint(true);
         req.fill_random_transaction_id();
         auto [resp, from] = co_await client->request(
-            server_ep, req, std::chrono::milliseconds(1000), 3);
+            server_ep, req, std::chrono::seconds(10), 3);
         if (!resp) {
             std::cerr << "Request error\n";
             co_return;

@@ -3,6 +3,7 @@
 #include <concepts>
 #include <cstddef>
 #include <ranges>
+#include <string>
 #include <string_view>
 
 namespace ice::hash {

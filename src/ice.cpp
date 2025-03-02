@@ -50,18 +50,25 @@ server_reflexive_endpoint(auto &client, Endpoint stun_server,
         stdexec::stopped_as_optional());
     if (!result)
         co_return std::nullopt;
-    const auto &[resp, from] = *result;
+    auto &[resp, from] = *result;
+    if (!resp)
+        co_return std::nullopt;
+    utils::scope_guard on_exit(
+        [&]() noexcept { client.message_pool().push_back(std::move(resp)); });
     if (from != stun_server) {
         ICE_IN_DEBUG {
             std::cerr << "server_reflexive_candidate: from != stun_server\n";
         }
         co_return std::nullopt;
     }
+    ice::endpoint ep;
     if (resp->xor_mapped_address)
-        co_return *resp->xor_mapped_address;
+        ep = *resp->xor_mapped_address;
     else if (resp->mapped_address)
-        co_return *resp->mapped_address;
-    co_return std::nullopt;
+        ep = *resp->mapped_address;
+    else
+        co_return std::nullopt;
+    co_return ep;
 } catch (std::exception &e) {
     ICE_IN_DEBUG {
         std::cerr << "server_reflexive_candidate: " << e.what() << "\n";
@@ -85,7 +92,7 @@ static void get_local_addresses_test(uint64_t n) {
               << "ns\n";
 }
 
-static void server_reflexive_endpoint_test(uint64_t n) {
+static void server_reflexive_endpoint_test(uint64_t n) try {
     net::io_context ctx;
 
     net::ip::udp::resolver resolver(ctx);
@@ -99,6 +106,7 @@ static void server_reflexive_endpoint_test(uint64_t n) {
               << server_ep.port() << '\n';
 
     net::ip::udp::socket sock(ctx, net::ip::udp::v4());
+    sock.bind(net::ip::udp::endpoint(net::ip::udp::v4(), 0));
     auto client = std::make_shared<stun::client>(ctx, sock);
 
     auto recv_coro = [&]() -> inline_task<void> {
@@ -137,6 +145,8 @@ static void server_reflexive_endpoint_test(uint64_t n) {
                          }));
     stdexec::start_detached(stdexec::starts_on(sched, std::move(work)));
     ctx.run();
+} catch (const std::exception &e) {
+    std::cerr << "Unhandled exception: " << e.what() << '\n';
 }
 
 void debug_test() {
