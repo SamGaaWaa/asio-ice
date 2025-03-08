@@ -107,7 +107,8 @@ static void server_reflexive_endpoint_test(uint64_t n) try {
 
     net::ip::udp::socket sock(ctx, net::ip::udp::v4());
     sock.bind(net::ip::udp::endpoint(net::ip::udp::v4(), 0));
-    auto client = std::make_shared<stun::client>(ctx, sock);
+    auto client =
+        std::make_shared<stun::client<net::ip::udp::socket>>(ctx, sock);
 
     auto recv_coro = [&]() -> inline_task<void> {
         char buf[2048];

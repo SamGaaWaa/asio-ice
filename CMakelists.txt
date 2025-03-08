@@ -48,7 +48,6 @@ file(GLOB ICE_SRC_FILES
     src/stun.cpp
     src/base64.cpp
     src/udp_proxy.cpp
-    src/stun_client.cpp
     src/address.cpp
     src/candidate.cpp
     src/hash.cpp
