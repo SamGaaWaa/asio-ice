@@ -1,7 +1,7 @@
 #pragma once
 
 #include "config.hpp"
-#include "inline_task.hpp"
+#include "task.hpp"
 #include "packet.hpp"
 #include "shared_promise_v2.hpp"
 
@@ -81,7 +81,7 @@ struct udp_proxy : std::enable_shared_from_this<udp_proxy> {
     }
 
   private:
-    ice::inline_task<void> read_loop(std::shared_ptr<udp_proxy> self);
+    ice::task<void> read_loop(std::shared_ptr<udp_proxy> self);
 
     struct peer_hasher_t {
         std::size_t

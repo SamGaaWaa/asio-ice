@@ -18,7 +18,7 @@ using namespace asio2exec;
 
 void mdns_query_test() {
     mdns::net::io_context ctx;
-    asio2exec::scheduler_t sched{ ctx };
+    asio2exec::scheduler sched{ ctx };
 
     mdns::server server{ ctx };
     auto f = server.queryA("pion-test.local") |
@@ -32,7 +32,7 @@ void mdns_query_test() {
 
 void mdns_publish_test() {
     mdns::net::io_context ctx;
-    asio2exec::scheduler_t sched{ ctx };
+    asio2exec::scheduler sched{ ctx };
     mdns::net::steady_timer timer(ctx);
 
     timer.expires_after(std::chrono::seconds(30));

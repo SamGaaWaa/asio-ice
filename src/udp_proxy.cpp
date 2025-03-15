@@ -59,7 +59,7 @@ void udp_proxy::start() {
         return;
     _started = true;
     ice::utils::scope_guard on_error([this]() noexcept { _started = false; });
-    asio2exec::scheduler_t sched(_ctx);
+    asio2exec::scheduler sched(_ctx);
     stdexec::start_detached(stdexec::starts_on(
         sched, exec::when_any(read_loop(shared_from_this()),
                               _stop_signal.get_future() |
@@ -74,7 +74,7 @@ void udp_proxy::stop() noexcept {
     _stop_signal.set_stopped();
 }
 
-ice::inline_task<void> udp_proxy::read_loop(std::shared_ptr<udp_proxy> self) {
+ice::task<void> udp_proxy::read_loop(std::shared_ptr<udp_proxy> self) {
     utils::scope_guard on_stopped([this]() noexcept {
         _sock.close();
         while (!_connections.empty()) {

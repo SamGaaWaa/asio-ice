@@ -722,7 +722,7 @@ namespace binary {
         struct read_operation {
             template<class T>
             static void unpack(const void* buf, T& x)noexcept {
-                std::terminate();
+                std::abort();
             }
         };
 
@@ -949,7 +949,7 @@ namespace binary {
         struct write_operation {
             template<class T>
             static void pack(void* buf, const T& x)noexcept {
-                std::terminate();
+                std::abort();
             }
         };
 

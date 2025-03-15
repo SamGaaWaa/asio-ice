@@ -1,23 +1,8 @@
+#include "asio2exec.hpp"
 #include "scope_guard.hpp"
 #include "stop_when.hpp"
-
-#if ASIOICE_USE_BOOST > 0
-#define ASIO_TO_EXEC_USE_BOOST
-#include <boost/asio/as_tuple.hpp>
-#include <boost/asio/buffer.hpp>
-#include <boost/asio/steady_timer.hpp>
-#include <boost/asio/write.hpp>
-#else
-#include <asio/as_tuple.hpp>
-#include <asio/buffer.hpp>
-#include <asio/steady_timer.hpp>
-#include <asio/write.hpp>
-#endif
-
-#include "asio2exec.hpp"
-#include <exec/when_any.hpp>
-
 #include <cassert>
+#include <exec/when_any.hpp>
 #include <iostream>
 #include <stdexcept>
 
@@ -59,6 +44,23 @@ bool client<NextLayer>::dispatch(
                   << ":\n"
                   << msg->to_string() << "\n";
     }
+    on_exit.dismiss();
+    return this->dispatch(ep, std::move(msg));
+}
+
+template <is_datagram_layer NextLayer>
+bool client<NextLayer>::dispatch(
+    const typename client<NextLayer>::endpoint_type &ep,
+    std::unique_ptr<stun::message> msg) {
+    ICE_IN_DEBUG {
+        if (!msg || !msg->is_response()) {
+            std::cerr << "Incoming STUN message\n";
+            throw std::runtime_error("Invalid STUN message");
+        }
+    }
+    utils::scope_guard on_exit([this, &msg]() noexcept {
+        this->message_pool().push_back(std::move(msg));
+    });
     auto it = _transactions.find(msg->transaction_id);
     if (it == _transactions.end()) {
         ICE_IN_DEBUG { std::cout << "Unknown transaction id\n"; }
@@ -73,7 +75,7 @@ bool client<NextLayer>::dispatch(
 }
 
 template <is_datagram_layer NextLayer>
-inline_task<void>
+ice::task<void>
 client<NextLayer>::transaction::retry(std::chrono::milliseconds timeout,
                                       std::size_t max_retries,
                                       std::shared_ptr<transaction> self) {
@@ -115,7 +117,7 @@ client<NextLayer>::transaction::retry(std::chrono::milliseconds timeout,
 template <is_datagram_layer NextLayer>
 void client<NextLayer>::transaction::run(std::chrono::milliseconds timeout,
                                          std::size_t max_retries) {
-    asio2exec::scheduler_t sched{_client->context()};
+    asio2exec::scheduler sched{_client->context()};
     stdexec::start_detached(stdexec::starts_on(
         sched, stdexec::when_all(
                    retry(timeout, max_retries, this->shared_from_this()),
@@ -123,12 +125,11 @@ void client<NextLayer>::transaction::run(std::chrono::milliseconds timeout,
 }
 
 template <is_datagram_layer NextLayer>
-inline_task<std::tuple<std::unique_ptr<stun::message>,
-                       typename client<NextLayer>::endpoint_type>>
+ice::task<std::tuple<std::unique_ptr<stun::message>,
+                     typename client<NextLayer>::endpoint_type>>
 client<NextLayer>::request(const typename client<NextLayer>::endpoint_type &ep,
                            const stun::message &msg, auto timeout,
-                           std::size_t retries,
-                           std::shared_ptr<client<NextLayer>> self) {
+                           std::size_t retries) {
     assert(this->_running);
     auto state = this->_transactions.lower_bound(msg.transaction_id);
     if (state != this->_transactions.end() &&
@@ -170,9 +171,8 @@ bool client<NextLayer>::dispatch(std::unique_ptr<stun::message> resp) noexcept {
 }
 
 template <is_stream_layer NextLayer>
-inline_task<std::unique_ptr<stun::message>>
-client<NextLayer>::request(const stun::message &msg, auto timeout,
-                           std::shared_ptr<client<NextLayer>> self) {
+ice::task<std::unique_ptr<stun::message>>
+client<NextLayer>::request(const stun::message &msg, auto timeout) {
     auto it = this->_transactions.lower_bound(msg.transaction_id);
     if (it != this->_transactions.end() &&
         it->transaction_id == msg.transaction_id) {

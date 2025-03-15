@@ -1,5 +1,5 @@
 #include "config.hpp"
-#include "inline_task.hpp"
+#include "task.hpp"
 #include "scope_guard.hpp"
 #include "udp_connection.hpp"
 
@@ -43,7 +43,7 @@ using namespace asio2exec;
 
 void udp_connection_test() {
     net::io_context ctx;
-    asio2exec::scheduler_t sched{ctx};
+    asio2exec::scheduler sched{ctx};
 
     net::ip::udp::endpoint local_ep(net::ip::address::from_string("127.0.0.1"),
                                     8013),
@@ -64,7 +64,7 @@ void udp_connection_test() {
     sender1.connect(local_ep);
     sender2.connect(local_ep);
 
-    // using coro_task = ice::inline_task<void>;
+    // using coro_task = ice::task<void>;
     using coro_task =
         exec::__task::basic_task<void, exec::__task::__raw_task_context<void>>;
     // using coro_task = exec::task<void>;

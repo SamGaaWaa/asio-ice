@@ -1,26 +1,34 @@
 #pragma once
 
-#include "async_queue.hpp"
 #include "config.hpp"
-#include "inline_task.hpp"
 #include "shared_promise_v2.hpp"
 #include "stun.hpp"
+#include "task.hpp"
 
 #include <boost/circular_buffer.hpp>
 #include <boost/container/small_vector.hpp>
 #include <boost/intrusive/set.hpp>
 
 #if ASIOICE_USE_BOOST > 0
+#define ASIO_TO_EXEC_USE_BOOST 1
+#include <boost/asio/as_tuple.hpp>
+#include <boost/asio/buffer.hpp>
 #include <boost/asio/io_context.hpp>
 #include <boost/asio/ip/tcp.hpp>
 #include <boost/asio/ip/udp.hpp>
+#include <boost/asio/steady_timer.hpp>
+#include <boost/asio/write.hpp>
 namespace ice {
 namespace net = boost::asio;
 }
 #else
+#include <asio/as_tuple.hpp>
+#include <asio/buffer.hpp>
 #include <asio/io_context.hpp>
 #include <asio/ip/tcp.hpp>
 #include <asio/ip/udp.hpp>
+#include <asio/steady_timer.hpp>
+#include <asio/write.hpp>
 namespace ice {
 namespace net = asio;
 }
@@ -29,7 +37,6 @@ namespace net = asio;
 #include "exec/task.hpp"
 
 #include <chrono>
-#include <map>
 #include <memory>
 
 namespace ice::stun {
@@ -98,10 +105,11 @@ class client<NextLayer>
         : client_base<NextLayer>(ctx, sock) {}
 
     bool dispatch(const endpoint_type &ep, const void *data, std::size_t size);
+    bool dispatch(const endpoint_type &ep, std::unique_ptr<stun::message> msg);
 
-    inline_task<std::tuple<std::unique_ptr<stun::message>, endpoint_type>>
+    ice::task<std::tuple<std::unique_ptr<stun::message>, endpoint_type>>
     request(const endpoint_type &ep, const stun::message &msg, auto timeout,
-            std::size_t retries, std::shared_ptr<client<NextLayer>> self = {});
+            std::size_t retries);
 
   private:
     struct transaction
@@ -140,9 +148,9 @@ class client<NextLayer>
         endpoint_type response_from{};
 
       private:
-        inline_task<void> retry(std::chrono::milliseconds timeout,
-                                std::size_t max_retries,
-                                std::shared_ptr<transaction> self);
+        ice::task<void> retry(std::chrono::milliseconds timeout,
+                              std::size_t max_retries,
+                              std::shared_ptr<transaction> self);
 
         boost::container::small_vector<std::byte, 576> _buf;
         std::shared_ptr<client<next_layer_type>> _client;
@@ -170,9 +178,8 @@ class client<NextLayer>
 
     bool dispatch(std::unique_ptr<stun::message> resp) noexcept;
 
-    inline_task<std::unique_ptr<stun::message>>
-    request(const stun::message &msg, auto timeout,
-            std::shared_ptr<client<NextLayer>> self = {});
+    ice::task<std::unique_ptr<stun::message>> request(const stun::message &msg,
+                                                      auto timeout);
 
   private:
     struct transaction

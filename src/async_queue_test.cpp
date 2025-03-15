@@ -1,6 +1,6 @@
 #include "async_queue.hpp"
 #include "config.hpp"
-#include "inline_task.hpp"
+#include "task.hpp"
 
 #if ASIOICE_USE_BOOST > 0
 #define ASIO_TO_EXEC_USE_BOOST 1
@@ -79,7 +79,7 @@ uint64_t async_queue_test(int times) {
     using namespace ice;
 
     net::io_context ctx;
-    asio2exec::scheduler_t sched{ctx};
+    asio2exec::scheduler sched{ctx};
     async_queue<std::tuple<ice::error_code, int>> q(buffer_max_size);
 
     uint64_t sum = 0;
@@ -116,7 +116,7 @@ uint64_t async_queue_with_circular_buffer_test(int times) {
     using namespace ice;
 
     net::io_context ctx;
-    asio2exec::scheduler_t sched{ctx};
+    asio2exec::scheduler sched{ctx};
     async_queue<std::tuple<ice::error_code, int>,
                 boost::circular_buffer<std::tuple<ice::error_code, int>>>
         q(buffer_max_size);
@@ -155,12 +155,12 @@ uint64_t async_queue_with_inline_task_test(int times) {
     using namespace ice;
 
     net::io_context ctx;
-    asio2exec::scheduler_t sched{ctx};
+    asio2exec::scheduler sched{ctx};
     async_queue<std::tuple<ice::error_code, int>> q(buffer_max_size);
 
     uint64_t sum = 0;
 
-    auto reader = [&]() -> inline_task<void> {
+    auto reader = [&]() -> ice::task<void> {
         while (true) {
             auto ret = co_await q.async_pop();
             if (!ret)
@@ -169,7 +169,7 @@ uint64_t async_queue_with_inline_task_test(int times) {
         }
     };
 
-    auto writer = [&]() -> inline_task<void> {
+    auto writer = [&]() -> ice::task<void> {
         for (int i = 1; i <= times; ++i) {
             while (q.full())
                 co_await stdexec::schedule(sched);

@@ -1,6 +1,6 @@
 #include "config.hpp"
 #include "scope_guard.hpp"
-#include "stun_client.hpp"
+#include "turn_client.hpp"
 
 #if ASIOICE_USE_BOOST > 0
 #define ASIO_TO_EXEC_USE_BOOST
@@ -19,31 +19,28 @@ namespace net = asio;
 
 #include <iostream>
 
-void request_test() {
+void test() {
     using namespace ice;
 
     net::io_context ctx;
 
-    net::ip::udp::resolver resolver(ctx);
-    auto resolve_result = resolver.resolve("14.29.112.241", "20002");
-    if (resolve_result.empty()) {
-        std::cerr << "Resolve error\n";
-        return;
-    }
-    const auto &server_ep = resolve_result->endpoint();
-    std::cout << "STUN server: " << server_ep.address().to_string() << ':'
+    const net::ip::udp::endpoint server_ep(net::ip::make_address("127.0.0.1"),
+                                           13478);
+    std::cout << "TURN server: " << server_ep.address().to_string() << ':'
               << server_ep.port() << '\n';
 
-    net::ip::udp::socket sock(ctx, net::ip::udp::v4());
-    sock.bind(net::ip::udp::endpoint(net::ip::udp::v4(), 0));
-    auto client =
-        std::make_shared<stun::client<net::ip::udp::socket>>(ctx, sock);
-
+    std::shared_ptr<turn::client<net::ip::udp::socket>> client{};
+    {
+        net::ip::udp::socket sock(ctx, net::ip::udp::v4());
+        sock.bind(net::ip::udp::endpoint(net::ip::udp::v4(), 0));
+        client = std::make_shared<turn::client<net::ip::udp::socket>>(
+            ctx, std::move(sock), server_ep);
+    }
     auto recv_coro = [&]() -> ice::task<void> {
         char buf[2048];
         while (true) {
             net::ip::udp::endpoint ep;
-            auto [err, n] = co_await sock.async_receive_from(
+            auto [err, n] = co_await client->socket().async_receive_from(
                 net::buffer(buf, sizeof(buf)), ep, asio2exec::use_sender);
             if (err) {
                 std::cerr << "Receive error: " << err.message() << '\n';
@@ -51,7 +48,16 @@ void request_test() {
             }
             std::cout << "Received " << n << " bytes from "
                       << ep.address().to_string() << ':' << ep.port() << '\n';
-            if (!client->dispatch(ep, buf, n)) {
+            auto msg = std::make_unique<stun::message>();
+            if (!msg->parse(buf, n) || !msg->is_response())
+                continue;
+            if (ep != server_ep) {
+                std::cerr << "Unexpected response from "
+                          << ep.address().to_string() << ':' << ep.port()
+                          << '\n';
+                continue;
+            }
+            if (!client->dispatch(std::move(msg))) {
                 std::cerr << "Dispatch error\n";
                 co_return;
             }
@@ -65,15 +71,12 @@ void request_test() {
         req.cls = stun::class_t::STUN_CLASS_REQUEST;
         req.use_fingerprint(true);
         req.fill_random_transaction_id();
-        auto [resp, from] = co_await client->request(
-            server_ep, req, std::chrono::seconds(10), 3);
+        auto resp = co_await client->request(req, std::chrono::seconds(10), 3);
         if (!resp) {
             std::cerr << "Request error\n";
             co_return;
         }
-        std::cout << "Received response from " << from.address() << ':'
-                  << from.port() << '\n';
-        std::cout << resp->to_string() << '\n';
+        std::cout << "Resp:\n" << resp->to_string() << '\n';
     };
 
     asio2exec::scheduler sched{ctx};
@@ -85,4 +88,4 @@ void request_test() {
     ctx.run();
 }
 
-int main(int argc, char *argv[]) { request_test(); }
+int main(int argc, char *argv[]) { test(); }

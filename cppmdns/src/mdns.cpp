@@ -234,7 +234,7 @@ private:
 };
 
 void query::start() {
-    auto sched = asio2exec::scheduler_t{ _server_impl->ctx };
+    auto sched = asio2exec::scheduler{ _server_impl->ctx };
     stdexec::start_detached(stdexec::starts_on(sched, stdexec::when_all(
         query_loop(shared_from_this()),
         _cancel.get_future() | stdexec::continues_on(sched)
@@ -328,7 +328,7 @@ service_t::service_t(dns::record_t record, std::shared_ptr<server::impl_t> serve
 {}
 
 void service_t::start() {
-    auto sched = asio2exec::scheduler_t{ _server_impl->ctx };
+    auto sched = asio2exec::scheduler{ _server_impl->ctx };
     stdexec::start_detached(stdexec::starts_on(sched, time_out_control(shared_from_this())));
 }
 
@@ -360,7 +360,7 @@ server::impl_t::queryAddr(std::string name, bool is_v4, std::shared_ptr<server::
     if (_stopped) {
         co_return std::unexpected(std::make_error_code(std::errc::operation_canceled));
     }
-    co_await stdexec::schedule(asio2exec::scheduler_t{ ctx });
+    co_await stdexec::schedule(asio2exec::scheduler{ ctx });
     if(name.empty())
         co_return std::unexpected(std::make_error_code(std::errc::invalid_argument));
     if (!name.ends_with(".local")) {
@@ -431,7 +431,7 @@ server::impl_t::publishAddr(std::string name, std::string ip, int seconds, std::
     if (_stopped) {
         co_return std::make_error_code(std::errc::operation_canceled);
     }
-    co_await stdexec::schedule(asio2exec::scheduler_t{ ctx });
+    co_await stdexec::schedule(asio2exec::scheduler{ ctx });
 
     dns::record_t record{
         .name = std::move(name),
@@ -476,7 +476,7 @@ server::impl_t::remove(std::string name, std::shared_ptr<server::impl_t> self)
     if (_stopped) {
         co_return;
     }
-    co_await stdexec::schedule(asio2exec::scheduler_t{ ctx });
+    co_await stdexec::schedule(asio2exec::scheduler{ ctx });
     for (auto& s : services) {
         if(s.record.name == name)
             s.stop();
@@ -484,7 +484,7 @@ server::impl_t::remove(std::string name, std::shared_ptr<server::impl_t> self)
 }
 
 void server::impl_t::start() {
-    auto sched = asio2exec::scheduler_t{ ctx };
+    auto sched = asio2exec::scheduler{ ctx };
     stdexec::start_detached(stdexec::starts_on(sched, stdexec::when_all(
         server_loop(shared_from_this()),
         receive_loop(shared_from_this()),

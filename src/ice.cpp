@@ -2,7 +2,7 @@
 #include "address.hpp"
 #include "candidate.hpp"
 #include "config.hpp"
-#include "inline_task.hpp"
+#include "task.hpp"
 #include "scope_guard.hpp"
 #include "stun.hpp"
 #include "stun_client.hpp"
@@ -36,7 +36,7 @@ namespace ice {
 const char *version() { return "0.1.0"; }
 
 template <class Endpoint, class Duration = std::chrono::milliseconds>
-static inline_task<std::optional<endpoint>>
+static ice::task<std::optional<endpoint>>
 server_reflexive_endpoint(auto &client, Endpoint stun_server,
                           Duration timeout) noexcept try {
     stun::message req;
@@ -110,7 +110,7 @@ static void server_reflexive_endpoint_test(uint64_t n) try {
     auto client =
         std::make_shared<stun::client<net::ip::udp::socket>>(ctx, sock);
 
-    auto recv_coro = [&]() -> inline_task<void> {
+    auto recv_coro = [&]() -> ice::task<void> {
         char buf[2048];
         while (true) {
             net::ip::udp::endpoint ep;
@@ -129,7 +129,7 @@ static void server_reflexive_endpoint_test(uint64_t n) try {
         }
     };
 
-    asio2exec::scheduler_t sched{ctx};
+    asio2exec::scheduler sched{ctx};
     auto work = stdexec::when_all(
         recv_coro(), server_reflexive_endpoint(*client, server_ep,
                                                std::chrono::seconds(10)) |
