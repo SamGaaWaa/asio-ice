@@ -75,10 +75,9 @@ bool client<NextLayer>::dispatch(
 }
 
 template <is_datagram_layer NextLayer>
-ice::task<void>
-client<NextLayer>::transaction::retry(std::chrono::milliseconds timeout,
-                                      std::size_t max_retries,
-                                      std::shared_ptr<transaction> self) {
+ice::task<void> client<NextLayer>::transaction::retry(
+    std::chrono::milliseconds timeout, std::size_t max_retries,
+    std::shared_ptr<client<NextLayer>::transaction> self) {
     utils::scope_guard on_exit(
         [this]() noexcept { _done_promise.set_value(); });
     net::steady_timer timer{_client->context()};

@@ -36,26 +36,23 @@ namespace net = asio;
 
 #include "exec/task.hpp"
 
+#include <array>
 #include <chrono>
 #include <memory>
 
 namespace ice::stun {
 
 template <class Layer>
-concept is_stream_layer = requires(Layer l, net::const_buffer buf) {
-    l.async_write_some(buf, [](std::error_code, std::size_t) {});
-};
-
-static_assert(is_stream_layer<net::ip::tcp::socket>);
+concept is_stream_layer =
+    std::is_same_v<std::remove_reference_t<Layer>, net::ip::tcp::socket>;
 
 template <class Layer>
 concept is_datagram_layer =
-    !is_stream_layer<Layer> &&
-    requires(Layer l, typename Layer::endpoint_type ep, net::const_buffer buf) {
-        l.async_send_to(buf, ep, [](std::error_code, std::size_t) {});
-    };
+    std::is_same_v<std::remove_reference_t<Layer>, net::ip::udp::socket>;
 
-static_assert(is_datagram_layer<net::ip::udp::socket>);
+static_assert(is_stream_layer<net::ip::tcp::socket>);
+static_assert(is_datagram_layer<net::ip::udp::socket> &&
+              !is_datagram_layer<net::ip::tcp::socket>);
 
 template <class NextLayer = net::ip::udp::socket> class client_base {
   public:
