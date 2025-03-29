@@ -1,5 +1,6 @@
 #pragma once
 
+#include <atomic>
 #include <mutex>
 #include <openssl/async.h>
 #include <utility>
@@ -16,15 +17,10 @@ struct condition_variable {
 
     template <class Lock, class Pred> void wait(Lock &lock, Pred pred) {
         while (!pred()) {
-            {
-                auto wait_ctx = ::ASYNC_get_wait_ctx(::ASYNC_get_current_job());
-                int (*resume)(void *) = nullptr;
-                void *args = nullptr;
-                ::ASYNC_WAIT_CTX_get_callback(wait_ctx, &resume, &args);
-                std::lock_guard lk(_mtx);
-                _resume = resume;
-                _args = args;
-            }
+            auto wait_ctx = ::ASYNC_get_wait_ctx(::ASYNC_get_current_job());
+            callback_ctx ctx;
+            ::ASYNC_WAIT_CTX_get_callback(wait_ctx, &ctx.resume, &ctx.args);
+            _ctx.exchange(&ctx);
             lock.unlock();
             ::ASYNC_pause_job();
             lock.lock();
@@ -32,21 +28,18 @@ struct condition_variable {
     }
 
     void notify() {
-        int (*resume)(void *) = nullptr;
-        void *args = nullptr;
-        {
-            std::lock_guard lk(_mtx);
-            std::swap(resume, _resume);
-            std::swap(args, _args);
-        }
-        if (resume)
-            resume(args);
+        auto ctx = _ctx.exchange(nullptr);
+        if (ctx)
+            ctx->resume(ctx->args);
     }
 
   private:
-    int (*_resume)(void *) = nullptr;
-    void *_args = nullptr;
-    mutable std::mutex _mtx;
+    struct callback_ctx {
+        int (*resume)(void *) = nullptr;
+        void *args = nullptr;
+    };
+
+    std::atomic<callback_ctx *> _ctx{nullptr};
 };
 
 } // namespace ice::fiber
