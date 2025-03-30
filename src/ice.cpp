@@ -2,10 +2,10 @@
 #include "address.hpp"
 #include "candidate.hpp"
 #include "config.hpp"
-#include "task.hpp"
 #include "scope_guard.hpp"
 #include "stun.hpp"
 #include "stun_client.hpp"
+#include "task.hpp"
 
 #if ASIOICE_USE_BOOST > 0
 #define ASIO_TO_EXEC_USE_BOOST 1
@@ -43,18 +43,14 @@ server_reflexive_endpoint(auto &client, Endpoint stun_server,
     req.cls = stun::class_t::STUN_CLASS_REQUEST;
     req.method = stun::method_t::STUN_METHOD_BINDING;
     req.fill_random_transaction_id();
-    auto result = co_await (
-        client.request(
-            stun_server, req,
-            std::chrono::duration_cast<std::chrono::milliseconds>(timeout), 7) |
-        stdexec::stopped_as_optional());
+
+    stun::message resp;
+    Endpoint from;
+    auto result =
+        co_await (client.request(stun_server, req, from, resp, timeout, 7) |
+                  stdexec::stopped_as_optional());
     if (!result)
         co_return std::nullopt;
-    auto &[resp, from] = *result;
-    if (!resp)
-        co_return std::nullopt;
-    utils::scope_guard on_exit(
-        [&]() noexcept { client.message_pool().push_back(std::move(resp)); });
     if (from != stun_server) {
         ICE_IN_DEBUG {
             std::cerr << "server_reflexive_candidate: from != stun_server\n";
@@ -62,10 +58,10 @@ server_reflexive_endpoint(auto &client, Endpoint stun_server,
         co_return std::nullopt;
     }
     ice::endpoint ep;
-    if (resp->xor_mapped_address)
-        ep = *resp->xor_mapped_address;
-    else if (resp->mapped_address)
-        ep = *resp->mapped_address;
+    if (resp.xor_mapped_address)
+        ep = *resp.xor_mapped_address;
+    else if (resp.mapped_address)
+        ep = *resp.mapped_address;
     else
         co_return std::nullopt;
     co_return ep;
@@ -107,8 +103,7 @@ static void server_reflexive_endpoint_test(uint64_t n) try {
 
     net::ip::udp::socket sock(ctx, net::ip::udp::v4());
     sock.bind(net::ip::udp::endpoint(net::ip::udp::v4(), 0));
-    auto client =
-        std::make_shared<stun::client<net::ip::udp::socket>>(ctx, sock);
+    stun::client<net::ip::udp::socket> client(ctx, sock);
 
     auto recv_coro = [&]() -> ice::task<void> {
         char buf[2048];
@@ -122,7 +117,7 @@ static void server_reflexive_endpoint_test(uint64_t n) try {
             }
             std::cout << "Received " << n << " bytes from "
                       << ep.address().to_string() << ':' << ep.port() << '\n';
-            if (!client->dispatch(ep, buf, n)) {
+            if (!client.dispatch(ep, buf, n)) {
                 std::cerr << "Dispatch error\n";
                 co_return;
             }
@@ -131,19 +126,18 @@ static void server_reflexive_endpoint_test(uint64_t n) try {
 
     asio2exec::scheduler sched{ctx};
     auto work = stdexec::when_all(
-        recv_coro(), server_reflexive_endpoint(*client, server_ep,
-                                               std::chrono::seconds(10)) |
-                         stdexec::let_value([](std::optional<endpoint> &res) {
-                             if (!res) {
-                                 std::cerr
-                                     << "Server reflexive endpoint not found\n";
-                             } else {
-                                 std::cout << "Server reflexive endpoint: "
-                                           << res->address.to_string() << ':'
-                                           << res->port << '\n';
-                             }
-                             return stdexec::just_stopped();
-                         }));
+        recv_coro(),
+        server_reflexive_endpoint(client, server_ep, std::chrono::seconds(10)) |
+            stdexec::let_value([](std::optional<endpoint> &res) {
+                if (!res) {
+                    std::cerr << "Server reflexive endpoint not found\n";
+                } else {
+                    std::cout << "Server reflexive endpoint: "
+                              << res->address.to_string() << ':' << res->port
+                              << '\n';
+                }
+                return stdexec::just_stopped();
+            }));
     stdexec::start_detached(stdexec::starts_on(sched, std::move(work)));
     ctx.run();
 } catch (const std::exception &e) {

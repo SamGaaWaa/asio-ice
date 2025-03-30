@@ -5,11 +5,13 @@
 #if ASIOICE_USE_BOOST > 0
 #define ASIO_TO_EXEC_USE_BOOST
 #include <boost/asio/buffer.hpp>
+#include <boost/asio/steady_timer.hpp>
 namespace ice {
 namespace net = boost::asio;
 }
 #else
 #include <asio/buffer.hpp>
+#include <asio/steady_timer.hpp>
 namespace ice {
 namespace net = asio;
 }
@@ -17,12 +19,18 @@ namespace net = asio;
 
 #include "asio2exec.hpp"
 
-#include <iostream>
+#include <exec/async_scope.hpp>
 
-void request_test() {
+#include <iostream>
+#include <vector>
+
+void udp_request_test() {
     using namespace ice;
 
-    net::io_context ctx;
+    asio2exec::asio_context asio_thread;
+    asio_thread.start();
+
+    auto &ctx = asio_thread.get_executor();
 
     net::ip::udp::resolver resolver(ctx);
     auto resolve_result = resolver.resolve("14.29.112.241", "20002");
@@ -36,10 +44,10 @@ void request_test() {
 
     net::ip::udp::socket sock(ctx, net::ip::udp::v4());
     sock.bind(net::ip::udp::endpoint(net::ip::udp::v4(), 0));
-    auto client =
-        std::make_shared<stun::client<net::ip::udp::socket>>(ctx, sock);
+    stun::client<net::ip::udp::socket> client(ctx, sock);
 
     auto recv_coro = [&]() -> ice::task<void> {
+        utils::scope_guard on_exit([&]() noexcept { client.stop(); });
         char buf[2048];
         while (true) {
             net::ip::udp::endpoint ep;
@@ -51,7 +59,7 @@ void request_test() {
             }
             std::cout << "Received " << n << " bytes from "
                       << ep.address().to_string() << ':' << ep.port() << '\n';
-            if (!client->dispatch(ep, buf, n)) {
+            if (!client.dispatch(ep, buf, n)) {
                 std::cerr << "Dispatch error\n";
                 co_return;
             }
@@ -59,21 +67,23 @@ void request_test() {
     };
 
     auto request_coro = [&]() -> ice::task<void> {
-        utils::scope_guard on_exit([&]() noexcept { client->stop(); });
         stun::message req;
         req.method = stun::method_t::STUN_METHOD_BINDING;
         req.cls = stun::class_t::STUN_CLASS_REQUEST;
         req.use_fingerprint(true);
         req.fill_random_transaction_id();
-        auto [resp, from] = co_await client->request(
-            server_ep, req, std::chrono::seconds(10), 3);
-        if (!resp) {
+
+        stun::message resp;
+        net::ip::udp::endpoint resp_from;
+        auto success = co_await client.request(server_ep, req, resp_from, resp,
+                                               std::chrono::seconds(10), 3);
+        if (!success) {
             std::cerr << "Request error\n";
             co_return;
         }
-        std::cout << "Received response from " << from.address() << ':'
-                  << from.port() << '\n';
-        std::cout << resp->to_string() << '\n';
+        std::cout << "Received response from " << resp_from.address() << ':'
+                  << resp_from.port() << '\n';
+        std::cout << resp.to_string() << '\n';
     };
 
     asio2exec::scheduler sched{ctx};
@@ -81,8 +91,109 @@ void request_test() {
         stdexec::when_all(recv_coro(), request_coro() | stdexec::let_value([] {
                                            return stdexec::just_stopped();
                                        }));
-    stdexec::start_detached(stdexec::starts_on(sched, std::move(work)));
-    ctx.run();
+    stdexec::sync_wait(
+        stdexec::starts_on(sched, std::move(work) | stdexec::into_variant()));
+
+    std::cout << "Test client.stop()\n";
+    exec::async_scope scope;
+    net::steady_timer timer{ctx, std::chrono::seconds(10)};
+    scope.spawn(stdexec::starts_on(sched, request_coro()));
+    scope.spawn(stdexec::starts_on(
+        sched, timer.async_wait(asio2exec::use_sender) |
+                   stdexec::then([&](auto) { client.stop(); })));
+    stdexec::sync_wait(scope.on_empty());
+    std::cout << "Finish\n";
 }
 
-int main(int argc, char *argv[]) { request_test(); }
+void tcp_request_test() {
+    using namespace ice;
+
+    asio2exec::asio_context asio_thread;
+    asio_thread.start();
+
+    auto &ctx = asio_thread.get_executor();
+
+    net::ip::tcp::resolver resolver(ctx);
+    auto resolve_result = resolver.resolve("0.0.0.0", "13478");
+    if (resolve_result.empty()) {
+        std::cerr << "Resolve error\n";
+        return;
+    }
+    const auto &server_ep = resolve_result->endpoint();
+    std::cout << "STUN server: " << server_ep.address().to_string() << ':'
+              << server_ep.port() << '\n';
+
+    net::ip::tcp::socket sock(ctx, net::ip::tcp::v4());
+    sock.bind(net::ip::tcp::endpoint(net::ip::tcp::v4(), 0));
+    sock.connect(server_ep);
+    stun::client<net::ip::tcp::socket> client(ctx, sock);
+
+    auto recv_coro = [&]() -> ice::task<void> {
+        char buf[8];
+        std::vector<char> tmp_buf;
+        while (true) {
+            auto [err, n] = co_await sock.async_read_some(
+                net::buffer(buf, sizeof(buf)), asio2exec::use_sender);
+            if (err) {
+                std::cerr << "Receive error: " << err.message() << '\n';
+                co_return;
+            }
+            if (n == 0) {
+                std::cerr << "Disconnected\n";
+                co_return;
+            }
+            std::cout << "Received " << n << " bytes\n";
+
+            tmp_buf.insert(tmp_buf.end(), buf, buf + n);
+            if (!client.dispatch(tmp_buf.data(), tmp_buf.size())) {
+                if (tmp_buf.size() > 16 * 1024) {
+                    std::cerr << "Dispatch error\n";
+                    co_return;
+                }
+                continue;
+            }
+            tmp_buf.clear();
+        }
+    };
+
+    auto request_coro = [&]() -> ice::task<void> {
+        stun::message req;
+        req.method = stun::method_t::STUN_METHOD_BINDING;
+        req.cls = stun::class_t::STUN_CLASS_REQUEST;
+        req.use_fingerprint(true);
+        req.fill_random_transaction_id();
+
+        stun::message resp;
+        auto success =
+            co_await client.request(req, resp, std::chrono::seconds(10));
+        if (!success) {
+            std::cerr << "Request error\n";
+            co_return;
+        }
+        std::cout << "Received response: " << resp.to_string() << '\n';
+    };
+
+    asio2exec::scheduler sched{ctx};
+    auto work =
+        stdexec::when_all(recv_coro(), request_coro() | stdexec::let_value([] {
+                                           return stdexec::just_stopped();
+                                       }));
+    stdexec::sync_wait(
+        stdexec::starts_on(sched, std::move(work) | stdexec::into_variant()));
+
+    std::cout << "Test client.stop()\n";
+    exec::async_scope scope;
+    net::steady_timer timer{ctx, std::chrono::seconds(10)};
+    scope.spawn(stdexec::starts_on(sched, request_coro()));
+    scope.spawn(stdexec::starts_on(
+        sched, timer.async_wait(asio2exec::use_sender) |
+                   stdexec::then([&](auto) { client.stop(); })));
+    stdexec::sync_wait(scope.on_empty());
+
+    std::cout << "Finished\n";
+}
+
+int main(int argc, char *argv[]) {
+    // udp_request_test();
+    tcp_request_test();
+}

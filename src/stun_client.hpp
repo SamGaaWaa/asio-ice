@@ -1,44 +1,7 @@
 #pragma once
 
-#include "config.hpp"
-#include "shared_promise_v2.hpp"
-#include "stun.hpp"
-#include "task.hpp"
-
-#include <boost/circular_buffer.hpp>
-#include <boost/container/small_vector.hpp>
-#include <boost/intrusive/set.hpp>
-
-#if ASIOICE_USE_BOOST > 0
-#define ASIO_TO_EXEC_USE_BOOST 1
-#include <boost/asio/as_tuple.hpp>
-#include <boost/asio/buffer.hpp>
-#include <boost/asio/io_context.hpp>
-#include <boost/asio/ip/tcp.hpp>
-#include <boost/asio/ip/udp.hpp>
-#include <boost/asio/steady_timer.hpp>
-#include <boost/asio/write.hpp>
-namespace ice {
-namespace net = boost::asio;
-}
-#else
-#include <asio/as_tuple.hpp>
-#include <asio/buffer.hpp>
-#include <asio/io_context.hpp>
-#include <asio/ip/tcp.hpp>
-#include <asio/ip/udp.hpp>
-#include <asio/steady_timer.hpp>
-#include <asio/write.hpp>
-namespace ice {
-namespace net = asio;
-}
-#endif
-
-#include "exec/task.hpp"
-
-#include <array>
-#include <chrono>
-#include <memory>
+#include "impl/datagram_stun_client.hpp"
+#include "impl/stream_stun_client.hpp"
 
 namespace ice::stun {
 
@@ -54,153 +17,77 @@ static_assert(is_stream_layer<net::ip::tcp::socket>);
 static_assert(is_datagram_layer<net::ip::udp::socket> &&
               !is_datagram_layer<net::ip::tcp::socket>);
 
-template <class NextLayer = net::ip::udp::socket> class client_base {
-  public:
-    using next_layer_type = std::decay_t<NextLayer>;
-    using endpoint_type = typename next_layer_type::endpoint_type;
-
-    client_base(net::io_context &ctx, next_layer_type &sock) noexcept
-        : _ctx(ctx), _sock(sock), _msg_pool(16), _local(sock.local_endpoint()) {
-    }
-
-    client_base(const client_base &) = delete;
-    client_base &operator=(const client_base &) = delete;
-    client_base(client_base &&) = delete;
-    client_base &operator=(client_base &&) = delete;
-
-    void stop() noexcept;
-    bool is_running() const noexcept { return _running; }
-
-    const auto &context() const noexcept { return _ctx; }
-    auto &context() noexcept { return _ctx; }
-    const auto &socket() const noexcept { return _sock; }
-    auto &socket() noexcept { return _sock; }
-    const auto &local_endpoint() const noexcept { return _local; }
-    auto &message_pool() noexcept { return _msg_pool; }
-    const auto &message_pool() const noexcept { return _msg_pool; }
-
-  protected:
-    net::io_context &_ctx;
-    next_layer_type &_sock;
-    endpoint_type _local;
-    boost::circular_buffer<std::unique_ptr<stun::message>> _msg_pool;
-    bool _running = true;
-    shared_promise<void> _stop_promise{};
-};
-
 template <class NextLayer> class client {};
 
-template <is_datagram_layer NextLayer>
-class client<NextLayer>
-    : public ice::stun::client_base<NextLayer>,
-      public std::enable_shared_from_this<client<NextLayer>> {
+template <is_datagram_layer NextLayer> class client<NextLayer> {
+    using impl_type = impl::datagram_client<NextLayer>;
+
   public:
-    using next_layer_type = typename client_base<NextLayer>::next_layer_type;
-    using endpoint_type = typename client_base<NextLayer>::endpoint_type;
+    using next_layer_type = typename impl_type::next_layer_type;
+    using endpoint_type = typename impl_type::endpoint_type;
 
-    client(net::io_context &ctx, next_layer_type &sock) noexcept
-        : client_base<NextLayer>(ctx, sock) {}
+    client(net::io_context &ctx, next_layer_type &sock) : _impl(ctx, sock) {}
 
-    bool dispatch(const endpoint_type &ep, const void *data, std::size_t size);
-    bool dispatch(const endpoint_type &ep, std::unique_ptr<stun::message> msg);
+    void stop() noexcept { _impl.stop(); }
+    bool is_running() const noexcept { return _impl.is_running(); }
 
-    ice::task<std::tuple<std::unique_ptr<stun::message>, endpoint_type>>
-    request(const endpoint_type &ep, const stun::message &msg, auto timeout,
-            std::size_t retries);
+    const auto &context() const noexcept { return _impl.context(); }
+    auto &context() noexcept { return _impl.context(); }
+    const auto &next_layer() const noexcept { return _impl.next_layer(); }
+    auto &next_layer() noexcept { return _impl.next_layer(); }
+    const auto &local_endpoint() const noexcept {
+        return _impl.local_endpoint();
+    }
+
+    bool dispatch(const endpoint_type &ep, const void *data,
+                  std::size_t size) noexcept {
+        return _impl.dispatch(ep, data, size);
+    }
+
+    ice::task<bool> request(const endpoint_type &ep, const stun::message &msg,
+                            endpoint_type &from, stun::message &resp,
+                            auto timeout, std::size_t retries) {
+        return _impl.request(ep, msg, from, resp, timeout, retries);
+    }
 
   private:
-    struct transaction
-        : std::enable_shared_from_this<transaction>,
-          boost::intrusive::set_base_hook<
-              boost::intrusive::link_mode<boost::intrusive::safe_link>> {
-        transaction(const stun::message &msg, const endpoint_type &ep,
-                    std::shared_ptr<client<next_layer_type>> c)
-            : transaction_id(msg.transaction_id), endpoint(ep),
-              _client(std::move(c)) {
-            _buf.resize(msg.serialized_size());
-            int ret = msg.write_to(_buf.data(), _buf.size());
-            if (ret < 0 || ret != _buf.size()) {
-                throw std::runtime_error("stun::message::write_to() failed");
-            }
-        }
-
-        void run(std::chrono::milliseconds timeout, std::size_t max_retries);
-
-        void stop() noexcept { _stop_promise.set_stopped(); }
-
-        void set_done() noexcept { _done_promise.set_value(); }
-
-        auto done() noexcept { return _done_promise.get_future(); }
-
-        struct comparer {
-            using type = std::array<uint8_t, 12>;
-            const type &operator()(const transaction &t) const noexcept {
-                return t.transaction_id;
-            }
-        };
-
-        std::array<uint8_t, 12> transaction_id;
-        endpoint_type endpoint;
-        std::unique_ptr<stun::message> response{};
-        endpoint_type response_from{};
-
-      private:
-        ice::task<void> retry(std::chrono::milliseconds timeout,
-                              std::size_t max_retries,
-                              std::shared_ptr<transaction> self);
-
-        boost::container::small_vector<std::byte, 576> _buf;
-        std::shared_ptr<client<next_layer_type>> _client;
-        shared_promise<void> _done_promise{};
-        shared_promise<void> _stop_promise{};
-    }; // transaction
-
-    using transaction_set = boost::intrusive::set<
-        transaction,
-        boost::intrusive::key_of_value<typename transaction::comparer>>;
-
-    transaction_set _transactions{};
+    impl_type _impl;
 }; // client
 
-template <is_stream_layer NextLayer>
-class client<NextLayer>
-    : public ice::stun::client_base<NextLayer>,
-      public std::enable_shared_from_this<client<NextLayer>> {
+template <is_stream_layer NextLayer> class client<NextLayer> {
+    using impl_type = impl::stream_client<NextLayer>;
+
   public:
-    using next_layer_type = typename client_base<NextLayer>::next_layer_type;
-    using endpoint_type = typename client_base<NextLayer>::endpoint_type;
+    using next_layer_type = typename impl_type::next_layer_type;
+    using endpoint_type = typename impl_type::endpoint_type;
 
-    client(net::io_context &ctx, next_layer_type &sock) noexcept
-        : client_base<NextLayer>(ctx, sock) {}
+    client(net::io_context &ctx, next_layer_type &sock) : _impl(ctx, sock) {}
 
-    bool dispatch(std::unique_ptr<stun::message> resp) noexcept;
+    void stop() noexcept { _impl.stop(); }
+    bool is_running() const noexcept { return _impl.is_running(); }
 
-    ice::task<std::unique_ptr<stun::message>> request(const stun::message &msg,
-                                                      auto timeout);
+    const auto &context() const noexcept { return _impl.context(); }
+    auto &context() noexcept { return _impl.context(); }
+    const auto &next_layer() const noexcept { return _impl.next_layer(); }
+    auto &next_layer() noexcept { return _impl.next_layer(); }
+    const auto &local_endpoint() const noexcept {
+        return _impl.local_endpoint();
+    }
+    const auto &remote_endpoint() const noexcept {
+        return _impl.remote_endpoint();
+    }
+
+    bool dispatch(const void *data, std::size_t size) noexcept {
+        return _impl.dispatch(data, size);
+    }
+
+    ice::task<bool> request(const stun::message &msg, stun::message &resp,
+                            auto timeout) {
+        return _impl.request(msg, resp, timeout);
+    }
 
   private:
-    struct transaction
-        : boost::intrusive::set_base_hook<
-              boost::intrusive::link_mode<boost::intrusive::safe_link>> {
-        struct comparer {
-            using type = std::array<uint8_t, 12>;
-            const type &operator()(const transaction &t) const noexcept {
-                return t.transaction_id;
-            }
-        };
-
-        std::array<uint8_t, 12> transaction_id{};
-        std::unique_ptr<stun::message> response{};
-        shared_promise<void> done_promise{};
-    };
-
-    using transaction_set = boost::intrusive::set<
-        transaction,
-        boost::intrusive::key_of_value<typename transaction::comparer>>;
-
-    transaction_set _transactions{};
-};
+    impl_type _impl;
+}; // client
 
 } // namespace ice::stun
-
-#include "stun_client.ipp"

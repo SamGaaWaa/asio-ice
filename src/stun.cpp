@@ -1,4 +1,5 @@
 #include "stun.hpp"
+#include "base64.hpp"
 #include "binary.hpp"
 #include "hash.hpp"
 #include "scope_guard.hpp"
@@ -640,8 +641,7 @@ bool message::parse(const void *data, std::size_t buf_size,
     uint16_t type = binary::ntoh<uint16_t>(header->type);
     this->cls = type & STUN_CLASS_MASK;
     this->method = type & ~STUN_CLASS_MASK;
-    std::copy(header->transaction_id, header->transaction_id + 12,
-              transaction_id.data());
+    std::copy_n(header->transaction_id, 12, transaction_id.data());
 
     const uint8_t *begin = reinterpret_cast<const uint8_t *>(data);
     const_attr_iterator_t iter{begin + 20};
@@ -759,6 +759,27 @@ bool message::parse(const void *data, std::size_t buf_size,
                 return false;
             this->nonce = std::string_view{
                 reinterpret_cast<const char *>(attr.value()), attr_len};
+            if (nonce.length() > STUN_NONCE_COOKIE.length() + 4 &&
+                nonce.starts_with(STUN_NONCE_COOKIE)) {
+                uint8_t bytes[4] = {0};
+                auto [n_out, n_in] = base64::decode(
+                    bytes + 1, nonce.data() + STUN_NONCE_COOKIE.length(), 4);
+                if (n_in != 4 || n_out != 3) {
+                    _security_features = 0;
+                    ICE_IN_DEBUG {
+                        std::cerr << "Nonce has cookie, but the encoded "
+                                     "Security Feature bits field is invalid: "
+                                  << this->nonce << '\n';
+                    }
+                } else {
+                    _security_features = binary::read_big<uint32_t>(bytes);
+                    ICE_IN_DEBUG {
+                        std::cout
+                            << "STUN: Security features: " << _security_features
+                            << '\n';
+                    }
+                }
+            }
             break;
         }
         case attr_type_t::STUN_ATTR_PASSWORD_ALGORITHM: //
@@ -1309,6 +1330,31 @@ bool message::is_not_stun(const void *data, std::size_t length) noexcept {
     return false;
 }
 
+const uint8_t *
+message::get_transaction_id(const void *data,
+                            std::size_t length) noexcept(!ICE_DEBUG) {
+    ICE_IN_DEBUG {
+        if (is_not_stun(data, length))
+            throw std::runtime_error{
+                "get_transaction_id: is not a stun packet"};
+    }
+    (void)length;
+    return static_cast<const header_t *>(data)->transaction_id;
+}
+
+bool message::is_response(const void *data,
+                          std::size_t length) noexcept(!ICE_DEBUG) {
+    ICE_IN_DEBUG {
+        if (is_not_stun(data, length))
+            throw std::runtime_error{"is_response: is not a stun packet"};
+    }
+    (void)length;
+    const auto *header = static_cast<const header_t *>(data);
+    uint16_t type = binary::ntoh<uint16_t>(header->type);
+    uint16_t cls = type & STUN_CLASS_MASK;
+    return (cls & 0x0100) != 0;
+}
+
 void message::reset() noexcept {
     cls = 0;
     method = 0;
@@ -1450,6 +1496,15 @@ std::size_t message::serialized_size() const noexcept {
 void message::fill_random_transaction_id() {
     hash::random_bytes(this->transaction_id.data(),
                        this->transaction_id.size());
+}
+
+void message::prepend_nonce_cookie() {
+    char cookie[STUN_NONCE_COOKIE.length() + 4 + 1] = {0};
+    std::copy_n(STUN_NONCE_COOKIE.begin(), STUN_NONCE_COOKIE.length(), cookie);
+    uint32_t features = binary::hton<uint32_t>(_security_features);
+    base64::encode(cookie + STUN_NONCE_COOKIE.length(),
+                   (uint8_t *)&features + 1, 3);
+    this->nonce.insert(0, cookie);
 }
 
 static nlohmann::json to_json(const endpoint &ep) {

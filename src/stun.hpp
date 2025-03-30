@@ -70,8 +70,7 @@ struct method_t {
 
 // Nonce cookie prefix as specified in
 // https://www.rfc-editor.org/rfc/rfc8489.html#section-9.2
-#define STUN_NONCE_COOKIE "obMatJos2"
-#define STUN_NONCE_COOKIE_LEN 9
+inline constexpr std::string_view STUN_NONCE_COOKIE = "obMatJos2";
 
 // USERHASH is a SHA256 digest
 #define USERHASH_SIZE 32
@@ -150,8 +149,19 @@ struct message {
     int write_to(void *data, std::size_t length) const noexcept;
     bool parse(const void *data, std::size_t length,
                std::size_t *offset = nullptr) noexcept;
-    static bool is_not_stun(const void *data, std::size_t length) noexcept;
     bool is_response() const noexcept { return (cls & 0x0100) != 0; }
+    uint32_t security_features() const noexcept { return _security_features; }
+    void set_security_features(uint32_t features) noexcept {
+        _security_features = features;
+    }
+    void prepend_nonce_cookie();
+
+    static bool is_not_stun(const void *data, std::size_t length) noexcept;
+    static const uint8_t *
+    get_transaction_id(const void *data,
+                       std::size_t length) noexcept(!ICE_DEBUG);
+    static bool is_response(const void *data,
+                            std::size_t length) noexcept(!ICE_DEBUG);
 
     class_t cls{0};
     method_t method{0};
@@ -200,6 +210,7 @@ struct message {
     bool _checked_fingerprint{false};
     std::string _hmac_key;
     bool _use_fingerprint{false};
+    uint32_t _security_features{0};
 };
 
 } // namespace ice::stun
