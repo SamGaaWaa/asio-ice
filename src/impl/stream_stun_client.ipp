@@ -1,8 +1,10 @@
 #include "asio2exec.hpp"
 #include "scope_guard.hpp"
 #include "stop_when.hpp"
+#include <algorithm>
 #include <boost/container/small_vector.hpp>
 #include <cassert>
+#include <ranges>
 
 namespace ice::stun::impl {
 
@@ -40,7 +42,26 @@ bool stream_client<NextLayer>::dispatch(const void *data,
         it->response.reset();
         return false;
     }
-    it->success = true;
+    // Check message integrity
+    if (!std::ranges::equal(it->request.integrities,
+                            it->response.integrities) ||
+        std::any_of(it->response.integrities.begin(),
+                    it->response.integrities.end(), [&](const auto i) {
+                        return !i.verify(it->request.hmac_key(), it->response);
+                    })) {
+        // If the request was sent over a reliable transport, the response MUST
+        // be discarded, and the layer MUST immediately end the transaction and
+        // signal that the integrity protection was violated.
+        ICE_IN_DEBUG { std::cout << "Discard invalid response\n"; }
+        it->success = false;
+    } else if (it->response.cls == stun::class_t::STUN_CLASS_RESP_ERROR &&
+               !it->response.error_code.has_value()) {
+        // If the error response contains unknown comprehension-required
+        // attributes, or if the error response does not contain an ERROR-CODE
+        // attribute, then the transaction is simply considered to have failed.
+        it->success = false;
+    } else
+        it->success = true;
     // TODO: handle message
     it->unlink();
     it->done_promise.set_value();
@@ -55,11 +76,11 @@ ice::task<bool> stream_client<NextLayer>::request(const stun::message &msg,
         co_return false;
     auto it = this->_transactions.lower_bound(msg.transaction_id);
     if (it != this->_transactions.end() &&
-        it->transaction_id == msg.transaction_id) {
+        it->request.transaction_id == msg.transaction_id) {
         ICE_IN_DEBUG { std::cout << "Transaction already in progress\n"; }
         co_return false;
     }
-    transaction trans{.transaction_id{msg.transaction_id}, .response{resp}};
+    transaction trans{.request{msg}, .response{resp}};
     this->_transactions.insert(it, trans);
     utils::scope_guard on_exit([&]() noexcept {
         if (trans.is_linked())

@@ -69,11 +69,11 @@ template <class NextLayer> struct stream_client {
         struct comparer {
             using type = std::array<uint8_t, 12>;
             const type &operator()(const transaction &t) const noexcept {
-                return t.transaction_id;
+                return t.request.transaction_id;
             }
         };
 
-        std::array<uint8_t, 12> transaction_id{};
+        const stun::message &request;
         stun::message &response;
         bool success{false};
         ice::shared_promise<void> done_promise{};

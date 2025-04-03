@@ -170,21 +170,23 @@ struct address_family_t {
  * +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
  */
 struct value_error_code_t {
-#ifdef __ICE_BIG_ENDIAN__
-    uint32_t reserved : 21 {0};
-    uint32_t code_class : 3 {0};
-    uint32_t code_number : 8 {0};
+#ifdef __ICE_LITTLE_ENDIAN__
+    uint16_t reserved{0};
+    uint8_t code_class : 3 {0};
+    uint8_t zero : 5 {0};
+    uint8_t code_number{0};
 #else
-    uint32_t code_number : 8 {0};
-    uint32_t code_class : 3 {0};
-    uint32_t reserved : 21 {0};
+    uint16_t reserved{0};
+    uint8_t zero : 5 {0};
+    uint8_t code_class : 3 {0};
+    uint8_t code_number{0};
 #endif
 
     const char *reason() const noexcept {
-        return reinterpret_cast<const char *>(this + 4);
+        return reinterpret_cast<const char *>(this) + 4;
     }
 
-    char *reason() noexcept { return reinterpret_cast<char *>(this + 4); }
+    char *reason() noexcept { return reinterpret_cast<char *>(this) + 4; }
 
     char operator[](size_t i) const noexcept { return reason()[i]; }
 
@@ -912,8 +914,6 @@ bool message::parse(const void *data, std::size_t buf_size,
                 return false;
             const auto *r =
                 reinterpret_cast<const value_requested_transport_t *>(attr_len);
-            if (r->reserved1 != 0 || r->reserved2 != 0)
-                return false;
             if (r->protocol != 17)
                 return false;
             this->requested_transport = true;
@@ -1548,6 +1548,42 @@ static nlohmann::json to_json(const message::password_algorithm &pa) noexcept {
 
 std::string message::to_string() {
     nlohmann::json obj;
+
+    obj["class"] = [this] {
+        switch (this->cls) {
+        case class_t::STUN_CLASS_REQUEST:
+            return "request";
+        case class_t::STUN_CLASS_INDICATION:
+            return "indication";
+        case class_t::STUN_CLASS_RESP_SUCCESS:
+            return "success_response";
+        case class_t::STUN_CLASS_RESP_ERROR:
+            return "error_response";
+        default:
+            return "unknown";
+        }
+    }();
+
+    obj["method"] = [this] {
+        switch (this->method) {
+        case method_t::STUN_METHOD_BINDING:
+            return "binding";
+        case method_t::STUN_METHOD_ALLOCATE:
+            return "allocate";
+        case method_t::STUN_METHOD_REFRESH:
+            return "refresh";
+        case method_t::STUN_METHOD_SEND:
+            return "send";
+        case method_t::STUN_METHOD_DATA:
+            return "data";
+        case method_t::STUN_METHOD_CREATE_PERMISSION:
+            return "create_permission";
+        case method_t::STUN_METHOD_CHANNEL_BIND:
+            return "channel_bind";
+        default:
+            return "unknown";
+        }
+    }();
 
     obj["transaction_id"] =
         hash::to_hex(transaction_id.data(), transaction_id.size());

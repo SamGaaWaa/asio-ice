@@ -89,7 +89,6 @@ inline constexpr std::string_view STUN_NONCE_COOKIE = "obMatJos2";
 #define STUN_MAX_PASSWORD_ALGORITHMS_VALUE_SIZE 256
 
 struct message {
-
     struct error_code {
         uint16_t code;
         std::string reason;
@@ -193,7 +192,7 @@ struct message {
     //
     std::optional<endpoint> changed_address;
     std::optional<uint16_t> channel_number;
-    std::optional<uint32_t> lifetime;
+    std::optional<uint32_t> lifetime; // seconds
     std::optional<endpoint> xor_peer_address;
     std::optional<endpoint> xor_relayed_address;
     bool requested_transport{false};
