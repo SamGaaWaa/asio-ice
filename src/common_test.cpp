@@ -18,6 +18,7 @@ namespace net = asio;
 }
 #endif
 
+#include <chrono>
 #include <concepts>
 #include <iostream>
 #include <string>
@@ -36,7 +37,21 @@ void ice_test() { ice::debug_test(); }
 
 void candidate_test() { using namespace ice; }
 
-int main() {
-    ice_test();
+void clock_test(std::size_t n) {
+    const auto begin = std::chrono::steady_clock::now();
+    std::size_t total = 0;
+    for (std::size_t i = 0; i < n; ++i) {
+        total += (std::chrono::steady_clock::now() - begin).count();
+    }
+    const auto end = std::chrono::steady_clock::now();
+    const auto dura =
+        std::chrono::duration_cast<std::chrono::nanoseconds>(end - begin);
+    std::cout << "total: " << total << "\n, takes " << dura.count() << "ns"
+              << ", avg: " << (dura.count() / n) << "ns\n";
+}
+
+int main(int argc, char **argv) {
+    // ice_test();
     // candidate_test();
+    clock_test(argc > 1 ? std::atoi(argv[1]) : 1000000);
 }

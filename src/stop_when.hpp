@@ -5,13 +5,15 @@
 
 namespace ice::utils {
 
-constexpr stdexec::sender auto stop_when(stdexec::sender auto &&snd,
-                                         stdexec::sender auto &&trigger) {
-    return exec::when_any(std::move(snd),
-                          std::move(trigger) |
-                              stdexec::let_value([](auto &...) noexcept {
-                                  return stdexec::just_stopped();
-                              })) |
+template <stdexec::sender Sender, stdexec::sender... Trigger>
+constexpr stdexec::sender auto stop_when(Sender &&snd, Trigger &&...trigger) {
+    auto trigger_stop = []<class S>(S &&s) noexcept {
+        return std::forward<S>(s) | stdexec::let_value([](auto &...) noexcept {
+                   return stdexec::just_stopped();
+               });
+    };
+    return exec::when_any(std::forward<Sender>(snd),
+                          trigger_stop(std::forward<Trigger>(trigger))...) |
            stdexec::then([]<class... Args>(Args &&...results) {
                constexpr auto args_n = sizeof...(Args);
                if constexpr (args_n == 0) {

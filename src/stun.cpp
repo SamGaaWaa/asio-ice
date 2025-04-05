@@ -784,8 +784,36 @@ bool message::parse(const void *data, std::size_t buf_size,
             }
             break;
         }
-        case attr_type_t::STUN_ATTR_PASSWORD_ALGORITHM: //
+        case attr_type_t::STUN_ATTR_PASSWORD_ALGORITHM: {
+            if (attr_len < sizeof(value_password_algorithm_t))
+                return false;
+            const auto *value_pwd_algo =
+                reinterpret_cast<const value_password_algorithm_t *>(
+                    attr.value());
+            const uint16_t pwd_algo_type =
+                binary::ntoh<uint16_t>(value_pwd_algo->algorithm);
+            const auto pwd_algo_len =
+                binary::ntoh<uint16_t>(value_pwd_algo->parameters_length);
+            if (pwd_algo_len > 256 ||
+                sizeof(value_password_algorithm_t) + pwd_algo_len > attr_len)
+                return false;
+            ICE_IN_DEBUG {
+                if (pwd_algo_type != password_algorithm::MD5 &&
+                    pwd_algo_type != password_algorithm::SHA256) {
+                    std::cerr << "Unknown password algorithm:" << pwd_algo_type
+                              << '\n';
+                }
+            }
+            this->pwd_algorithm.emplace(
+                pwd_algo_type,
+                std::span<const std::byte>{reinterpret_cast<const std::byte *>(
+                                               value_pwd_algo->parameters()),
+                                           pwd_algo_len});
+            break;
+        }
         case attr_type_t::STUN_ATTR_PASSWORD_ALGORITHMS: {
+            if (attr_len < sizeof(value_password_algorithm_t))
+                return false;
             const_attr_iterator_t pwd_it{attr.value()};
             const attr_iterator_sentinel_t pwd_end{attr.value() + attr_len};
             for (; pwd_it != pwd_end; ++pwd_it) {
@@ -796,18 +824,20 @@ bool message::parse(const void *data, std::size_t buf_size,
                     binary::ntoh<uint16_t>(value_pwd_algo->algorithm);
                 const auto pwd_algo_len =
                     binary::ntoh<uint16_t>(value_pwd_algo->parameters_length);
-                if (pwd_algo_len > 256)
+                if (pwd_algo_len > 256 ||
+                    pwd_it.data() + sizeof(value_password_algorithm_t) +
+                            pwd_algo_len >
+                        pwd_end.data())
                     return false;
-                if (pwd_algo_type != password_algorithm::MD5 &&
-                    pwd_algo_type != password_algorithm::SHA256) {
-                    ICE_IN_DEBUG {
+                ICE_IN_DEBUG {
+                    if (pwd_algo_type != password_algorithm::MD5 &&
+                        pwd_algo_type != password_algorithm::SHA256) {
                         std::cerr
                             << "Unknown password algorithm:" << pwd_algo_type
                             << '\n';
                     }
-                    continue;
                 }
-                this->password_algorithms.emplace_back(
+                this->pwd_algorithms.emplace_back(
                     pwd_algo_type, std::span<const std::byte>{
                                        reinterpret_cast<const std::byte *>(
                                            value_pwd_algo->parameters()),
@@ -913,7 +943,8 @@ bool message::parse(const void *data, std::size_t buf_size,
             if (attr_len != sizeof(value_requested_transport_t))
                 return false;
             const auto *r =
-                reinterpret_cast<const value_requested_transport_t *>(attr_len);
+                reinterpret_cast<const value_requested_transport_t *>(
+                    attr.value());
             if (r->protocol != 17)
                 return false;
             this->requested_transport = true;
@@ -1085,6 +1116,104 @@ int message::write_to(void *buf, size_t length) const noexcept {
         if (attr_size < 0)
             goto overflow;
         iter->length = binary::hton<uint16_t>(static_cast<uint16_t>(attr_size));
+        ++iter;
+    }
+
+    if (!this->username.empty()) {
+        if (iter == end)
+            goto overflow;
+        if (this->username.size() > 513)
+            goto overflow;
+        if (iter->value() + this->username.size() > buf_end)
+            goto overflow;
+        iter->type = binary::hton<uint16_t>(attr_type_t::STUN_ATTR_USERNAME);
+        iter->length = binary::hton<uint16_t>((uint16_t)this->username.size());
+        std::ranges::copy(this->username, (char *)iter->value());
+        ++iter;
+    }
+
+    if (this->pwd_algorithm) {
+        if (iter == end)
+            goto overflow;
+        if (iter->value() + sizeof(value_password_algorithm_t) +
+                this->pwd_algorithm->parameter().size() >
+            buf_end)
+            goto overflow;
+        iter->type =
+            binary::hton<uint16_t>(attr_type_t::STUN_ATTR_PASSWORD_ALGORITHM);
+        iter->length =
+            binary::hton<uint16_t>(sizeof(value_password_algorithm_t) +
+                                   this->pwd_algorithm->parameter().size());
+        auto *p = reinterpret_cast<value_password_algorithm_t *>(iter->value());
+        p->algorithm = binary::hton<uint16_t>(this->pwd_algorithm->algo());
+        p->parameters_length =
+            binary::hton<uint16_t>(this->pwd_algorithm->parameter().size());
+        std::ranges::copy(this->pwd_algorithm->parameter(),
+                          (std::byte *)p->parameters());
+        ++iter;
+    }
+
+    if (!this->pwd_algorithms.empty()) {
+        if (iter == end)
+            goto overflow;
+        attr_iterator_t sub_it{iter->value()};
+        attr_iterator_sentinel_t sub_end = end;
+        for (const auto &pwd_algo : this->pwd_algorithms) {
+            if (sub_it == sub_end)
+                goto overflow;
+            if (sub_it->value() + pwd_algo.parameter().size() > buf_end)
+                goto overflow;
+            auto *p =
+                reinterpret_cast<value_password_algorithm_t *>(sub_it.data());
+            p->algorithm = binary::hton<uint16_t>(pwd_algo.algo());
+            p->parameters_length =
+                binary::hton<uint16_t>(pwd_algo.parameter().size());
+            std::ranges::copy(pwd_algo.parameter(),
+                              (std::byte *)p->parameters());
+            ++sub_it;
+        }
+        if (sub_it.data() > buf_end)
+            goto overflow;
+        iter->type =
+            binary::hton<uint16_t>(attr_type_t::STUN_ATTR_PASSWORD_ALGORITHMS);
+        iter->length = binary::hton<uint16_t>(sub_it.data() - iter->value());
+        ++iter;
+    }
+
+    if (!this->realm.empty()) {
+        if (iter == end)
+            goto overflow;
+        if (this->realm.size() > 763)
+            goto overflow;
+        if (iter->value() + this->realm.size() > buf_end)
+            goto overflow;
+        iter->type = binary::hton<uint16_t>(attr_type_t::STUN_ATTR_REALM);
+        iter->length = binary::hton<uint16_t>(this->realm.size());
+        std::ranges::copy(this->realm, (char *)iter->value());
+        ++iter;
+    }
+
+    if (!this->nonce.empty()) {
+        if (iter == end)
+            goto overflow;
+        if (this->nonce.size() > 763)
+            goto overflow;
+        if (iter->value() + this->nonce.size() > buf_end)
+            goto overflow;
+        iter->type = binary::hton<uint16_t>(attr_type_t::STUN_ATTR_NONCE);
+        iter->length = binary::hton<uint16_t>(this->nonce.size());
+        std::ranges::copy(this->nonce, (char *)iter->value());
+        ++iter;
+    }
+
+    if (this->userhash) {
+        if (iter == end)
+            goto overflow;
+        if (iter->value() + USERHASH_SIZE > buf_end)
+            goto overflow;
+        iter->type = binary::hton<uint16_t>(attr_type_t::STUN_ATTR_USERHASH);
+        iter->length = binary::hton<uint16_t>(USERHASH_SIZE);
+        std::ranges::copy(*this->userhash, iter->value());
         ++iter;
     }
 
@@ -1355,6 +1484,14 @@ bool message::is_response(const void *data,
     return (cls & 0x0100) != 0;
 }
 
+void message::compute_userhash(void *out, std::string_view username,
+                               std::string_view realm) {
+    std::string input(username);
+    input += ':';
+    input += realm;
+    hash::SHA256(out, input);
+}
+
 void message::reset() noexcept {
     cls = 0;
     method = 0;
@@ -1363,7 +1500,8 @@ void message::reset() noexcept {
     xor_mapped_address.reset();
     username.clear();
     integrities.clear();
-    password_algorithms.clear();
+    pwd_algorithm.reset();
+    pwd_algorithms.clear();
     error_code.reset();
     realm.clear();
     nonce.clear();
@@ -1415,6 +1553,34 @@ std::size_t message::serialized_size() const noexcept {
             total += 4 + 4 + 4;
         else
             total += 4 + 4 + 16;
+    }
+
+    if (!this->username.empty()) {
+        total += align_size(4 + this->username.size());
+    }
+
+    if (this->pwd_algorithm) {
+        total += align_size(4 + sizeof(value_password_algorithm_t) +
+                            this->pwd_algorithm->parameter().size());
+    }
+
+    if (!this->pwd_algorithms.empty()) {
+        total += 4;
+        for (const auto &pwd_algo : this->pwd_algorithms) {
+            total += align_size(4 + pwd_algo.parameter().size());
+        }
+    }
+
+    if (!this->realm.empty()) {
+        total += align_size(4 + this->realm.size());
+    }
+
+    if (!this->nonce.empty()) {
+        total += align_size(4 + this->nonce.size());
+    }
+
+    if (this->userhash) {
+        total += 4 + USERHASH_SIZE;
     }
 
     if (this->priority) {
@@ -1541,8 +1707,9 @@ static nlohmann::json to_json(const message::password_algorithm &pa) noexcept {
     nlohmann::json obj;
     obj["type"] = "password_algorithm";
     obj["algo"] = algo_name(pa.algo());
-    auto param = pa.parameter();
-    obj["parameter"] = hash::to_hex(param.data(), param.size());
+    const auto &param = pa.parameter();
+    if (!param.empty())
+        obj["parameter"] = hash::to_hex(param.data(), param.size());
     return obj;
 }
 
@@ -1607,6 +1774,18 @@ std::string message::to_string() {
         xor_peer_address_obj["value"] = to_json(*this->xor_peer_address);
         attributes.emplace_back(std::move(xor_peer_address_obj));
     }
+    if (this->xor_relayed_address) {
+        nlohmann::json xor_relayed_address_obj;
+        xor_relayed_address_obj["type"] = "xor_relayed_address";
+        xor_relayed_address_obj["value"] = to_json(*this->xor_relayed_address);
+        attributes.emplace_back(std::move(xor_relayed_address_obj));
+    }
+    if (this->changed_address) {
+        nlohmann::json changed_address_obj;
+        changed_address_obj["type"] = "changed_address";
+        changed_address_obj["value"] = to_json(*this->changed_address);
+        attributes.emplace_back(std::move(changed_address_obj));
+    }
     if (!this->software.empty()) {
         nlohmann::json software_obj;
         software_obj["type"] = "software";
@@ -1663,11 +1842,14 @@ std::string message::to_string() {
         nonce_obj["value"] = this->nonce;
         attributes.emplace_back(std::move(nonce_obj));
     }
-    if (!this->password_algorithms.empty()) {
+    if (this->pwd_algorithm) {
+        attributes.emplace_back(to_json(*this->pwd_algorithm));
+    }
+    if (!this->pwd_algorithms.empty()) {
         nlohmann::json pwd_algos_obj;
         pwd_algos_obj["type"] = "password_algorithms";
         nlohmann::json algos = nlohmann::json::array();
-        for (const auto &pwd_algo : this->password_algorithms) {
+        for (const auto &pwd_algo : this->pwd_algorithms) {
             algos.emplace_back(to_json(pwd_algo));
         }
         pwd_algos_obj["value"] = std::move(algos);
@@ -1713,9 +1895,12 @@ std::string message::to_string() {
         reservation_token_obj["type"] = "reservation_token";
         reservation_token_obj["value"] = *this->reservation_token;
     }
-    if (!this->_raw_data.empty() &&
-        !is_not_stun(this->_raw_data.data(), this->_raw_data.size())) {
-        for (const auto &integrity : this->integrities) {
+    for (const auto &integrity : this->integrities) {
+        nlohmann::json integrity_obj;
+        integrity_obj["type"] =
+            std::string{"integrity_"} + algo_name(integrity.algo());
+        if (!this->_raw_data.empty() &&
+            !is_not_stun(this->_raw_data.data(), this->_raw_data.size())) {
             const attr_t *attr = find_attr(
                 this->_raw_data.data(), this->_raw_data.size(),
                 integrity.algo() == integrity::algo_t::SHA1
@@ -1724,15 +1909,13 @@ std::string message::to_string() {
             if (!attr || (const std::byte *)attr + 4 +
                                  binary::ntoh<uint16_t>(attr->length) >
                              this->_raw_data.data() + this->_raw_data.size()) {
+                attributes.emplace_back(std::move(integrity_obj));
                 continue;
             }
-            nlohmann::json integrity_obj;
-            integrity_obj["type"] =
-                std::string{"integrity_"} + algo_name(integrity.algo());
             integrity_obj["value"] = hash::to_hex(
                 attr->value(), binary::ntoh<uint16_t>(attr->length));
-            attributes.emplace_back(std::move(integrity_obj));
         }
+        attributes.emplace_back(std::move(integrity_obj));
     }
     if (this->_checked_fingerprint) {
         nlohmann::json fingerprint_obj;

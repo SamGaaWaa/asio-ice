@@ -194,7 +194,7 @@ void parse_test5() {
     auto dura =
         std::chrono::duration_cast<std::chrono::nanoseconds>(end - begin);
     std::cout << "Long-term authentication with password \"TheMatrIX\"\n";
-    const auto &algo = resp.password_algorithms.front();
+    const auto &algo = resp.pwd_algorithm.value();
     std::string password = algo.get_hmac_key(
         nlohmann::json::parse(R"("\u30DE\u30C8\u30EA\u30C3\u30AF\u30B9")")
             .get<std::string>(),

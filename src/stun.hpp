@@ -73,7 +73,7 @@ struct method_t {
 inline constexpr std::string_view STUN_NONCE_COOKIE = "obMatJos2";
 
 // USERHASH is a SHA256 digest
-#define USERHASH_SIZE 32
+inline constexpr std::size_t USERHASH_SIZE = 32;
 
 // STUN Security Feature bits as defined in
 // https://www.rfc-editor.org/rfc/rfc8489.html#section-18.1 See errata about bit
@@ -117,6 +117,9 @@ struct message {
         static constexpr uint16_t MD5 = 1;
         static constexpr uint16_t SHA256 = 2;
 
+        password_algorithm(uint16_t algo_type = MD5) noexcept
+            : _algo{algo_type} {}
+
         password_algorithm(uint16_t algo_type, std::span<const std::byte> param)
             : _algo{algo_type}, _value(param.begin(), param.end()) {
             if (_value.size() > 256)
@@ -124,13 +127,21 @@ struct message {
                     "password algorithm's parameter size greater than 256"};
         }
 
+        password_algorithm(const password_algorithm &) = default;
+        password_algorithm(password_algorithm &&) noexcept = default;
+        password_algorithm &operator=(const password_algorithm &) = default;
+        password_algorithm &operator=(password_algorithm &&) noexcept = default;
+
         uint16_t algo() const noexcept { return _algo; }
-        std::span<const std::byte> parameter() const noexcept {
-            return {_value.data(), _value.size()};
+        const std::vector<std::byte> &parameter() const noexcept {
+            return _value;
         }
         std::string get_hmac_key(std::string_view username,
                                  std::string_view realm,
                                  std::string_view password) const;
+        bool supported() const noexcept {
+            return _algo == MD5 || _algo == SHA256;
+        }
 
       private:
         uint16_t _algo{};
@@ -142,7 +153,7 @@ struct message {
     void reset() noexcept;
     void fill_random_transaction_id();
     const std::string &hmac_key() const noexcept { return _hmac_key; }
-    void set_hmac_key(std::string_view key) noexcept { _hmac_key = key; }
+    void set_hmac_key(std::string key) noexcept { _hmac_key = std::move(key); }
     void use_fingerprint(bool use) noexcept { _use_fingerprint = use; }
     bool use_fingerprint() const noexcept { return _use_fingerprint; }
     int write_to(void *data, std::size_t length) const noexcept;
@@ -161,6 +172,8 @@ struct message {
                        std::size_t length) noexcept(!ICE_DEBUG);
     static bool is_response(const void *data,
                             std::size_t length) noexcept(!ICE_DEBUG);
+    static void compute_userhash(void *out, std::string_view username,
+                                 std::string_view realm);
 
     class_t cls{0};
     method_t method{0};
@@ -170,7 +183,8 @@ struct message {
     std::optional<endpoint> xor_mapped_address;
     std::string username;
     boost::container::small_vector<integrity, 2> integrities{};
-    boost::container::small_vector<password_algorithm, 2> password_algorithms{};
+    std::optional<password_algorithm> pwd_algorithm{};
+    boost::container::small_vector<password_algorithm, 2> pwd_algorithms{};
     std::optional<error_code> error_code;
     std::string realm;
     std::string nonce;

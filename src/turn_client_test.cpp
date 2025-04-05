@@ -20,7 +20,7 @@ void request_test() {
         net::ip::udp::socket sock(ctx, net::ip::udp::v4());
         sock.bind(net::ip::udp::endpoint(net::ip::udp::v4(), 0));
         client = std::make_unique<turn::client<net::ip::udp::socket>>(
-            ctx, std::move(sock), server_ep);
+            ctx, std::move(sock), server_ep, "samgaawaa", "1234");
     }
     auto recv_coro = [&]() -> ice::task<void> {
         char buf[2048];
@@ -57,8 +57,7 @@ void request_test() {
 
         stun::message resp;
         net::ip::udp::endpoint resp_from;
-        bool success = co_await client->request(req, resp_from, resp,
-                                                std::chrono::seconds(10), 3);
+        bool success = co_await client->request(req, resp_from, resp, 3);
         if (resp_from != server_ep) {
             std::cerr << "Received response from unknown address: "
                       << resp_from.address() << ':' << resp_from.port() << '\n';
@@ -97,7 +96,7 @@ void allocate_test() {
         net::ip::udp::socket sock(ctx, net::ip::udp::v4());
         sock.bind(net::ip::udp::endpoint(net::ip::udp::v4(), 0));
         client = std::make_unique<turn::client<net::ip::udp::socket>>(
-            ctx, std::move(sock), server_ep);
+            ctx, std::move(sock), server_ep, "samgaawaa", "1234");
     }
     auto recv_coro = [&]() -> ice::task<void> {
         char buf[2048];
@@ -124,38 +123,20 @@ void allocate_test() {
         }
     };
     auto allocate_coro = [&]() -> ice::task<void> {
-        stun::message req;
-
-        // The client MUST include a REQUESTED-TRANSPORT attribute in the
-        // request.
-        req.requested_transport = true;
-
-        // If the client wishes the server to initialize the time-to-expiry
-        // field of the allocation to some value other than the default
-        // lifetime, then it MAY include a LIFETIME attribute specifying its
-        // desired value.
-        req.lifetime = 10 * 60;
-
-        req.dont_fragment = true;
-
-        req.method = stun::method_t::STUN_METHOD_ALLOCATE;
-        req.cls = stun::class_t::STUN_CLASS_REQUEST;
-        req.use_fingerprint(true);
-        req.fill_random_transaction_id();
-
-        stun::message resp;
-        net::ip::udp::endpoint resp_from;
-        bool success = co_await client->request(req, resp_from, resp,
-                                                std::chrono::seconds(10), 3);
-        if (resp_from != server_ep) {
-            std::cerr << "Received response from unknown address: "
-                      << resp_from.address() << ':' << resp_from.port() << '\n';
-        }
-        if (!success) {
-            std::cerr << "Request error\n";
+        auto relayed = co_await client->allocate(std::chrono::seconds(60 * 10));
+        if (!relayed) {
+            std::cerr << "Allocate failed\n";
             co_return;
         }
-        std::cout << "Resp:\n" << resp.to_string() << '\n';
+        std::cout << "Relayed address: " << relayed->address() << ":"
+                  << relayed->port() << '\n';
+        relayed = co_await client->allocate(std::chrono::seconds(60 * 10));
+        if (!relayed) {
+            std::cerr << "The second allocate failed\n";
+            co_return;
+        }
+        std::cout << "Relayed address: " << relayed->address() << ":"
+                  << relayed->port() << '\n';
     };
 
     asio2exec::scheduler sched{ctx};

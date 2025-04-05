@@ -75,8 +75,8 @@ void udp_request_test() {
 
         stun::message resp;
         net::ip::udp::endpoint resp_from;
-        auto success = co_await client.request(server_ep, req, resp_from, resp,
-                                               std::chrono::seconds(10), 3);
+        auto success =
+            co_await client.request(server_ep, req, resp_from, resp, 3);
         if (!success) {
             std::cerr << "Request error\n";
             co_return;
@@ -164,8 +164,7 @@ void tcp_request_test() {
         req.fill_random_transaction_id();
 
         stun::message resp;
-        auto success =
-            co_await client.request(req, resp, std::chrono::seconds(10));
+        auto success = co_await client.request(req, resp);
         if (!success) {
             std::cerr << "Request error\n";
             co_return;
@@ -194,6 +193,6 @@ void tcp_request_test() {
 }
 
 int main(int argc, char *argv[]) {
-    // udp_request_test();
+    udp_request_test();
     tcp_request_test();
 }

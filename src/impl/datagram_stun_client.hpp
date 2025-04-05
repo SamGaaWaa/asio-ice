@@ -58,7 +58,7 @@ template <class NextLayer> struct datagram_client {
 
     ice::task<bool> request(const endpoint_type &ep, const stun::message &msg,
                             endpoint_type &from, stun::message &resp,
-                            auto timeout, std::size_t retries);
+                            std::size_t retries, auto... self);
 
   private:
     struct transaction
@@ -88,6 +88,7 @@ template <class NextLayer> struct datagram_client {
     endpoint_type _local;
     bool _running = true;
     transaction_set _transactions{};
+    ice::shared_promise<void> _stop_promise{};
 };
 
 } // namespace ice::stun::impl

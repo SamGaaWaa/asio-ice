@@ -1,5 +1,6 @@
 #pragma once
 
+#include <string>
 #include <vector>
 
 #include "config.hpp"
@@ -25,6 +26,8 @@ struct endpoint {
     friend bool operator==(const endpoint &lhs, const endpoint &rhs) noexcept {
         return lhs.address == rhs.address && lhs.port == rhs.port;
     }
+
+    std::string to_string() const;
 };
 
 std::vector<net::ip::address> get_local_addresses();

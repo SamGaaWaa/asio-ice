@@ -91,4 +91,8 @@ std::vector<net::ip::address> get_local_addresses() {
     return addresses;
 }
 
+std::string endpoint::to_string() const {
+    return address.to_string() + ":" + std::to_string(port);
+}
+
 } // namespace ice

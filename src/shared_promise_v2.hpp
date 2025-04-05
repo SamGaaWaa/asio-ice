@@ -60,10 +60,15 @@ template <class... Args> struct shared_promise {
     shared_promise &operator=(shared_promise &&) = delete;
 
     bool set_value(const Args &...args) noexcept {
-        if (!set_one_value(args...))
+        auto n = _operations.size();
+        if (n == 0)
             return false;
-        while (set_one_value(args...))
-            ;
+        for (auto i = 0; i < n; ++i) {
+            auto &op = _operations.front();
+            _operations.pop_front();
+            op.set_value(args...);
+            // if it is the last operation, *this may be destroyed
+        }
         return true;
     }
 
@@ -77,10 +82,15 @@ template <class... Args> struct shared_promise {
     }
 
     bool set_error(const std::exception_ptr &error) noexcept {
-        if (!set_one_error(error))
+        auto n = _operations.size();
+        if (n == 0)
             return false;
-        while (set_one_error(error))
-            ;
+        for (auto i = 0; i < n; ++i) {
+            auto &op = _operations.front();
+            _operations.pop_front();
+            op.set_error(error);
+            // if it is the last operation, *this may be destroyed
+        }
         return true;
     }
 
@@ -94,10 +104,15 @@ template <class... Args> struct shared_promise {
     }
 
     bool set_stopped() noexcept {
-        if (!set_one_stopped())
+        auto n = _operations.size();
+        if (n == 0)
             return false;
-        while (set_one_stopped())
-            ;
+        for (auto i = 0; i < n; ++i) {
+            auto &op = _operations.front();
+            _operations.pop_front();
+            op.set_stopped();
+            // if it is the last operation, *this may be destroyed
+        }
         return true;
     }
 
@@ -257,10 +272,15 @@ template <> struct shared_promise<void> {
     shared_promise &operator=(shared_promise &&) = delete;
 
     bool set_value() noexcept {
-        if (!set_one_value())
+        auto n = _operations.size();
+        if (n == 0)
             return false;
-        while (set_one_value())
-            ;
+        for (auto i = 0; i < n; ++i) {
+            auto &op = _operations.front();
+            _operations.pop_front();
+            op.set_value();
+            // if it is the last operation, *this may be destroyed
+        }
         return true;
     }
 
@@ -274,10 +294,15 @@ template <> struct shared_promise<void> {
     }
 
     bool set_error(const std::exception_ptr &error) noexcept {
-        if (!set_one_error(error))
+        auto n = _operations.size();
+        if (n == 0)
             return false;
-        while (set_one_error(error))
-            ;
+        for (auto i = 0; i < n; ++i) {
+            auto &op = _operations.front();
+            _operations.pop_front();
+            op.set_error(error);
+            // if it is the last operation, *this may be destroyed
+        }
         return true;
     }
 
@@ -291,10 +316,15 @@ template <> struct shared_promise<void> {
     }
 
     bool set_stopped() noexcept {
-        if (!set_one_stopped())
+        auto n = _operations.size();
+        if (n == 0)
             return false;
-        while (set_one_stopped())
-            ;
+        for (auto i = 0; i < n; ++i) {
+            auto &op = _operations.front();
+            _operations.pop_front();
+            op.set_stopped();
+            // if it is the last operation, *this may be destroyed
+        }
         return true;
     }
 

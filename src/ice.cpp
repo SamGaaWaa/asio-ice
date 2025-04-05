@@ -46,9 +46,8 @@ server_reflexive_endpoint(auto &client, Endpoint stun_server,
 
     stun::message resp;
     Endpoint from;
-    auto result =
-        co_await (client.request(stun_server, req, from, resp, timeout, 7) |
-                  stdexec::stopped_as_optional());
+    auto result = co_await (client.request(stun_server, req, from, resp, 7) |
+                            stdexec::stopped_as_optional());
     if (!result)
         co_return std::nullopt;
     if (from != stun_server) {

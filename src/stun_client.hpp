@@ -46,8 +46,8 @@ template <is_datagram_layer NextLayer> class client<NextLayer> {
 
     ice::task<bool> request(const endpoint_type &ep, const stun::message &msg,
                             endpoint_type &from, stun::message &resp,
-                            auto timeout, std::size_t retries) {
-        return _impl.request(ep, msg, from, resp, timeout, retries);
+                            std::size_t retries) {
+        return _impl.request(ep, msg, from, resp, retries);
     }
 
   private:
@@ -82,8 +82,8 @@ template <is_stream_layer NextLayer> class client<NextLayer> {
     }
 
     ice::task<bool> request(const stun::message &msg, stun::message &resp,
-                            auto timeout) {
-        return _impl.request(msg, resp, timeout);
+                            auto... self) {
+        return _impl.request(msg, resp, std::move(self)...);
     }
 
   private:

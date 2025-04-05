@@ -12,11 +12,7 @@ template <class NextLayer> void datagram_client<NextLayer>::stop() noexcept {
     if (!this->_running)
         return;
     this->_running = false;
-    while (!this->_transactions.empty()) {
-        auto &trans = *_transactions.begin();
-        trans.unlink();
-        trans.done_promise.set_stopped();
-    }
+    this->_stop_promise.set_value();
 }
 
 template <class NextLayer>
@@ -40,16 +36,33 @@ bool datagram_client<NextLayer>::dispatch(
     it->response.reset();
     if (!it->response.parse(data, size)) {
         ICE_IN_DEBUG { std::cerr << "Parse response failed\n"; }
-        it->response.reset();
         return false;
     }
-    // Check message integrity
-    if (!std::ranges::equal(it->request.integrities,
-                            it->response.integrities) ||
-        std::any_of(it->response.integrities.begin(),
-                    it->response.integrities.end(), [&](const auto i) {
-                        return !i.verify(it->request.hmac_key(), it->response);
-                    })) {
+    if (it->response.cls == stun::class_t::STUN_CLASS_RESP_ERROR &&
+        !it->response.error_code.has_value()) {
+        // If the error response contains unknown comprehension-required
+        // attributes, or if the error response does not contain an ERROR-CODE
+        // attribute, then the transaction is simply considered to have failed.
+        it->success = false;
+    } else if (it->response.cls == stun::class_t::STUN_CLASS_RESP_ERROR &&
+               (it->response.error_code->code == 401 ||
+                it->response.error_code->code == 438)) {
+        it->success = true;
+    } else if (!it->response.nonce.empty() && !it->response.realm.empty() &&
+               it->response.nonce.starts_with(stun::STUN_NONCE_COOKIE) &&
+               (it->response.security_features() & 0x01) &&
+               it->response.pwd_algorithms.empty()) {
+        // For all other responses, if the NONCE attribute starts with the
+        // "nonce cookie" with the STUN Security Feature "Password algorithms"
+        // bit set to 1 but PASSWORD-ALGORITHMS is not present, the response
+        // MUST be ignored.
+        return true;
+    } else if (!it->request.hmac_key().empty() &&
+               std::any_of(it->response.integrities.begin(),
+                           it->response.integrities.end(), [&](const auto i) {
+                               return !i.verify(it->request.hmac_key(),
+                                                it->response);
+                           })) {
         // If the request was sent over an unreliable transport, the response
         // MUST be discarded, as if it had never been received.  This means that
         // retransmits, if applicable, will continue.  If all the responses
@@ -58,22 +71,9 @@ bool datagram_client<NextLayer>::dispatch(
         // protection was violated.
         ICE_IN_DEBUG { std::cout << "Discard invalid response\n"; }
         return true;
-    }
-    if (it->response.cls == stun::class_t::STUN_CLASS_RESP_ERROR &&
-        !it->response.error_code.has_value()) {
-        // If the error response contains unknown comprehension-required
-        // attributes, or if the error response does not contain an ERROR-CODE
-        // attribute, then the transaction is simply considered to have failed.
-        it->success = false;
     } else
         it->success = true;
     it->response_from = ep;
-    // TODO: handle message
-    ICE_IN_DEBUG {
-        std::cout << "STUN message from " << ep.address() << ":" << ep.port()
-                  << ":\n"
-                  << it->response.to_string() << "\n";
-    }
     it->unlink();
     it->done_promise.set_value();
     return true;
@@ -84,7 +84,7 @@ ice::task<bool> datagram_client<NextLayer>::request(
     const typename datagram_client<NextLayer>::endpoint_type &ep,
     const stun::message &msg,
     typename datagram_client<NextLayer>::endpoint_type &from,
-    stun::message &resp, auto timeout, std::size_t max_retries) {
+    stun::message &resp, std::size_t max_retries, auto... self) {
     if (!this->_running)
         co_return false;
     ice::shared_promise<void> stop_receiver, stop_retry;
@@ -99,7 +99,12 @@ ice::task<bool> datagram_client<NextLayer>::request(
         buf.resize(msg.serialized_size());
         {
             auto n = msg.write_to(buf.data(), buf.size());
-            assert(n != -1);
+            if (n < 0) {
+                ICE_IN_DEBUG {
+                    std::cerr << "USERNAME, NONCE or REALM too long\n";
+                }
+                co_return false;
+            }
             buf.resize(n);
         }
         for (int i = 0; i < max_retries; ++i) {
@@ -161,18 +166,16 @@ ice::task<bool> datagram_client<NextLayer>::request(
                          return false;
                      });
 
-    net::steady_timer timer{this->context(), timeout};
-
     std::optional<std::tuple<std::optional<bool>, std::optional<bool>>> result =
         co_await (utils::stop_when(
             stdexec::when_all(
                 utils::stop_when(retry_coro(), stop_retry.get_future()),
                 utils::stop_when(std::move(recv_work),
                                  stop_receiver.get_future())),
-            timer.async_wait(asio2exec::use_sender)));
+            this->_stop_promise.get_future()));
 
     if (!result) {
-        ICE_IN_DEBUG { std::cerr << "Timeout\n"; }
+        ICE_IN_DEBUG { std::cerr << "Canceled\n"; }
         co_return false;
     }
     auto success = std::get<1>(*result);

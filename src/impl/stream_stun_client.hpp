@@ -60,7 +60,7 @@ template <class NextLayer> struct stream_client {
     bool dispatch(const void *data, std::size_t size) noexcept;
 
     ice::task<bool> request(const stun::message &msg, stun::message &resp,
-                            auto timeout);
+                            auto... self);
 
   private:
     struct transaction
@@ -90,6 +90,7 @@ template <class NextLayer> struct stream_client {
     endpoint_type _remote;
     bool _running = true;
     transaction_set _transactions{};
+    ice::shared_promise<void> _stop_promise{};
 };
 
 } // namespace ice::stun::impl
