@@ -118,21 +118,15 @@ void allocate_test() {
             }
             if (!client->dispatch(buf, n)) {
                 std::cerr << "Dispatch error\n";
-                co_return;
+                // co_return;
             }
         }
     };
     auto allocate_coro = [&]() -> ice::task<void> {
-        auto relayed = co_await client->allocate(std::chrono::seconds(60 * 10));
+        auto relayed =
+            co_await client->create_allocation(std::chrono::seconds(60 * 10));
         if (!relayed) {
             std::cerr << "Allocate failed\n";
-            co_return;
-        }
-        std::cout << "Relayed address: " << relayed->address() << ":"
-                  << relayed->port() << '\n';
-        relayed = co_await client->allocate(std::chrono::seconds(60 * 10));
-        if (!relayed) {
-            std::cerr << "The second allocate failed\n";
             co_return;
         }
         std::cout << "Relayed address: " << relayed->address() << ":"
@@ -142,7 +136,8 @@ void allocate_test() {
     asio2exec::scheduler sched{ctx};
     auto work =
         stdexec::when_all(recv_coro(), allocate_coro() | stdexec::let_value([] {
-                                           return stdexec::just_stopped();
+                                           //    return stdexec::just_stopped();
+                                           return stdexec::just();
                                        }));
     stdexec::start_detached(stdexec::starts_on(sched, std::move(work)));
     ctx.run();

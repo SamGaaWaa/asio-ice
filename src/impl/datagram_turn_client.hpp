@@ -28,11 +28,14 @@ namespace net = asio;
 
 #include <algorithm>
 #include <iostream>
+#include <memory>
 #include <stdexcept>
 
 namespace ice::turn::impl {
 
-template <class NextLayer> struct datagram_client {
+template <class NextLayer>
+struct datagram_client
+    : std::enable_shared_from_this<datagram_client<NextLayer>> {
     using next_layer_type = NextLayer;
     using endpoint_type = typename next_layer_type::endpoint_type;
 
@@ -50,7 +53,7 @@ template <class NextLayer> struct datagram_client {
     void stop() noexcept {
         _stun_client.stop();
         _sock.close();
-        _stop_promise.set_value();
+        _stop_refresh_task.set_value();
     }
 
     bool is_running() const noexcept { return _stun_client.is_running(); }
@@ -83,20 +86,21 @@ template <class NextLayer> struct datagram_client {
     /*
         Only support UDP between server and peer
     */
-    ice::task<std::optional<net::ip::udp::endpoint>> allocate(auto lifetime,
-                                                              auto... self);
+    ice::task<std::optional<net::ip::udp::endpoint>>
+    create_allocation(auto lifetime, auto... self);
 
     ice::task<bool> channel_bind(uint16_t channel_number,
                                  net::ip::udp::endpoint peer, auto... self);
 
-    ice::task<bool> delete_allocation(auto... self);
+    ice::task<void> delete_allocation(auto... self);
 
     ice::task<bool> refresh(auto time_to_expiry, auto... self);
 
   private:
     ice::task<bool> request_with_retry(stun::message &req, stun::message &resp,
                                        std::size_t retries);
-    void start_refresh_task(auto... self);
+    ice::task<void> refresh_task(auto self);
+    void start_refresh_task();
 
     next_layer_type _sock;
     stun::client<next_layer_type> _stun_client;
@@ -109,9 +113,10 @@ template <class NextLayer> struct datagram_client {
     std::optional<std::array<uint8_t, stun::USERHASH_SIZE>> _userhash{};
     std::optional<stun::message::password_algorithm> _used_pwd_algo{};
     stun::message::integrity _integrity{stun::message::integrity::SHA1};
-    std::optional<uint32_t> _lifetime{};
+    uint32_t _lifetime{0};
     std::optional<ice::endpoint> _relayed_address{};
-    ice::shared_promise<void> _stop_promise{};
+    std::optional<ice::endpoint> _reflex_address{};
+    ice::shared_promise<void> _stop_refresh_task{};
 };
 
 } // namespace ice::turn::impl

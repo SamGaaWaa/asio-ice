@@ -136,8 +136,41 @@ ice::task<bool> datagram_client<NextLayer>::request_with_retry(
 }
 
 template <class NextLayer>
+ice::task<void> datagram_client<NextLayer>::refresh_task(auto self) {
+    net::steady_timer timer(this->context());
+    while (true) {
+        auto expire = std::chrono::seconds(this->_lifetime * 5 / 6);
+        timer.expires_after(expire);
+        co_await timer.async_wait(asio2exec::use_sender);
+        std::optional<bool> success =
+            co_await (this->refresh(std::chrono::seconds(this->_lifetime)) |
+                      stdexec::stopped_as_optional());
+        if (!success || !*success) {
+            ICE_IN_DEBUG { std::cerr << "Refresh task stopped\n"; }
+            co_return;
+        }
+        ICE_IN_DEBUG {
+            std::cout << "Refresh task succeeded, lifetime: " << this->_lifetime
+                      << "\n";
+        }
+        if (this->_lifetime == 0)
+            co_return;
+    }
+}
+
+template <class NextLayer>
+void datagram_client<NextLayer>::start_refresh_task() {
+    this->_stop_refresh_task.set_value(); // Cancel previous task
+    asio2exec::scheduler sched{this->context()};
+    stdexec::start_detached(stdexec::starts_on(
+        sched, utils::stop_when(this->refresh_task(this->shared_from_this()),
+                                this->_stop_refresh_task.get_future() |
+                                    stdexec::continues_on(sched))));
+}
+
+template <class NextLayer>
 ice::task<std::optional<net::ip::udp::endpoint>>
-datagram_client<NextLayer>::allocate(auto lifetime, auto... self) {
+datagram_client<NextLayer>::create_allocation(auto lifetime, auto... self) {
     if (this->_relayed_address) {
         ICE_IN_DEBUG { std::cout << "WARN: Already allocated\n"; }
     }
@@ -160,10 +193,57 @@ datagram_client<NextLayer>::allocate(auto lifetime, auto... self) {
     ICE_IN_DEBUG { std::cout << "Resp:\n" << resp.to_string() << '\n'; }
     if (!resp.lifetime || !resp.xor_relayed_address)
         co_return std::nullopt;
-    this->_lifetime = resp.lifetime;
+    this->_lifetime = *resp.lifetime;
     this->_relayed_address = resp.xor_relayed_address;
+    this->_reflex_address = resp.xor_mapped_address;
+    start_refresh_task();
     co_return net::ip::udp::endpoint{this->_relayed_address->address,
                                      this->_relayed_address->port};
+}
+
+template <class NextLayer>
+ice::task<bool> datagram_client<NextLayer>::refresh(auto time_to_expiry,
+                                                    auto... self) {
+    ICE_IN_DEBUG { std::cout << "Refreshing\n"; }
+    stun::message req;
+    req.cls = stun::class_t::STUN_CLASS_REQUEST;
+    req.method = stun::method_t::STUN_METHOD_REFRESH;
+    req.fill_random_transaction_id();
+    req.lifetime =
+        std::chrono::duration_cast<std::chrono::seconds>(time_to_expiry)
+            .count();
+    req.use_fingerprint(true);
+
+    stun::message resp;
+    bool success = co_await this->request_with_retry(req, resp, 7);
+    if (!success || !resp.lifetime) // TODO: Handle 437 error
+        co_return false;
+    this->_lifetime = *resp.lifetime;
+    co_return true;
+}
+
+template <class NextLayer>
+ice::task<void> datagram_client<NextLayer>::delete_allocation(auto... self) {
+    stun::message req;
+    req.method = stun::method_t::STUN_METHOD_REFRESH;
+    req.fill_random_transaction_id();
+    req.lifetime = 0;
+    req.use_fingerprint(true);
+
+    stun::message resp;
+    bool success = co_await this->request_with_retry(req, resp, 7);
+    if (!success)
+        co_return;
+    ICE_IN_DEBUG { std::cout << "TURN allocation deleted\n"; }
+    this->_stop_refresh_task.set_value();
+    this->_nonce.clear();
+    this->_hmac_key.clear();
+    this->_userhash.reset();
+    this->_used_pwd_algo.reset();
+    this->_integrity.reset();
+    this->_lifetime = 0;
+    this->_relayed_address.reset();
+    this->_reflex_address.reset();
 }
 
 } // namespace ice::turn::impl

@@ -71,9 +71,9 @@ template <is_datagram_layer NextLayer> class client<NextLayer> {
     /*
         Only support UDP between server and peer
     */
-    ice::task<std::optional<net::ip::udp::endpoint>> allocate(auto lifetime,
-                                                              auto... self) {
-        return _impl->allocate(lifetime, std::move(self)...);
+    ice::task<std::optional<net::ip::udp::endpoint>>
+    create_allocation(auto lifetime, auto... self) {
+        return _impl->create_allocation(lifetime, std::move(self)...);
     }
 
     ice::task<bool> channel_bind(uint16_t channel_number,
@@ -81,7 +81,7 @@ template <is_datagram_layer NextLayer> class client<NextLayer> {
         return _impl->channel_bind(channel_number, peer, std::move(self)...);
     }
 
-    ice::task<bool> delete_allocation(auto... self) {
+    ice::task<void> delete_allocation(auto... self) {
         return _impl->delete_allocation(std::move(self)...);
     }
 
