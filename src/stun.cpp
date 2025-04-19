@@ -911,11 +911,12 @@ bool message::parse(const void *data, std::size_t buf_size,
             break;
         }
         case attr_type_t::STUN_ATTR_XOR_PEER_ADDRESS: {
+            ice::endpoint peer_addr;
             if ((attr_len != 8 && attr_len != 20) ||
                 parse_xor_address(attr.value(), end.data() - attr.value(),
-                                  header,
-                                  this->xor_peer_address.emplace()) != attr_len)
+                                  header, peer_addr) != attr_len)
                 return false;
+            this->xor_peer_address.push_back(peer_addr);
             break;
         }
         case attr_type_t::STUN_ATTR_XOR_RELAYED_ADDRESS: {
@@ -1287,14 +1288,13 @@ int message::write_to(void *buf, size_t length) const noexcept {
         ++iter;
     }
 
-    if (this->xor_peer_address) {
+    for (const auto &peer : this->xor_peer_address) {
         if (iter == end)
             goto overflow;
         iter->type =
             binary::hton<uint16_t>(attr_type_t::STUN_ATTR_XOR_PEER_ADDRESS);
-        auto attr_size =
-            write_xor_address(iter->value(), buf_end - iter->value(), header,
-                              *this->xor_peer_address);
+        auto attr_size = write_xor_address(
+            iter->value(), buf_end - iter->value(), header, peer);
         if (attr_size < 0)
             goto overflow;
         iter->length = binary::hton<uint16_t>(static_cast<uint16_t>(attr_size));
@@ -1514,7 +1514,7 @@ void message::reset() noexcept {
     changed_address.reset();
     channel_number.reset();
     lifetime.reset();
-    xor_peer_address.reset();
+    xor_peer_address.clear();
     xor_relayed_address.reset();
     requested_transport = false;
     response_origin.reset();
@@ -1607,8 +1607,8 @@ std::size_t message::serialized_size() const noexcept {
         total += 4 + 4;
     }
 
-    if (this->xor_peer_address) {
-        if (this->xor_peer_address->address.is_v4())
+    for (const auto &peer : this->xor_peer_address) {
+        if (peer.address.is_v4())
             total += 4 + 4 + 4;
         else
             total += 4 + 4 + 16;
@@ -1768,10 +1768,12 @@ std::string message::to_string() {
         xor_mapped_address_obj["value"] = to_json(*this->xor_mapped_address);
         attributes.emplace_back(std::move(xor_mapped_address_obj));
     }
-    if (this->xor_peer_address) {
+    if (!this->xor_peer_address.empty()) {
         nlohmann::json xor_peer_address_obj;
         xor_peer_address_obj["type"] = "xor_peer_address";
-        xor_peer_address_obj["value"] = to_json(*this->xor_peer_address);
+        auto &arr = xor_peer_address_obj["value"];
+        for (const auto &peer : this->xor_peer_address)
+            arr.push_back(to_json(peer));
         attributes.emplace_back(std::move(xor_peer_address_obj));
     }
     if (this->xor_relayed_address) {
