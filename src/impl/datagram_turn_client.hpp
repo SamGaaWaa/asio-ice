@@ -6,7 +6,7 @@
 #include "stun_client.hpp"
 #include "task.hpp"
 
-#include <boost/container/small_vector.hpp>
+#include <boost/container/flat_map.hpp>
 #include <boost/intrusive/set.hpp>
 
 #if ASIOICE_USE_BOOST > 0
@@ -27,8 +27,11 @@ namespace net = asio;
 #endif
 
 #include <algorithm>
+#include <array>
+#include <deque>
 #include <iostream>
 #include <memory>
+#include <ranges>
 #include <stdexcept>
 
 namespace ice::turn::impl {
@@ -51,12 +54,17 @@ struct datagram_client
     datagram_client &operator=(datagram_client &&) = delete;
 
     void stop() noexcept {
+        if (!_is_running)
+            return;
+        _is_running = false;
         _stun_client.stop();
         _sock.close();
-        _stop_refresh_task.set_value();
+        _expired_number.clear();
+        _stop_expire_number_task.set_value();
+        do_delete_allocation();
     }
 
-    bool is_running() const noexcept { return _stun_client.is_running(); }
+    bool is_running() const noexcept { return _is_running; }
 
     const auto &context() const noexcept { return _stun_client.context(); }
     auto &context() noexcept { return _stun_client.context(); }
@@ -96,11 +104,73 @@ struct datagram_client
 
     ice::task<bool> refresh(auto time_to_expiry, auto... self);
 
+    ice::task<bool> create_permission(net::ip::address peer, auto... self) {
+        return create_permission(
+            std::ranges::owning_view(std::array<net::ip::address, 1>{peer}),
+            std::move(self)...);
+    }
+
+    ice::task<bool> create_permission(std::ranges::view auto peers,
+                                      auto... self);
+
+    void delete_permission(const net::ip::address &peer);
+
+    void delete_permission(std::ranges::view auto peers) {
+        for (const auto &peer : peers) {
+            delete_permission(peer);
+        }
+    }
+
   private:
+    void do_delete_allocation();
     ice::task<bool> request_with_retry(stun::message &req, stun::message &resp,
                                        std::size_t retries);
-    ice::task<void> refresh_task(auto self);
-    void start_refresh_task();
+
+    ice::task<void> refresh_allocation_task(auto self);
+    void start_refresh_allocation_task();
+
+    void clear_permissions() noexcept;
+
+    uint16_t generate_channel_number() const noexcept;
+
+    void mark_channel_number_expired(std::ranges::view auto channel_numbers);
+    ice::task<void> expire_channel_number_task(auto self);
+    void start_expire_channel_number_task();
+
+    struct permission_state : std::enable_shared_from_this<permission_state> {
+        net::ip::address peer_ip{};
+        boost::container::flat_map<uint16_t, uint16_t>
+            port_to_channel{}; // empty means no channel binding
+        boost::container::flat_map<uint16_t, uint16_t>
+            channel_to_port{}; // empty means no channel binding
+        std::shared_ptr<datagram_client<NextLayer>> client;
+
+        permission_state() = default;
+        permission_state(permission_state &&) = delete;
+        permission_state &operator=(permission_state &&) = delete;
+        permission_state(const permission_state &) = delete;
+        permission_state &operator=(const permission_state &) = delete;
+        ~permission_state();
+
+        void start();
+
+        void stop() noexcept { _stop.set_value(); }
+
+      private:
+        ice::task<void> refresh_permission_task(auto self);
+
+        ice::shared_promise<void> _stop{};
+    };
+
+    struct expired_channel_number {
+        uint16_t channel_number{};
+        std::chrono::time_point<std::chrono::steady_clock> expiry_time{};
+
+        friend auto operator<=>(const expired_channel_number &lhs,
+                                const expired_channel_number &rhs) noexcept {
+            return lhs.expiry_time <=> rhs.expiry_time;
+        }
+    };
 
     next_layer_type _sock;
     stun::client<next_layer_type> _stun_client;
@@ -116,7 +186,13 @@ struct datagram_client
     uint32_t _lifetime{0};
     std::optional<ice::endpoint> _relayed_address{};
     std::optional<ice::endpoint> _reflex_address{};
-    ice::shared_promise<void> _stop_refresh_task{};
+    ice::shared_promise<void> _stop_refresh_allocation_task{};
+    boost::container::flat_map<net::ip::address, permission_state *>
+        _ip_to_channel{};
+    boost::container::flat_map<uint16_t, permission_state *> _channel_to_ip{};
+    std::deque<expired_channel_number> _expired_number{};
+    ice::shared_promise<void> _stop_expire_number_task{};
+    bool _is_running{true};
 };
 
 } // namespace ice::turn::impl

@@ -89,6 +89,23 @@ template <is_datagram_layer NextLayer> class client<NextLayer> {
         return _impl->refresh(time_to_expiry, std::move(self)...);
     }
 
+    ice::task<bool> create_permission(net::ip::address peer, auto... self) {
+        return _impl->create_permission(peer, std::move(self)...);
+    }
+
+    ice::task<bool> create_permission(std::ranges::view auto peers,
+                                      auto... self) {
+        return _impl->create_permission(std::move(peers), std::move(self)...);
+    }
+
+    void delete_permission(const net::ip::address &peer) {
+        _impl->delete_permission(peer);
+    }
+
+    void delete_permission(std::ranges::view auto peers) {
+        _impl->delete_permission(std::move(peers));
+    }
+
     void stop() noexcept {
         if (!_impl)
             return;

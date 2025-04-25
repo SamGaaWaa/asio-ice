@@ -131,6 +131,8 @@ void allocate_test() {
         }
         std::cout << "Relayed address: " << relayed->address() << ":"
                   << relayed->port() << '\n';
+        co_await client->create_permission(
+            net::ip::make_address("10.255.255.254"));
     };
 
     asio2exec::scheduler sched{ctx};

@@ -207,7 +207,7 @@ struct message {
     std::optional<endpoint> changed_address;
     std::optional<uint16_t> channel_number;
     std::optional<uint32_t> lifetime; // seconds
-    boost::container::small_vector<endpoint, 1> xor_peer_address;
+    std::vector<endpoint> xor_peer_address;
     std::optional<endpoint> xor_relayed_address;
     bool requested_transport{false};
     std::optional<endpoint> response_origin;
