@@ -165,6 +165,23 @@ struct message {
         _security_features = features;
     }
     void prepend_nonce_cookie();
+    bool has_turn_data() const noexcept {
+        return _turn_data || _reserved_turn_data;
+    }
+    const std::byte *turn_data() const noexcept { return _turn_data->data(); }
+    std::size_t turn_data_size() const noexcept { return _turn_data->size(); }
+    void reserve_turn_data(std::size_t size) noexcept {
+        _reserved_turn_data = size;
+    }
+    bool has_reserved_turn_data() const noexcept {
+        return !!_reserved_turn_data;
+    }
+    std::size_t reserved_turn_data_size() const noexcept {
+        return *_reserved_turn_data;
+    }
+    std::byte *writable_turn_data() const noexcept {
+        return _writable_turn_data;
+    }
 
     static bool is_not_stun(const void *data, std::size_t length) noexcept;
     static const uint8_t *
@@ -207,7 +224,7 @@ struct message {
     std::optional<endpoint> changed_address;
     std::optional<uint16_t> channel_number;
     std::optional<uint32_t> lifetime; // seconds
-    std::vector<endpoint> xor_peer_address;
+    boost::container::small_vector<endpoint, 1> xor_peer_address;
     std::optional<endpoint> xor_relayed_address;
     bool requested_transport{false};
     std::optional<endpoint> response_origin;
@@ -224,6 +241,9 @@ struct message {
     std::string _hmac_key;
     bool _use_fingerprint{false};
     uint32_t _security_features{0};
+    std::optional<std::span<const std::byte>> _turn_data; // only for parsing
+    std::optional<std::size_t> _reserved_turn_data;  // only for serializing
+    mutable std::byte *_writable_turn_data{nullptr}; // only for serializing
 };
 
 } // namespace ice::stun

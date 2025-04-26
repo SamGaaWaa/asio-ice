@@ -106,6 +106,13 @@ template <is_datagram_layer NextLayer> class client<NextLayer> {
         _impl->delete_permission(std::move(peers));
     }
 
+    template <class ConstBufferSequence>
+    ice::task<std::tuple<std::error_code, std::size_t>>
+    async_send_to(const ConstBufferSequence &buffers,
+                  const endpoint_type &destination, auto... self) {
+        return _impl->async_send_to(buffers, destination, std::move(self)...);
+    }
+
     void stop() noexcept {
         if (!_impl)
             return;

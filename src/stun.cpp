@@ -928,6 +928,8 @@ bool message::parse(const void *data, std::size_t buf_size,
             break;
         }
         case attr_type_t::STUN_ATTR_DATA: {
+            this->_turn_data = std::span<const std::byte>{
+                (const std::byte *)attr.value(), attr_len};
             break;
         }
         case attr_type_t::STUN_ATTR_EVEN_PORT: {
@@ -1366,14 +1368,29 @@ int message::write_to(void *buf, size_t length) const noexcept {
         ++iter;
     }
 
-    if (iter != end) {
-        static constexpr std::string_view sw = "asio-ice";
-        if (iter->value() + sw.size() <= buf_end) {
-            iter->type =
-                binary::hton<uint16_t>(attr_type_t::STUN_ATTR_SOFTWARE);
-            iter->length = binary::hton<uint16_t>(sw.size());
-            std::ranges::copy(sw, iter->value());
-            ++iter;
+    if (!this->software.empty()) {
+        if (iter == end)
+            goto overflow;
+        if (iter->value() + this->software.size() > buf_end)
+            goto overflow;
+        iter->type = binary::hton<uint16_t>(attr_type_t::STUN_ATTR_SOFTWARE);
+        iter->length = binary::hton<uint16_t>(this->software.size());
+        std::ranges::copy(this->software, iter->value());
+        ++iter;
+    }
+
+    if (_reserved_turn_data) {
+        if (iter == end)
+            goto overflow;
+        iter->type = binary::hton<uint16_t>(attr_type_t::STUN_ATTR_DATA);
+        iter->length = binary::hton<uint16_t>(*_reserved_turn_data);
+        _writable_turn_data = (std::byte *)iter->value();
+        std::size_t written = iter->value() - buf_begin;
+        ++iter;
+        if (iter == end) {
+            binary::write_big<uint16_t>(
+                &header->length, iter.data() - buf_begin - sizeof(header_t));
+            return written;
         }
     }
 
@@ -1528,6 +1545,9 @@ void message::reset() noexcept {
     _checked_fingerprint = false;
     _hmac_key.clear();
     _use_fingerprint = false;
+    _turn_data.reset();
+    _reserved_turn_data.reset();
+    _writable_turn_data = nullptr;
 }
 
 std::size_t message::serialized_size() const noexcept {
@@ -1654,6 +1674,10 @@ std::size_t message::serialized_size() const noexcept {
 
     if (_use_fingerprint) {
         total += 4 + 4;
+    }
+
+    if (_reserved_turn_data) {
+        total += align_size(4 + *_reserved_turn_data);
     }
 
     return total;

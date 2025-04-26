@@ -11,6 +11,7 @@
 
 #if ASIOICE_USE_BOOST > 0
 #define ASIO_TO_EXEC_USE_BOOST 1
+#include <boost/asio/buffers_iterator.hpp>
 #include <boost/asio/io_context.hpp>
 #include <boost/asio/ip/tcp.hpp>
 #include <boost/asio/ip/udp.hpp>
@@ -18,6 +19,7 @@ namespace ice {
 namespace net = boost::asio;
 }
 #else
+#include <asio/buffers_iterator.hpp>
 #include <asio/io_context.hpp>
 #include <asio/ip/tcp.hpp>
 #include <asio/ip/udp.hpp>
@@ -120,6 +122,11 @@ struct datagram_client
             delete_permission(peer);
         }
     }
+
+    template <class ConstBufferSequence>
+    ice::task<std::tuple<std::error_code, std::size_t>>
+    async_send_to(const ConstBufferSequence &buffers,
+                  const endpoint_type &destination, auto... self);
 
   private:
     void do_delete_allocation();

@@ -450,4 +450,62 @@ void datagram_client<NextLayer>::delete_permission(
     it->second->stop();
 }
 
+template <class NextLayer>
+template <class ConstBufferSequence>
+ice::task<std::tuple<std::error_code, std::size_t>>
+datagram_client<NextLayer>::async_send_to(
+    const ConstBufferSequence &buffers,
+    const typename datagram_client<NextLayer>::endpoint_type &destination,
+    auto... self) {
+    auto it = this->_ip_to_channel.find(destination.address());
+    if (it == this->_ip_to_channel.end()) {
+        ICE_IN_DEBUG {
+            std::cout << "No permissions to send to " << destination.address()
+                      << "\n";
+        }
+        co_return std::make_tuple(std::make_error_code(std::errc::bad_address),
+                                  0);
+    }
+    auto *p = it->second;
+    auto channel_it = p->port_to_channel.find(destination.port());
+    if (channel_it == p->port_to_channel.end()) {
+        // send indication
+        std::size_t data_size = net::buffer_size(buffers);
+
+        stun::message msg;
+        msg.cls = stun::class_t::STUN_CLASS_INDICATION;
+        msg.method = stun::method_t::STUN_METHOD_SEND;
+        msg.fill_random_transaction_id();
+        msg.reserve_turn_data(data_size);
+        msg.xor_peer_address.emplace_back(destination.address(),
+                                          destination.port());
+
+        char buf[20 + 4 + 20 + 4] = {};
+        int n = msg.write_to(buf, sizeof(buf));
+        assert(n <= sizeof(buf) && "Write turn send indication failed");
+
+        auto buffer_first = net::buffer_sequence_begin(buffers);
+        auto buffer_last = net::buffer_sequence_end(buffers);
+        std::size_t buffer_count = std::distance(buffer_first, buffer_last);
+
+        boost::container::small_vector<net::const_buffer, 128>
+            indication_buffers;
+        indication_buffers.resize(buffer_count + 1);
+        indication_buffers.front() = net::const_buffer(buf, n);
+        std::transform(
+            buffer_first, buffer_last, indication_buffers.begin() + 1,
+            [](const auto &b) noexcept { return net::const_buffer(b); });
+
+        char pad[4] = {0};
+        if (data_size % 4 != 0) {
+            indication_buffers.emplace_back(pad, 4 - data_size % 4);
+        }
+        co_return co_await this->next_layer().async_send_to(
+            indication_buffers, this->remote_endpoint(), asio2exec::use_sender);
+    } else {
+        // TODO: send channel data
+        co_return std::make_tuple(std::error_code(), 0);
+    }
+}
+
 } // namespace ice::turn::impl
