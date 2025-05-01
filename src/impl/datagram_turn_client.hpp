@@ -60,7 +60,6 @@ struct datagram_client
             return;
         _is_running = false;
         _stun_client.stop();
-        _sock.close();
         _expired_number.clear();
         _stop_expire_number_task.set_value();
         do_delete_allocation();
@@ -99,8 +98,10 @@ struct datagram_client
     ice::task<std::optional<net::ip::udp::endpoint>>
     create_allocation(auto lifetime, auto... self);
 
-    ice::task<bool> channel_bind(uint16_t channel_number,
-                                 net::ip::udp::endpoint peer, auto... self);
+    uint16_t generate_channel_number() const;
+
+    ice::task<bool> channel_bind(net::ip::udp::endpoint peer, uint16_t channel,
+                                 auto... self);
 
     ice::task<void> delete_allocation(auto... self);
 
@@ -128,6 +129,10 @@ struct datagram_client
     async_send_to(const ConstBufferSequence &buffers,
                   const endpoint_type &destination, auto... self);
 
+    template <class ConstBufferSequence>
+    auto send_channel_data(const ConstBufferSequence &buffers, uint16_t channel,
+                           auto... self);
+
   private:
     void do_delete_allocation();
     ice::task<bool> request_with_retry(stun::message &req, stun::message &resp,
@@ -138,21 +143,17 @@ struct datagram_client
 
     void clear_permissions() noexcept;
 
-    uint16_t generate_channel_number() const noexcept;
-
     void mark_channel_number_expired(std::ranges::view auto channel_numbers);
     ice::task<void> expire_channel_number_task(auto self);
     void start_expire_channel_number_task();
 
     struct permission_state : std::enable_shared_from_this<permission_state> {
-        net::ip::address peer_ip{};
-        boost::container::flat_map<uint16_t, uint16_t>
-            port_to_channel{}; // empty means no channel binding
-        boost::container::flat_map<uint16_t, uint16_t>
-            channel_to_port{}; // empty means no channel binding
-        std::shared_ptr<datagram_client<NextLayer>> client;
+        permission_state(const net::ip::address peer,
+                         datagram_client<NextLayer> &client)
+            : _ip(peer), _client(client.shared_from_this()) {
+            _client->_ip_to_channel[_ip] = this;
+        }
 
-        permission_state() = default;
         permission_state(permission_state &&) = delete;
         permission_state &operator=(permission_state &&) = delete;
         permission_state(const permission_state &) = delete;
@@ -160,12 +161,36 @@ struct datagram_client
         ~permission_state();
 
         void start();
-
         void stop() noexcept { _stop.set_value(); }
 
+        const net::ip::address &ip() const noexcept { return _ip; }
+        std::optional<uint16_t>
+        find_channel_by_port(uint16_t port) const noexcept;
+        std::optional<uint16_t>
+        find_port_by_channel(uint16_t channel) const noexcept;
+        bool add_channel(uint16_t port, uint16_t channel) noexcept;
+        bool remove_channel(uint16_t channel) noexcept;
+        void remove_all_channels() noexcept;
+        auto all_channels() const noexcept;
+        auto all_ports() const noexcept;
+
       private:
+        void add_to_refresh_queue(
+            uint16_t channel,
+            std::chrono::steady_clock::time_point refresh_time);
+        std::pair<uint16_t, std::chrono::steady_clock::time_point>
+        next_refresh_channel() noexcept;
+        void remove_from_refresh_queue(uint16_t channel) noexcept;
         ice::task<void> refresh_permission_task(auto self);
 
+        net::ip::address _ip{};
+        boost::container::flat_map<uint16_t, uint16_t>
+            _port_to_channel{}; // empty means no channel binding
+        boost::container::flat_map<uint16_t, uint16_t>
+            _channel_to_port{}; // empty means no channel binding
+        std::shared_ptr<datagram_client<NextLayer>> _client;
+        std::vector<std::pair<uint16_t, std::chrono::steady_clock::time_point>>
+            _refresh_queue{};
         ice::shared_promise<void> _stop{};
     };
 

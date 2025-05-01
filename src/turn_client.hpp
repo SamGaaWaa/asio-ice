@@ -76,9 +76,13 @@ template <is_datagram_layer NextLayer> class client<NextLayer> {
         return _impl->create_allocation(lifetime, std::move(self)...);
     }
 
-    ice::task<bool> channel_bind(uint16_t channel_number,
-                                 net::ip::udp::endpoint peer, auto... self) {
-        return _impl->channel_bind(channel_number, peer, std::move(self)...);
+    uint16_t generate_channel_number() const {
+        return _impl->generate_channel_number();
+    }
+
+    ice::task<bool> channel_bind(net::ip::udp::endpoint peer, uint16_t channel,
+                                 auto... self) {
+        return _impl->channel_bind(peer, channel, std::move(self)...);
     }
 
     ice::task<void> delete_allocation(auto... self) {
@@ -113,12 +117,13 @@ template <is_datagram_layer NextLayer> class client<NextLayer> {
         return _impl->async_send_to(buffers, destination, std::move(self)...);
     }
 
-    void stop() noexcept {
-        if (!_impl)
-            return;
-        auto impl = std::exchange(_impl, nullptr);
-        impl->stop();
+    template <class ConstBufferSequence>
+    auto send_channel_data(const ConstBufferSequence &buffers, uint16_t channel,
+                           auto... self) {
+        return _impl->send_channel_data(buffers, channel, std::move(self)...);
     }
+
+    void stop() noexcept { _impl->stop(); }
 
   private:
     std::shared_ptr<impl_type> _impl;

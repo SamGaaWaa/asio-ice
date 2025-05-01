@@ -269,7 +269,7 @@ ice::task<void> datagram_client<NextLayer>::delete_allocation(auto... self) {
 
 template <class NextLayer>
 void datagram_client<NextLayer>::permission_state::start() {
-    asio2exec::scheduler sched{this->client->context()};
+    asio2exec::scheduler sched{this->_client->context()};
     stdexec::start_detached(stdexec::starts_on(
         sched, utils::stop_when(
                    this->refresh_permission_task(this->shared_from_this()),
@@ -278,41 +278,184 @@ void datagram_client<NextLayer>::permission_state::start() {
 
 template <class NextLayer>
 datagram_client<NextLayer>::permission_state::~permission_state() {
-    if (!this->client)
+    if (!this->_client)
         return;
-    auto &c = *this->client;
-    c._ip_to_channel.erase(this->peer_ip);
-    for (const auto [channel, _] : this->channel_to_port) {
+    auto &c = *this->_client;
+    c._ip_to_channel.erase(this->ip());
+    this->remove_all_channels();
+}
+
+template <class NextLayer>
+std::optional<uint16_t>
+datagram_client<NextLayer>::permission_state::find_channel_by_port(
+    uint16_t port) const noexcept {
+    auto it = this->_port_to_channel.find(port);
+    if (it == this->_port_to_channel.end())
+        return std::nullopt;
+    return it->second;
+}
+
+template <class NextLayer>
+std::optional<uint16_t>
+datagram_client<NextLayer>::permission_state::find_port_by_channel(
+    uint16_t channel) const noexcept {
+    auto it = this->_channel_to_port.find(channel);
+    if (it == this->_channel_to_port.end())
+        return std::nullopt;
+    return it->second;
+}
+
+template <class NextLayer>
+bool datagram_client<NextLayer>::permission_state::add_channel(
+    uint16_t port, uint16_t channel) noexcept {
+    auto [it, success] = this->_port_to_channel.insert({port, channel});
+    if (!success)
+        return false;
+    this->_channel_to_port.insert({channel, port});
+    this->_client->_channel_to_ip[channel] = this;
+    auto now = std::chrono::steady_clock::now();
+    this->add_to_refresh_queue(channel, now + std::chrono::seconds(60 * 9));
+    return true;
+}
+
+template <class NextLayer>
+bool datagram_client<NextLayer>::permission_state::remove_channel(
+    uint16_t channel) noexcept {
+    auto it = this->_channel_to_port.find(channel);
+    if (it == this->_channel_to_port.end())
+        return false;
+    this->_client->_channel_to_ip.erase(channel);
+    this->_client->mark_channel_number_expired(std::views::single(it->second));
+    this->_port_to_channel.erase(it->second);
+    this->_channel_to_port.erase(it);
+    this->remove_from_refresh_queue(channel);
+    return true;
+}
+
+template <class NextLayer>
+void datagram_client<
+    NextLayer>::permission_state::remove_all_channels() noexcept {
+    if (this->_channel_to_port.empty())
+        return;
+    auto &c = *this->_client;
+    for (const auto [channel, _] : this->_channel_to_port) {
         c._channel_to_ip.erase(channel);
     }
-    this->client->mark_channel_number_expired(
-        std::views::keys(this->channel_to_port));
+    c.mark_channel_number_expired(std::views::keys(this->_channel_to_port));
+    this->_port_to_channel.clear();
+    this->_channel_to_port.clear();
+    this->_refresh_queue.clear();
+}
+
+template <class NextLayer>
+auto datagram_client<NextLayer>::permission_state::all_channels()
+    const noexcept {
+    return std::views::keys(this->_channel_to_port);
+}
+
+template <class NextLayer>
+auto datagram_client<NextLayer>::permission_state::all_ports() const noexcept {
+    return std::views::keys(this->_port_to_channel);
+}
+
+template <class NextLayer>
+void datagram_client<NextLayer>::permission_state::add_to_refresh_queue(
+    uint16_t channel, std::chrono::steady_clock::time_point refresh_time) {
+    this->_refresh_queue.emplace_back(channel, refresh_time);
+    std::ranges::push_heap(
+        this->_refresh_queue,
+        [](const auto &a, const auto &b) { return a.second > b.second; });
+}
+
+template <class NextLayer>
+std::pair<uint16_t, std::chrono::steady_clock::time_point>
+datagram_client<NextLayer>::permission_state::next_refresh_channel() noexcept {
+    auto res = this->_refresh_queue.front();
+    std::ranges::pop_heap(
+        this->_refresh_queue,
+        [](const auto &a, const auto &b) { return a.second > b.second; });
+    this->_refresh_queue.pop_back();
+    return res;
+}
+
+template <class NextLayer>
+void datagram_client<NextLayer>::permission_state::remove_from_refresh_queue(
+    uint16_t channel) noexcept {
+    auto it =
+        std::ranges::find_if(this->_refresh_queue, [channel](const auto &a) {
+            return a.first == channel;
+        });
+    if (it == this->_refresh_queue.end())
+        return;
+    this->_refresh_queue.erase(it);
+    std::ranges::make_heap(
+        this->_refresh_queue,
+        [](const auto &a, const auto &b) { return a.second > b.second; });
 }
 
 template <class NextLayer>
 ice::task<void>
 datagram_client<NextLayer>::permission_state::refresh_permission_task(
     auto self) {
-    net::steady_timer timer{self->client->context()};
+    net::steady_timer timer{self->_client->context()};
     while (true) {
-        timer.expires_after(std::chrono::seconds(60 * 4));
+        auto now = std::chrono::steady_clock::now();
+        if (this->_refresh_queue.empty() ||
+            (this->_refresh_queue.front().second > now &&
+             this->_refresh_queue.front().second - now >
+                 std::chrono::seconds(60 * 4))) {
+            timer.expires_at(now + std::chrono::seconds(60 * 4));
+            auto ret = co_await (timer.async_wait(asio2exec::use_sender) |
+                                 stdexec::stopped_as_optional());
+            if (!ret) {
+                ICE_IN_DEBUG { std::cout << "Refresh task cancelled\n"; }
+                co_return;
+            }
+            if (!co_await this->_client->create_permission(this->ip())) {
+                ICE_IN_DEBUG { std::cout << "Failed to refresh permission\n"; }
+                co_return;
+            }
+            continue;
+        }
+        auto next = this->next_refresh_channel();
+        net::ip::udp::endpoint peer(
+            this->ip(), this->find_port_by_channel(next.first).value());
+        if (next.second <= now) {
+            utils::scope_guard guard([&]() noexcept {
+                this->add_to_refresh_queue(next.first,
+                                           now + std::chrono::seconds(60 * 9));
+            });
+            bool success =
+                co_await this->_client->channel_bind(peer, next.first);
+            if (!success) {
+                ICE_IN_DEBUG { std::cerr << "Refresh channel failed\n"; }
+                this->remove_channel(next.first);
+                continue;
+            }
+            ICE_IN_DEBUG {
+                std::cout << "Refresh channel " << next.first << " success\n";
+            }
+            continue;
+        }
+        timer.expires_at(next.second);
         auto ret = co_await (timer.async_wait(asio2exec::use_sender) |
                              stdexec::stopped_as_optional());
         if (!ret) {
-            ICE_IN_DEBUG {
-                std::cout << "Permission of " << this->peer_ip.to_string()
-                          << " expired.\n";
-            }
+            ICE_IN_DEBUG { std::cout << "Refresh task cancelled\n"; }
             co_return;
         }
-        bool refreshed =
-            co_await this->client->create_permission(this->peer_ip);
-        if (!refreshed) {
-            ICE_IN_DEBUG {
-                std::cout << "Permission of " << this->peer_ip.to_string()
-                          << " refresh failed.\n";
-            }
-            co_return;
+        utils::scope_guard guard([&]() noexcept {
+            this->add_to_refresh_queue(
+                next.first, next.second + std::chrono::seconds(60 * 9));
+        });
+        bool success = co_await this->_client->channel_bind(peer, next.first);
+        if (!success) {
+            ICE_IN_DEBUG { std::cerr << "Refresh channel failed\n"; }
+            this->remove_channel(next.first);
+            continue;
+        }
+        ICE_IN_DEBUG {
+            std::cout << "Refresh channel " << next.first << " success\n";
         }
     }
 }
@@ -325,17 +468,35 @@ void datagram_client<NextLayer>::clear_permissions() noexcept {
 }
 
 template <class NextLayer>
-uint16_t datagram_client<NextLayer>::generate_channel_number() const noexcept {
-    return std::max(this->_channel_to_ip.rbegin()->first,
-                    this->_expired_number.empty()
-                        ? 0
-                        : std::ranges::max_element(
-                              this->_expired_number,
-                              [](const auto &a, const auto &b) noexcept {
-                                  return a.channel_number < b.channel_number;
-                              })
-                              ->channel_number) +
-           1;
+uint16_t datagram_client<NextLayer>::generate_channel_number() const {
+    auto ch = std::max(this->_channel_to_ip.empty()
+                           ? 0x3fff
+                           : this->_channel_to_ip.rbegin()->first,
+                       this->_expired_number.empty()
+                           ? 0
+                           : std::ranges::max_element(
+                                 this->_expired_number,
+                                 [](const auto &a, const auto &b) noexcept {
+                                     return a.channel_number < b.channel_number;
+                                 })
+                                 ->channel_number) +
+              1;
+    if (ch < 0x5000)
+        return ch;
+    std::vector<uint16_t> used;
+    used.resize(this->_channel_to_ip.size() + this->_expired_number.size());
+    std::ranges::copy(this->_channel_to_ip | std::views::keys, used.begin());
+    std::ranges::transform(
+        this->_expired_number, used.begin() + this->_channel_to_ip.size(),
+        [](const auto &a) noexcept { return a.channel_number; });
+    std::ranges::sort(used);
+    uint16_t i = 0x4000;
+    for (auto &ch : used) {
+        if (ch != i)
+            return i;
+        ++i;
+    }
+    throw std::runtime_error("no available channel number");
 }
 
 template <class NextLayer>
@@ -430,12 +591,9 @@ datagram_client<NextLayer>::create_permission(std::ranges::view auto peers,
     for (const auto &peer : req.xor_peer_address) {
         if (this->_ip_to_channel.contains(peer.address))
             continue;
-        auto ptr =
-            std::make_shared<datagram_client<NextLayer>::permission_state>();
-        ptr->peer_ip = peer.address;
-        ptr->client = this->shared_from_this();
-        this->_ip_to_channel.emplace(peer.address, ptr.get());
-        ptr->start();
+        std::make_shared<datagram_client<NextLayer>::permission_state>(
+            peer.address, *this)
+            ->start();
     }
     co_return true;
 }
@@ -467,45 +625,122 @@ datagram_client<NextLayer>::async_send_to(
                                   0);
     }
     auto *p = it->second;
-    auto channel_it = p->port_to_channel.find(destination.port());
-    if (channel_it == p->port_to_channel.end()) {
-        // send indication
-        std::size_t data_size = net::buffer_size(buffers);
-
-        stun::message msg;
-        msg.cls = stun::class_t::STUN_CLASS_INDICATION;
-        msg.method = stun::method_t::STUN_METHOD_SEND;
-        msg.fill_random_transaction_id();
-        msg.reserve_turn_data(data_size);
-        msg.xor_peer_address.emplace_back(destination.address(),
-                                          destination.port());
-
-        char buf[20 + 4 + 20 + 4] = {};
-        int n = msg.write_to(buf, sizeof(buf));
-        assert(n <= sizeof(buf) && "Write turn send indication failed");
-
-        auto buffer_first = net::buffer_sequence_begin(buffers);
-        auto buffer_last = net::buffer_sequence_end(buffers);
-        std::size_t buffer_count = std::distance(buffer_first, buffer_last);
-
-        boost::container::small_vector<net::const_buffer, 128>
-            indication_buffers;
-        indication_buffers.resize(buffer_count + 1);
-        indication_buffers.front() = net::const_buffer(buf, n);
-        std::transform(
-            buffer_first, buffer_last, indication_buffers.begin() + 1,
-            [](const auto &b) noexcept { return net::const_buffer(b); });
-
-        char pad[4] = {0};
-        if (data_size % 4 != 0) {
-            indication_buffers.emplace_back(pad, 4 - data_size % 4);
-        }
-        co_return co_await this->next_layer().async_send_to(
-            indication_buffers, this->remote_endpoint(), asio2exec::use_sender);
-    } else {
-        // TODO: send channel data
-        co_return std::make_tuple(std::error_code(), 0);
+    auto channel = p->find_channel_by_port(destination.port());
+    if (channel.has_value()) {
+        ICE_IN_DEBUG { std::cout << "Send channel data\n"; }
+        co_return co_await this->send_channel_data(buffers, *channel);
     }
+    // send indication
+    ICE_IN_DEBUG { std::cout << "Send indication\n"; }
+    std::size_t data_size = net::buffer_size(buffers);
+
+    stun::message msg;
+    msg.cls = stun::class_t::STUN_CLASS_INDICATION;
+    msg.method = stun::method_t::STUN_METHOD_SEND;
+    msg.fill_random_transaction_id();
+    msg.reserve_turn_data(data_size);
+    msg.xor_peer_address.emplace_back(destination.address(),
+                                      destination.port());
+
+    char buf[20 + 4 + 20 + 4] = {};
+    int n = msg.write_to(buf, sizeof(buf));
+    assert(n <= sizeof(buf) && "Write turn send indication failed");
+
+    auto buffer_first = net::buffer_sequence_begin(buffers);
+    auto buffer_last = net::buffer_sequence_end(buffers);
+    std::size_t buffer_count = std::distance(buffer_first, buffer_last);
+
+    boost::container::small_vector<net::const_buffer, 128> indication_buffers;
+    indication_buffers.resize(buffer_count + 1);
+    indication_buffers.front() = net::const_buffer(buf, n);
+    std::transform(buffer_first, buffer_last, indication_buffers.begin() + 1,
+                   [](const auto &b) noexcept { return net::const_buffer(b); });
+
+    char pad[4] = {0};
+    if (data_size % 4 != 0) {
+        indication_buffers.emplace_back(pad, 4 - data_size % 4);
+    }
+    co_return co_await this->next_layer().async_send_to(
+        indication_buffers, this->remote_endpoint(), asio2exec::use_sender);
+}
+
+template <class NextLayer>
+template <class ConstBufferSequence>
+auto datagram_client<NextLayer>::send_channel_data(
+    const ConstBufferSequence &buffers, uint16_t channel, auto... self) {
+    auto data_size = net::buffer_size(buffers);
+    auto buffer_first = net::buffer_sequence_begin(buffers);
+    auto buffer_last = net::buffer_sequence_end(buffers);
+    std::size_t buffer_count = std::distance(buffer_first, buffer_last);
+    boost::container::small_vector<net::const_buffer, 128> channel_buffers(
+        buffer_count + 1);
+    std::transform(buffer_first, buffer_last, channel_buffers.begin() + 1,
+                   [](const auto &b) noexcept { return net::const_buffer(b); });
+    return stdexec::just(std::move(channel_buffers), std::array<char, 4>{},
+                         std::move(self)...) |
+           stdexec::let_value(
+               [channel, data_size, this](auto &buffers, auto &header,
+                                          const auto &...self) noexcept {
+                   binary::write_big<uint16_t>(header.data(), channel);
+                   binary::write_big<uint16_t>(header.data() + 2,
+                                               (uint16_t)data_size);
+                   buffers.front() =
+                       net::const_buffer(header.data(), header.size());
+                   return this->next_layer().async_send_to(
+                       buffers, this->remote_endpoint(), asio2exec::use_sender);
+               });
+}
+
+template <class NextLayer>
+ice::task<bool>
+datagram_client<NextLayer>::channel_bind(net::ip::udp::endpoint peer,
+                                         uint16_t channel, auto... self) {
+    if (!this->_relayed_address) {
+        ICE_IN_DEBUG { std::cout << "Haven't allocate.\n"; }
+        co_return false;
+    }
+    if ((this->_relayed_address->address.is_v4() && !peer.address().is_v4()) ||
+        (this->_relayed_address->address.is_v6() && !peer.address().is_v6())) {
+        ICE_IN_DEBUG {
+            std::cout << "Peer address is not the same type as the relayed "
+                         "address.\n";
+        }
+        co_return false;
+    }
+    ICE_IN_DEBUG {
+        std::cout << "Bind or refresh channel: {" << peer.address() << ":"
+                  << peer.port() << ", " << channel << "}\n";
+    }
+    stun::message req;
+    req.cls = stun::class_t::STUN_CLASS_REQUEST;
+    req.method = stun::method_t::STUN_METHOD_CHANNEL_BIND;
+    req.fill_random_transaction_id();
+    req.use_fingerprint(true);
+    req.xor_peer_address.emplace_back(peer.address(), peer.port());
+    req.channel_number = channel;
+
+    stun::message resp;
+    bool success = co_await this->request_with_retry(req, resp, 7);
+    if (!success) {
+        ICE_IN_DEBUG {
+            std::cout << "Bind or refresh channel failed: {" << peer.address()
+                      << ":" << peer.port() << ", " << channel << "}\n";
+        }
+        co_return false;
+    }
+    ICE_IN_DEBUG {
+        std::cout << "Bind or refresh channel success: {" << peer.address()
+                  << ":" << peer.port() << ", " << channel << "}\n";
+    }
+    auto it = this->_ip_to_channel.find(peer.address());
+    if (it == this->_ip_to_channel.end()) {
+        auto p = std::make_shared<datagram_client<NextLayer>::permission_state>(
+            peer.address(), *this);
+        p->add_channel(peer.port(), channel);
+        p->start();
+    } else
+        it->second->add_channel(peer.port(), channel);
+    co_return true;
 }
 
 } // namespace ice::turn::impl

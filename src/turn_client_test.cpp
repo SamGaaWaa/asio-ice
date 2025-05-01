@@ -136,8 +136,9 @@ void allocate_test() {
                   << relayed->port() << '\n';
 
         auto peer = remote_peer.local_endpoint();
-        std::cout << "Creat permission for " << peer.address() << '\n';
-        co_await client->create_permission(peer.address());
+        std::cout << "Creat channel for " << peer.address() << ':'
+                  << peer.port() << '\n';
+        co_await client->channel_bind(peer, client->generate_channel_number());
 
         std::cout << "\nSending data...\n";
         net::steady_timer timer{ctx};
