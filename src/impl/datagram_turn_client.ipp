@@ -743,4 +743,130 @@ datagram_client<NextLayer>::channel_bind(net::ip::udp::endpoint peer,
     co_return true;
 }
 
+template <class NextLayer>
+ice::task<std::expected<ice::message, std::error_code>>
+datagram_client<NextLayer>::read(
+    typename datagram_client<NextLayer>::endpoint_type &from, auto... self) {
+    if (!this->is_running())
+        co_return std::unexpected(
+            std::make_error_code(std::errc::invalid_argument));
+    auto &turn_q = this->_pool.get_pool(message_type::turn_channel);
+    auto &stun_q = this->_pool.get_pool(message_type::stun);
+    while (this->is_running()) {
+        while (!turn_q.empty()) {
+            auto it = std::ranges::find_if(
+                turn_q, [this](const message_pool::value_type &v) noexcept {
+                    const auto &msg = v.first;
+                    const auto &ep = v.second;
+                    assert(msg.type() == message_type::turn_channel);
+                    return ep.address == this->remote_endpoint().address() &&
+                           ep.port == this->remote_endpoint().port();
+                });
+            if (it == turn_q.end())
+                break;
+            auto [msg, ep] = std::move(*it);
+            turn_q.erase(it);
+
+            uint16_t channel_number = binary::read_big<uint16_t>(msg.data());
+            uint16_t len = binary::read_big<uint16_t>((char *)msg.data() + 2);
+            auto ip_it = this->_channel_to_ip.find(channel_number);
+            if (ip_it == this->_channel_to_ip.end()) {
+                // drop
+                continue;
+            }
+
+            auto *permission = ip_it->second;
+            from = typename datagram_client<NextLayer>::endpoint_type(
+                permission->ip(),
+                *permission->find_port_by_channel(channel_number));
+            msg += 4;
+            co_return std::move(msg);
+        }
+        while (!stun_q.empty()) {
+            auto it = std::ranges::find_if(
+                stun_q, [this](const message_pool::value_type &v) noexcept {
+                    const auto &msg = v.first;
+                    const auto &ep = v.second;
+                    assert(msg.type() == message_type::stun);
+                    auto cls = stun::message::get_class(msg.data(), msg.size());
+                    auto method =
+                        stun::message::get_method(msg.data(), msg.size());
+                    return ep.address == this->remote_endpoint().address() &&
+                           ep.port == this->remote_endpoint().port() &&
+                           ((cls == stun::class_t::STUN_CLASS_INDICATION &&
+                             method == stun::method_t::STUN_METHOD_DATA) ||
+                            cls == stun::class_t::STUN_CLASS_RESP_SUCCESS ||
+                            cls == stun::class_t::STUN_CLASS_RESP_ERROR);
+                });
+            if (it == stun_q.end())
+                break;
+            auto [msg, ep] = std::move(*it);
+            stun_q.erase(it);
+
+            if (stun::message::is_response(msg.data(), msg.size())) {
+                // handle response
+                if (!this->dispatch(msg.data(), msg.size())) {
+                    auto &other_q = this->_pool.get_pool(message_type::unknown);
+                    msg.type() = message_type::unknown;
+                    other_q.push_back(std::pair{std::move(msg), ep});
+                    continue;
+                }
+                continue;
+            }
+
+            stun::message indication;
+            if (!indication.parse(msg.data(), msg.size()) ||
+                indication.xor_peer_address.size() != 1 ||
+                !indication.has_turn_data()) {
+                // may be application data
+                auto &other_q = this->_pool.get_pool(message_type::unknown);
+                msg.type() = message_type::unknown;
+                other_q.push_back(std::pair{std::move(msg), ep});
+                continue;
+            }
+            from = typename datagram_client<NextLayer>::endpoint_type(
+                indication.xor_peer_address.front().address,
+                indication.xor_peer_address.front().port);
+            msg = net::const_buffer{indication.turn_data(),
+                                    indication.turn_data_size()};
+            co_return std::move(msg);
+        }
+        co_await exec::when_any(this->_pool.wait(message_type::stun),
+                                this->_pool.wait(message_type::turn_channel),
+                                this->_stop_read_task.get_future());
+    }
+    co_return std::unexpected(
+        std::make_error_code(std::errc::operation_canceled));
+}
+
+template <class NextLayer>
+template <class MutableBufferSequence>
+auto datagram_client<NextLayer>::async_receive_from(
+    const MutableBufferSequence &buffers,
+    typename datagram_client<NextLayer>::endpoint_type &from, auto... self) {
+    auto buffer_first = net::buffer_sequence_begin(buffers);
+    auto buffer_last = net::buffer_sequence_end(buffers);
+    std::size_t buffer_count = std::distance(buffer_first, buffer_last);
+    boost::container::small_vector<net::mutable_buffer, 128> result_buffers(
+        buffer_count);
+    std::transform(
+        buffer_first, buffer_last, result_buffers.begin(),
+        [](const auto &b) noexcept { return net::mutable_buffer(b); });
+    return stdexec::just(std::move(result_buffers), std::move(self)...) |
+           stdexec::let_value(
+               [&from, this](auto &buffers, const auto &...self) {
+                   return this->read(from) |
+                          stdexec::then(
+                              [&](std::expected<ice::message, std::error_code>
+                                      msg) noexcept
+                              -> std::tuple<std::error_code, std::size_t> {
+                                  if (!msg)
+                                      return std::make_tuple(msg.error(), 0);
+                                  return std::make_tuple(
+                                      std::error_code{},
+                                      net::buffer_copy(buffers, msg->buffer()));
+                              });
+               });
+}
+
 } // namespace ice::turn::impl

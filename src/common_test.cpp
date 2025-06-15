@@ -1,5 +1,5 @@
-#include "candidate.hpp"
 #include "config.hpp"
+#include "candidate.hpp"
 #include "ice.hpp"
 
 #if ASIOICE_USE_BOOST > 0

@@ -59,70 +59,58 @@ template <class... Args> struct shared_promise {
     shared_promise(shared_promise &&) = delete;
     shared_promise &operator=(shared_promise &&) = delete;
 
-    bool set_value(const Args &...args) noexcept {
-        auto n = _operations.size();
-        if (n == 0)
-            return false;
-        for (auto i = 0; i < n; ++i) {
-            auto &op = _operations.front();
-            _operations.pop_front();
+    void set_value(const Args &...args) noexcept {
+        operation_list_type tmp;
+        tmp.swap(_operations);
+        while (!tmp.empty()) {
+            auto &op = tmp.front();
+            tmp.pop_front();
             op.set_value(args...);
-            // if it is the last operation, *this may be destroyed
         }
-        return true;
     }
 
-    bool set_one_value(const Args &...args) noexcept {
+    void set_one_value(const Args &...args) noexcept {
         if (_operations.empty())
-            return false;
+            return;
         auto &op = _operations.front();
         _operations.pop_front();
         op.set_value(args...);
-        return true;
     }
 
-    bool set_error(const std::exception_ptr &error) noexcept {
-        auto n = _operations.size();
-        if (n == 0)
-            return false;
-        for (auto i = 0; i < n; ++i) {
-            auto &op = _operations.front();
-            _operations.pop_front();
+    void set_error(const std::exception_ptr &error) noexcept {
+        operation_list_type tmp;
+        tmp.swap(_operations);
+        while (!tmp.empty()) {
+            auto &op = tmp.front();
+            tmp.pop_front();
             op.set_error(error);
-            // if it is the last operation, *this may be destroyed
         }
-        return true;
     }
 
-    bool set_one_error(const std::exception_ptr &error) noexcept {
+    void set_one_error(const std::exception_ptr &error) noexcept {
         if (_operations.empty())
-            return false;
+            return;
         auto &op = _operations.front();
         _operations.pop_front();
         op.set_error(error);
-        return true;
     }
 
-    bool set_stopped() noexcept {
-        auto n = _operations.size();
-        if (n == 0)
-            return false;
-        for (auto i = 0; i < n; ++i) {
-            auto &op = _operations.front();
-            _operations.pop_front();
+    void set_stopped() noexcept {
+        operation_list_type tmp;
+        tmp.swap(_operations);
+        while (!tmp.empty()) {
+            auto &op = tmp.front();
+            tmp.pop_front();
             op.set_stopped();
-            // if it is the last operation, *this may be destroyed
         }
-        return true;
     }
 
-    bool set_one_stopped() noexcept {
+    void set_one_stopped() noexcept {
         if (_operations.empty())
-            return false;
+            return;
         auto &op = _operations.front();
         _operations.pop_front();
         op.set_stopped();
-        return true;
     }
 
   private:
@@ -224,7 +212,8 @@ template <class... Args> struct shared_promise {
             struct on_stop_t {
                 cancelable_op_t &self;
                 void operator()() noexcept {
-                    self._ops.erase(self._ops.iterator_to(self));
+                    if (self.is_linked())
+                        self.unlink();
                     stdexec::set_stopped(std::move(self._r));
                 }
             };
@@ -271,70 +260,58 @@ template <> struct shared_promise<void> {
     shared_promise(shared_promise &&) = delete;
     shared_promise &operator=(shared_promise &&) = delete;
 
-    bool set_value() noexcept {
-        auto n = _operations.size();
-        if (n == 0)
-            return false;
-        for (auto i = 0; i < n; ++i) {
-            auto &op = _operations.front();
-            _operations.pop_front();
+    void set_value() noexcept {
+        operation_list_type tmp;
+        tmp.swap(_operations);
+        while (!tmp.empty()) {
+            auto &op = tmp.front();
+            tmp.pop_front();
             op.set_value();
-            // if it is the last operation, *this may be destroyed
         }
-        return true;
     }
 
-    bool set_one_value() noexcept {
+    void set_one_value() noexcept {
         if (_operations.empty())
-            return false;
+            return;
         auto &op = _operations.front();
         _operations.pop_front();
         op.set_value();
-        return true;
     }
 
-    bool set_error(const std::exception_ptr &error) noexcept {
-        auto n = _operations.size();
-        if (n == 0)
-            return false;
-        for (auto i = 0; i < n; ++i) {
-            auto &op = _operations.front();
-            _operations.pop_front();
+    void set_error(const std::exception_ptr &error) noexcept {
+        operation_list_type tmp;
+        tmp.swap(_operations);
+        while (!tmp.empty()) {
+            auto &op = tmp.front();
+            tmp.pop_front();
             op.set_error(error);
-            // if it is the last operation, *this may be destroyed
         }
-        return true;
     }
 
-    bool set_one_error(const std::exception_ptr &error) noexcept {
+    void set_one_error(const std::exception_ptr &error) noexcept {
         if (_operations.empty())
-            return false;
+            return;
         auto &op = _operations.front();
         _operations.pop_front();
         op.set_error(error);
-        return true;
     }
 
-    bool set_stopped() noexcept {
-        auto n = _operations.size();
-        if (n == 0)
-            return false;
-        for (auto i = 0; i < n; ++i) {
-            auto &op = _operations.front();
-            _operations.pop_front();
+    void set_stopped() noexcept {
+        operation_list_type tmp;
+        tmp.swap(_operations);
+        while (!tmp.empty()) {
+            auto &op = tmp.front();
+            tmp.pop_front();
             op.set_stopped();
-            // if it is the last operation, *this may be destroyed
         }
-        return true;
     }
 
-    bool set_one_stopped() noexcept {
+    void set_one_stopped() noexcept {
         if (_operations.empty())
-            return false;
+            return;
         auto &op = _operations.front();
         _operations.pop_front();
         op.set_stopped();
-        return true;
     }
 
   private:
@@ -418,7 +395,8 @@ template <> struct shared_promise<void> {
             struct on_stop_t {
                 cancelable_op_t &self;
                 void operator()() noexcept {
-                    self._ops.erase(self._ops.iterator_to(self));
+                    if (self.is_linked())
+                        self.unlink();
                     stdexec::set_stopped(std::move(self._r));
                 }
             };

@@ -1,6 +1,7 @@
+#pragma once
+
 #include <stdexec/execution.hpp>
 
-#include <boost/circular_buffer.hpp>
 #include <boost/intrusive/list.hpp>
 #include <boost/intrusive/list_hook.hpp>
 
@@ -35,20 +36,20 @@ class async_queue {
 
     explicit async_queue(
         std::size_t max = std::numeric_limits<std::size_t>::max()) noexcept
-        : _max(max) {
-        if constexpr (std::is_same_v<container_type,
-                                     boost::circular_buffer<T>>) {
-            _q.set_capacity(max);
-        }
-    }
+        : _max(max) {}
+
+    template <class... Args>
+    async_queue(std::size_t max, Args &&...args)
+        : _max(max), _q(std::forward<Args>(args)...) {}
 
     async_queue(const async_queue &) = delete;
     async_queue(async_queue &&) = delete;
     async_queue &operator=(const async_queue &) = delete;
     async_queue &operator=(async_queue &&) = delete;
 
+    ~async_queue() noexcept { close(); }
+
     template <class _T, class OverflowHandler>
-        requires std::is_invocable_v<OverflowHandler, container_type &>
     void push(_T &&t, OverflowHandler &&handler) {
         if (_closed) [[unlikely]]
             return;
@@ -59,23 +60,37 @@ class async_queue {
             return;
         }
         if (_q.size() == _max) [[unlikely]]
-            std::forward<OverflowHandler>(handler)(_q);
-        _q.push_back(std::forward<_T>(t)); // May override
+            std::forward<OverflowHandler>(handler)(_q, std::forward<_T>(t));
+        else
+            _q.push_back(std::forward<_T>(t));
     }
 
     template <class _T> void push(_T &&t) {
         push(std::forward<_T>(t),
-             [](container_type &c) noexcept { c.pop_front(); });
+             []<class T1>(container_type &, T1 &&) noexcept {});
+    }
+
+    std::optional<T> try_pop() noexcept {
+        if (_closed) [[unlikely]]
+            return std::nullopt;
+        if (!_q.empty()) {
+            auto t = std::move(_q.front());
+            _q.pop_front();
+            return t;
+        }
+        return std::nullopt;
     }
 
     auto async_pop() noexcept { return result<false>{this}; }
 
     auto async_pop_stoppable() noexcept { return result<true>{this}; }
 
-    void close() {
-        while (!_readers.empty()) {
-            auto &r = _readers.front();
-            _readers.pop_front();
+    void close() noexcept {
+        readers_list_t tmp;
+        std::swap(tmp, _readers);
+        while (!tmp.empty()) {
+            auto &r = tmp.front();
+            tmp.pop_front();
             r.set_stopped();
         }
         _closed = true;
@@ -209,7 +224,7 @@ class async_queue {
 
     container_type _q;
     const std::size_t _max;
-    readers_list_t _readers;
+    readers_list_t _readers{};
     bool _closed{false};
 };
 

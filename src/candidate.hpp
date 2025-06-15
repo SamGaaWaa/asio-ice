@@ -6,8 +6,8 @@
 #include <string>
 #include <string_view>
 
-#include "address.hpp"
 #include "config.hpp"
+#include "address.hpp"
 
 #if ASIOICE_USE_BOOST > 0
 #include <boost/asio/ip/udp.hpp>

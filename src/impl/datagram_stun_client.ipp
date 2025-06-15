@@ -1,25 +1,15 @@
-#include "asio2exec.hpp"
-#include "scope_guard.hpp"
-#include "stop_when.hpp"
-#include <algorithm>
-#include <boost/container/small_vector.hpp>
-#include <cassert>
-#include <ranges>
-
 namespace ice::stun::impl {
 
-template <class NextLayer> void datagram_client<NextLayer>::stop() noexcept {
-    if (!this->_running)
-        return;
-    this->_running = false;
+template <class LowestLayer>
+void datagram_client<LowestLayer>::stop() noexcept {
     this->_stop_promise.set_value();
 }
 
-template <class NextLayer>
-bool datagram_client<NextLayer>::dispatch(
-    const typename datagram_client<NextLayer>::endpoint_type &ep,
+template <class LowestLayer>
+bool datagram_client<LowestLayer>::dispatch_response(
+    const typename datagram_client<LowestLayer>::endpoint_type &ep,
     const void *data, std::size_t size) noexcept {
-    if (!this->_running)
+    if (!this->is_running())
         return false;
     if (message::is_not_stun(data, size) || !message::is_response(data, size))
         return false;
@@ -79,14 +69,14 @@ bool datagram_client<NextLayer>::dispatch(
     return true;
 }
 
-template <class NextLayer>
-ice::task<bool> datagram_client<NextLayer>::request(
-    const typename datagram_client<NextLayer>::endpoint_type &ep,
+template <class LowestLayer>
+template <class Transport>
+ice::task<bool> datagram_client<LowestLayer>::request(
+    Transport &transport,
+    const typename datagram_client<LowestLayer>::endpoint_type &ep,
     const stun::message &msg,
-    typename datagram_client<NextLayer>::endpoint_type &from,
+    typename datagram_client<LowestLayer>::endpoint_type &from,
     stun::message &resp, std::size_t max_retries, auto... self) {
-    if (!this->_running)
-        co_return false;
     ice::shared_promise<void> stop_receiver, stop_retry;
     auto retry_coro = [&, this]() -> ice::task<bool> {
         std::chrono::milliseconds retry_rto(500);
@@ -108,7 +98,7 @@ ice::task<bool> datagram_client<NextLayer>::request(
             buf.resize(n);
         }
         for (int i = 0; i < max_retries; ++i) {
-            auto [err, n] = co_await this->next_layer().async_send_to(
+            auto [err, n] = co_await transport.template async_send_to(
                 net::buffer(buf.data(), buf.size()), ep, asio2exec::use_sender);
             if (err) {
                 ICE_IN_DEBUG {

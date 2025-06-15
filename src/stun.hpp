@@ -1,7 +1,7 @@
 #pragma once
 
-#include "address.hpp"
 #include "config.hpp"
+#include "address.hpp"
 #include "endian.hpp"
 
 #if ASIOICE_USE_BOOST > 0
@@ -29,6 +29,8 @@ namespace net = asio;
 #include <vector>
 
 namespace ice::stun {
+
+inline constexpr std::size_t HEADER_SIZE = 20U;
 
 struct class_t {
     static constexpr uint16_t STUN_CLASS_REQUEST = 0x0000;
@@ -191,6 +193,10 @@ struct message {
                             std::size_t length) noexcept(!ICE_DEBUG);
     static void compute_userhash(void *out, std::string_view username,
                                  std::string_view realm);
+    static class_t get_class(const void *data,
+                             std::size_t length) noexcept(!ICE_DEBUG);
+    static method_t get_method(const void *data,
+                               std::size_t length) noexcept(!ICE_DEBUG);
 
     class_t cls{0};
     method_t method{0};

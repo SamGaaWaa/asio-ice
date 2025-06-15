@@ -1,7 +1,7 @@
 #pragma once
 
-#include "async_queue.hpp"
 #include "config.hpp"
+#include "async_queue.hpp"
 #include "packet.hpp"
 #include "udp_proxy.hpp"
 

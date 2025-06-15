@@ -1,12 +1,14 @@
 #pragma once
 
-#include "config.hpp"
-#include "shared_promise_v2.hpp"
-#include "stun.hpp"
-#include "task.hpp"
-
+#include <algorithm>
+#include <cassert>
+#include <ranges>
+#include <stdexcept>
+#include <iostream>
 #include <boost/intrusive/set.hpp>
+#include <boost/container/small_vector.hpp>
 
+#include "config.hpp"
 #if ASIOICE_USE_BOOST > 0
 #define ASIO_TO_EXEC_USE_BOOST 1
 #include <boost/asio/buffer.hpp>
@@ -26,18 +28,19 @@ namespace net = asio;
 }
 #endif
 
-#include <algorithm>
-#include <iostream>
-#include <stdexcept>
+#include "asio2exec.hpp"
+#include "scope_guard.hpp"
+#include "stop_when.hpp"
+#include "shared_promise_v2.hpp"
+#include "stun.hpp"
+#include "task.hpp"
 
 namespace ice::stun::impl {
 
-template <class NextLayer> struct datagram_client {
-    using next_layer_type = NextLayer;
-    using endpoint_type = typename next_layer_type::endpoint_type;
+template <class LowestLayer> struct datagram_client {
+    using endpoint_type = typename LowestLayer::endpoint_type;
 
-    datagram_client(net::io_context &ctx, next_layer_type &sock) noexcept
-        : _ctx(ctx), _sock(sock), _local(sock.local_endpoint()) {}
+    datagram_client(net::io_context &ctx) noexcept : _ctx(ctx) {}
 
     datagram_client(const datagram_client &) = delete;
     datagram_client &operator=(const datagram_client &) = delete;
@@ -45,20 +48,19 @@ template <class NextLayer> struct datagram_client {
     datagram_client &operator=(datagram_client &&) = delete;
 
     void stop() noexcept;
-    bool is_running() const noexcept { return _running; }
+    bool is_running() const noexcept { return !_transactions.empty(); }
 
     const auto &context() const noexcept { return _ctx; }
     auto &context() noexcept { return _ctx; }
-    const auto &next_layer() const noexcept { return _sock; }
-    auto &next_layer() noexcept { return _sock; }
-    const auto &local_endpoint() const noexcept { return _local; }
 
-    bool dispatch(const endpoint_type &ep, const void *data,
-                  std::size_t size) noexcept;
+    bool dispatch_response(const endpoint_type &ep, const void *data,
+                           std::size_t size) noexcept;
 
-    ice::task<bool> request(const endpoint_type &ep, const stun::message &msg,
-                            endpoint_type &from, stun::message &resp,
-                            std::size_t retries, auto... self);
+    template <class Transport>
+    ice::task<bool> request(Transport &transport, const endpoint_type &ep,
+                            const stun::message &msg, endpoint_type &from,
+                            stun::message &resp, std::size_t retries,
+                            auto... self);
 
   private:
     struct transaction
@@ -84,9 +86,6 @@ template <class NextLayer> struct datagram_client {
         boost::intrusive::constant_time_size<false>>;
 
     net::io_context &_ctx;
-    next_layer_type &_sock;
-    endpoint_type _local;
-    bool _running = true;
     transaction_set _transactions{};
     ice::shared_promise<void> _stop_promise{};
 };

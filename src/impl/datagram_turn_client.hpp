@@ -2,6 +2,7 @@
 
 #include "binary.hpp"
 #include "config.hpp"
+#include "message_pool.hpp"
 #include "shared_promise_v2.hpp"
 #include "stun_client.hpp"
 #include "task.hpp"
@@ -31,6 +32,7 @@ namespace net = asio;
 #include <algorithm>
 #include <array>
 #include <deque>
+#include <expected>
 #include <iostream>
 #include <memory>
 #include <ranges>
@@ -44,11 +46,12 @@ struct datagram_client
     using next_layer_type = NextLayer;
     using endpoint_type = typename next_layer_type::endpoint_type;
 
-    datagram_client(net::io_context &ctx, next_layer_type sock,
-                    const endpoint_type &server, std::string username = {},
-                    std::string password = {})
-        : _sock(std::move(sock)), _stun_client(ctx, _sock), _server(server),
-          _username(std::move(username)), _password(std::move(password)) {}
+    datagram_client(net::io_context &ctx, next_layer_type &sock,
+                    const endpoint_type &server, ice::message_pool &pool,
+                    std::string username = {}, std::string password = {})
+        : _stun_client(ctx, sock), _server(server),
+          _username(std::move(username)), _password(std::move(password)),
+          _pool(pool) {}
 
     datagram_client(const datagram_client &) = delete;
     datagram_client &operator=(const datagram_client &) = delete;
@@ -63,14 +66,17 @@ struct datagram_client
         _expired_number.clear();
         _stop_expire_number_task.set_value();
         do_delete_allocation();
+        _stop_read_task.set_value();
     }
 
     bool is_running() const noexcept { return _is_running; }
 
     const auto &context() const noexcept { return _stun_client.context(); }
     auto &context() noexcept { return _stun_client.context(); }
-    const auto &next_layer() const noexcept { return _sock; }
-    auto &next_layer() noexcept { return _sock; }
+    const auto &next_layer() const noexcept {
+        return _stun_client.next_layer();
+    }
+    auto &next_layer() noexcept { return _stun_client.next_layer(); }
 
     const auto &local_endpoint() const noexcept {
         return _stun_client.local_endpoint();
@@ -132,6 +138,13 @@ struct datagram_client
     template <class ConstBufferSequence>
     auto send_channel_data(const ConstBufferSequence &buffers, uint16_t channel,
                            auto... self);
+
+    ice::task<std::expected<ice::message, std::error_code>>
+    read(endpoint_type &from, auto... self);
+
+    template <class MutableBufferSequence>
+    auto async_receive_from(const MutableBufferSequence &buffers,
+                            endpoint_type &sender_endpoint, auto... self);
 
   private:
     void do_delete_allocation();
@@ -204,13 +217,13 @@ struct datagram_client
         }
     };
 
-    next_layer_type _sock;
     stun::client<next_layer_type> _stun_client;
     endpoint_type _server;
     std::string _nonce{};
     std::string _realm{};
     const std::string _username{};
     const std::string _password{};
+    message_pool &_pool;
     std::string _hmac_key{};
     std::optional<std::array<uint8_t, stun::USERHASH_SIZE>> _userhash{};
     std::optional<stun::message::password_algorithm> _used_pwd_algo{};
@@ -225,6 +238,7 @@ struct datagram_client
     std::deque<expired_channel_number> _expired_number{};
     ice::shared_promise<void> _stop_expire_number_task{};
     bool _is_running{true};
+    ice::shared_promise<void> _stop_read_task{};
 };
 
 } // namespace ice::turn::impl

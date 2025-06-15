@@ -1490,15 +1490,9 @@ message::get_transaction_id(const void *data,
 
 bool message::is_response(const void *data,
                           std::size_t length) noexcept(!ICE_DEBUG) {
-    ICE_IN_DEBUG {
-        if (is_not_stun(data, length))
-            throw std::runtime_error{"is_response: is not a stun packet"};
-    }
-    (void)length;
-    const auto *header = static_cast<const header_t *>(data);
-    uint16_t type = binary::ntoh<uint16_t>(header->type);
-    uint16_t cls = type & STUN_CLASS_MASK;
-    return (cls & 0x0100) != 0;
+    class_t cls = get_class(data, length);
+    return cls == class_t::STUN_CLASS_RESP_ERROR ||
+           cls == class_t::STUN_CLASS_RESP_SUCCESS;
 }
 
 void message::compute_userhash(void *out, std::string_view username,
@@ -1507,6 +1501,30 @@ void message::compute_userhash(void *out, std::string_view username,
     input += ':';
     input += realm;
     hash::SHA256(out, input);
+}
+
+class_t message::get_class(const void *data,
+                           std::size_t length) noexcept(!ICE_DEBUG) {
+    ICE_IN_DEBUG {
+        if (length < sizeof(header_t))
+            throw std::runtime_error{"get_class: is not a stun packet"};
+    }
+    (void)length;
+    const header_t *header = static_cast<const header_t *>(data);
+    uint16_t type = binary::ntoh<uint16_t>(header->type);
+    return type & STUN_CLASS_MASK;
+}
+
+method_t message::get_method(const void *data,
+                             std::size_t length) noexcept(!ICE_DEBUG) {
+    ICE_IN_DEBUG {
+        if (is_not_stun(data, length))
+            throw std::runtime_error{"get_method: is not a stun packet"};
+    }
+    (void)length;
+    const header_t *header = static_cast<const header_t *>(data);
+    uint16_t type = binary::ntoh<uint16_t>(header->type);
+    return type & ~STUN_CLASS_MASK;
 }
 
 void message::reset() noexcept {

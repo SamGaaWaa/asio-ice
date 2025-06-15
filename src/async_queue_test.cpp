@@ -1,6 +1,8 @@
-#include "async_queue.hpp"
 #include "config.hpp"
+#include "async_queue.hpp"
 #include "task.hpp"
+
+#include <boost/circular_buffer.hpp>
 
 #if ASIOICE_USE_BOOST > 0
 #define ASIO_TO_EXEC_USE_BOOST 1
@@ -97,8 +99,7 @@ uint64_t async_queue_test(int times) {
         for (int i = 1; i <= times; ++i) {
             while (q.full())
                 co_await stdexec::schedule(sched);
-            q.push(std::make_tuple(ice::error_code{}, i),
-                   [](auto &container) { container.pop_front(); });
+            q.push(std::make_tuple(ice::error_code{}, i));
         }
         q.close();
         co_return;
@@ -136,8 +137,7 @@ uint64_t async_queue_with_circular_buffer_test(int times) {
         for (int i = 1; i <= times; ++i) {
             while (q.full())
                 co_await stdexec::schedule(sched);
-            q.push(std::make_tuple(ice::error_code{}, i),
-                   [](auto &container) { container.pop_front(); });
+            q.push(std::make_tuple(ice::error_code{}, i));
         }
         q.close();
         co_return;
@@ -173,8 +173,7 @@ uint64_t async_queue_with_inline_task_test(int times) {
         for (int i = 1; i <= times; ++i) {
             while (q.full())
                 co_await stdexec::schedule(sched);
-            q.push(std::make_tuple(ice::error_code{}, i),
-                   [](auto &container) { container.pop_front(); });
+            q.push(std::make_tuple(ice::error_code{}, i));
         }
         q.close();
         co_return;

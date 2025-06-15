@@ -88,57 +88,59 @@ static void get_local_addresses_test(uint64_t n) {
 }
 
 static void server_reflexive_endpoint_test(uint64_t n) try {
-    net::io_context ctx;
+    // net::io_context ctx;
 
-    net::ip::udp::resolver resolver(ctx);
-    auto resolve_result = resolver.resolve("14.29.112.241", "20002");
-    if (resolve_result.empty()) {
-        std::cerr << "Resolve error\n";
-        return;
-    }
-    const auto &server_ep = resolve_result->endpoint();
-    std::cout << "STUN server: " << server_ep.address().to_string() << ':'
-              << server_ep.port() << '\n';
+    // net::ip::udp::resolver resolver(ctx);
+    // auto resolve_result = resolver.resolve("14.29.112.241", "20002");
+    // if (resolve_result.empty()) {
+    //     std::cerr << "Resolve error\n";
+    //     return;
+    // }
+    // const auto &server_ep = resolve_result->endpoint();
+    // std::cout << "STUN server: " << server_ep.address().to_string() << ':'
+    //           << server_ep.port() << '\n';
 
-    net::ip::udp::socket sock(ctx, net::ip::udp::v4());
-    sock.bind(net::ip::udp::endpoint(net::ip::udp::v4(), 0));
-    stun::client<net::ip::udp::socket> client(ctx, sock);
+    // net::ip::udp::socket sock(ctx, net::ip::udp::v4());
+    // sock.bind(net::ip::udp::endpoint(net::ip::udp::v4(), 0));
+    // stun::client<net::ip::udp::socket> client(ctx, sock);
 
-    auto recv_coro = [&]() -> ice::task<void> {
-        char buf[2048];
-        while (true) {
-            net::ip::udp::endpoint ep;
-            auto [err, n] = co_await sock.async_receive_from(
-                net::buffer(buf, sizeof(buf)), ep, asio2exec::use_sender);
-            if (err) {
-                std::cerr << "Receive error: " << err.message() << '\n';
-                co_return;
-            }
-            std::cout << "Received " << n << " bytes from "
-                      << ep.address().to_string() << ':' << ep.port() << '\n';
-            if (!client.dispatch(ep, buf, n)) {
-                std::cerr << "Dispatch error\n";
-                co_return;
-            }
-        }
-    };
+    // auto recv_coro = [&]() -> ice::task<void> {
+    //     char buf[2048];
+    //     while (true) {
+    //         net::ip::udp::endpoint ep;
+    //         auto [err, n] = co_await sock.async_receive_from(
+    //             net::buffer(buf, sizeof(buf)), ep, asio2exec::use_sender);
+    //         if (err) {
+    //             std::cerr << "Receive error: " << err.message() << '\n';
+    //             co_return;
+    //         }
+    //         std::cout << "Received " << n << " bytes from "
+    //                   << ep.address().to_string() << ':' << ep.port() <<
+    //                   '\n';
+    //         if (!client.dispatch(ep, buf, n)) {
+    //             std::cerr << "Dispatch error\n";
+    //             co_return;
+    //         }
+    //     }
+    // };
 
-    asio2exec::scheduler sched{ctx};
-    auto work = stdexec::when_all(
-        recv_coro(),
-        server_reflexive_endpoint(client, server_ep, std::chrono::seconds(10)) |
-            stdexec::let_value([](std::optional<endpoint> &res) {
-                if (!res) {
-                    std::cerr << "Server reflexive endpoint not found\n";
-                } else {
-                    std::cout << "Server reflexive endpoint: "
-                              << res->address.to_string() << ':' << res->port
-                              << '\n';
-                }
-                return stdexec::just_stopped();
-            }));
-    stdexec::start_detached(stdexec::starts_on(sched, std::move(work)));
-    ctx.run();
+    // asio2exec::scheduler sched{ctx};
+    // auto work = stdexec::when_all(
+    //     recv_coro(),
+    //     server_reflexive_endpoint(client, server_ep,
+    //     std::chrono::seconds(10)) |
+    //         stdexec::let_value([](std::optional<endpoint> &res) {
+    //             if (!res) {
+    //                 std::cerr << "Server reflexive endpoint not found\n";
+    //             } else {
+    //                 std::cout << "Server reflexive endpoint: "
+    //                           << res->address.to_string() << ':' << res->port
+    //                           << '\n';
+    //             }
+    //             return stdexec::just_stopped();
+    //         }));
+    // stdexec::start_detached(stdexec::starts_on(sched, std::move(work)));
+    // ctx.run();
 } catch (const std::exception &e) {
     std::cerr << "Unhandled exception: " << e.what() << '\n';
 }

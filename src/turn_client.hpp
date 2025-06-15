@@ -1,51 +1,60 @@
 #pragma once
 
-#include "impl/datagram_turn_client.hpp"
+#include "impl/datagram_turn_client_v2.hpp"
 
 #include <memory>
 
 namespace ice::turn {
 
-using stun::is_datagram_layer;
-using stun::is_stream_layer;
-
 constexpr bool is_channel_data(const void *data, std::size_t size) noexcept {
     return (static_cast<const uint8_t *>(data)[0] & 0xC0) == 0x40;
 }
 
-template <class NextLayer> class client {};
+template <class NextLayer, class StunClient, bool IsDatagram> class client {};
 
-template <is_datagram_layer NextLayer> class client<NextLayer> {
-    using impl_type = impl::datagram_client<NextLayer>;
+template <class NextLayer, class StunClient>
+class client<NextLayer, StunClient, true> {
+    using impl_type = impl::datagram_client<NextLayer, StunClient>;
 
   public:
     using next_layer_type = typename impl_type::next_layer_type;
+    using stun_client_type = typename impl_type::stun_client_type;
     using endpoint_type = typename impl_type::endpoint_type;
 
-    client(net::io_context &ctx, next_layer_type sock,
+    client(net::io_context &ctx, std::shared_ptr<next_layer_type> transport,
+           std::shared_ptr<stun_client_type> stun_client,
            const endpoint_type &server, std::string username,
            std::string password)
-        : _impl(std::make_shared<impl_type>(ctx, std::move(sock), server,
-                                            std::move(username),
-                                            std::move(password))) {}
+        : _impl(std::make_shared<impl_type>(
+              ctx, std::move(transport), std::move(stun_client), server,
+              std::move(username), std::move(password))) {}
+
+    client(const client &) = delete;
+    client &operator=(const client &) = delete;
 
     client(client &&) noexcept = default;
-    client(const client &) = delete;
-    client &operator=(client &&) noexcept = default;
-    client &operator=(const client &) = delete;
+
+    client &operator=(client &&other) noexcept {
+        if (this != &other) {
+            if (_impl)
+                _impl->stop();
+            _impl = std::move(other._impl);
+        }
+        return *this;
+    }
 
     ~client() noexcept { stop(); }
 
-    bool is_running() const noexcept {
-        return _impl != nullptr && _impl->is_running();
-    }
+    bool is_running() const noexcept { return _impl->is_running(); }
+
+    void stop() noexcept { _impl->stop(); }
 
     const auto &context() const noexcept { return _impl->context(); }
     auto &context() noexcept { return _impl->context(); }
     const auto &next_layer() const noexcept { return _impl->next_layer(); }
     auto &next_layer() noexcept { return _impl->next_layer(); }
-    const auto &impl() const noexcept { return _impl; }
-    auto &impl() noexcept { return _impl; }
+    const auto &impl() const noexcept { return *_impl; }
+    auto &impl() noexcept { return *_impl; }
 
     const auto &local_endpoint() const noexcept {
         return _impl->local_endpoint();
@@ -55,12 +64,11 @@ template <is_datagram_layer NextLayer> class client<NextLayer> {
         return _impl->remote_endpoint();
     }
 
+    auto &stun_client() noexcept { return _impl->stun_client(); }
+    const auto &stun_client() const noexcept { return _impl->stun_client(); }
+
     const std::string &username() const noexcept { return _impl->username(); }
     const std::string &password() const noexcept { return _impl->password(); }
-
-    bool dispatch(const void *data, std::size_t size) noexcept {
-        return _impl->dispatch(data, size);
-    }
 
     ice::task<bool> request(const stun::message &msg, endpoint_type &from,
                             stun::message &resp, std::size_t retries,
@@ -123,7 +131,9 @@ template <is_datagram_layer NextLayer> class client<NextLayer> {
         return _impl->send_channel_data(buffers, channel, std::move(self)...);
     }
 
-    void stop() noexcept { _impl->stop(); }
+    void add_receiver(datagram_receiver<endpoint_type> &receiver) noexcept {
+        _impl->add_receiver(receiver);
+    }
 
   private:
     std::shared_ptr<impl_type> _impl;

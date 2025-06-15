@@ -1,5 +1,6 @@
 #pragma once
 
+#include "basic_any.hpp"
 #include "config.hpp"
 #include "shared_promise_v2.hpp"
 #include "stun.hpp"
@@ -38,9 +39,12 @@ template <class NextLayer> struct stream_client {
     using next_layer_type = NextLayer;
     using endpoint_type = typename next_layer_type::endpoint_type;
 
-    stream_client(net::io_context &ctx, next_layer_type &sock) noexcept
+    template <class... Args>
+    stream_client(net::io_context &ctx, next_layer_type &sock,
+                  Args &&...any_data) noexcept
         : _ctx(ctx), _sock(sock), _local(sock.local_endpoint()),
-          _remote(sock.remote_endpoint()) {}
+          _remote(sock.remote_endpoint()),
+          _any(std::make_tuple(std::forward<Args>(any_data)...)) {}
 
     stream_client(const stream_client &) = delete;
     stream_client &operator=(const stream_client &) = delete;
@@ -84,6 +88,7 @@ template <class NextLayer> struct stream_client {
         boost::intrusive::key_of_value<typename transaction::comparer>,
         boost::intrusive::constant_time_size<false>>;
 
+    ice::basic_any<32, 8> _any{};
     net::io_context &_ctx;
     next_layer_type &_sock;
     endpoint_type _local;
