@@ -7,20 +7,20 @@
 #include "random.hpp"
 #include "log.hpp"
 
-#if CPPMDNS_USE_BOOST > 0
+#if CPPMDNS_USE_BOOST_ASIO > 0
 #define ASIO_TO_EXEC_USE_BOOST
 #include <boost/asio/ip/udp.hpp>
 #include <boost/asio/steady_timer.hpp>
 #include <boost/asio/ip/multicast.hpp>
-#include <boost/asio/ip/address_v4.hpp>
+#include <boost/asio/ip/address.hpp>
 #include <boost/asio/ip/udp.hpp>
 #else
 #include <asio/ip/udp.hpp>
 #include <asio/steady_timer.hpp>
 #include <asio/ip/multicast.hpp>
-#include <asio/ip/address_v4.hpp>
+#include <asio/ip/address.hpp>
 #include <asio/ip/udp.hpp>
-#endif // CPPMDNS_USE_BOOST
+#endif // CPPMDNS_USE_BOOST_ASIO
 
 #include "asio2exec.hpp"
 
@@ -334,9 +334,8 @@ void service_t::start() {
 
 void service_t::update_timeout(int seconds) {
     record.ttl = seconds;
-    _server_impl->ctx.post([self = shared_from_this()] {
-        self->_timer.cancel();
-    });
+    net::post(_server_impl->ctx,
+              [self = shared_from_this()] { self->_timer.cancel(); });
 }
 
 exec::task<void> service_t::time_out_control(std::shared_ptr<service_t> self) {
@@ -441,7 +440,7 @@ server::impl_t::publishAddr(std::string name, std::string ip, int seconds, std::
 
     service_ptr service = std::make_shared<service_t>(std::move(record), self);
     try {
-        auto addr = net::ip::address::from_string(ip);
+        auto addr = net::ip::make_address(ip);
         if (addr.is_v4()) {
             service->record.data.emplace<dns::rdata::a>(addr.to_v4().to_uint());
         }

@@ -4,7 +4,7 @@
 
 #include <boost/circular_buffer.hpp>
 
-#if ASIOICE_USE_BOOST > 0
+#if ASIOICE_USE_BOOST_ASIO > 0
 #define ASIO_TO_EXEC_USE_BOOST 1
 #include "asio2exec.hpp"
 #include <boost/asio/awaitable.hpp>

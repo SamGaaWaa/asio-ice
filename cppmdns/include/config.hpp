@@ -1,6 +1,6 @@
 #pragma once
 
-#define CPPMDNS_USE_BOOST 0
+#define CPPMDNS_USE_BOOST_ASIO 1
 
 #ifdef NDEBUG
     #define CPPMDNS_DEBUG 0

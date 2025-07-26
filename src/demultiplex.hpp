@@ -6,7 +6,7 @@
 #include "shared_promise_v2.hpp"
 #include "task.hpp"
 
-#if ASIOICE_USE_BOOST > 0
+#if ASIOICE_USE_BOOST_ASIO > 0
 #define ASIO_TO_EXEC_USE_BOOST 1
 #include <boost/asio/buffer.hpp>
 namespace ice {

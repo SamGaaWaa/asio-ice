@@ -10,9 +10,18 @@
 
 namespace ice {
 
+struct receiver_base {
+    receiver_base() = default;
+    receiver_base(const receiver_base &) = delete;
+    receiver_base &operator=(const receiver_base &) = delete;
+    receiver_base(receiver_base &&) = delete;
+    receiver_base &operator=(receiver_base &&) = delete;
+    virtual ~receiver_base() = default;
+};
+
 template <class Endpoint>
 struct datagram_receiver
-    : boost::intrusive::list_base_hook<
+    : receiver_base, boost::intrusive::list_base_hook<
           boost::intrusive::link_mode<boost::intrusive::auto_unlink>> {
     using endpoint_type = Endpoint;
 
@@ -21,11 +30,6 @@ struct datagram_receiver
         transport->add_receiver(*this);
         _transport = std::move(transport);
     }
-
-    datagram_receiver(const datagram_receiver &) = delete;
-    datagram_receiver &operator=(const datagram_receiver &) = delete;
-    datagram_receiver(datagram_receiver &&) = delete;
-    datagram_receiver &operator=(datagram_receiver &&) = delete;
 
     virtual ~datagram_receiver() { detach(); }
 
@@ -79,7 +83,7 @@ struct queue_datagram_receiver : public datagram_receiver<Endpoint> {
 };
 
 template <class Endpoint>
-inline void dispatch_receivers(auto &receivers, io_buffer_ptr &buffer,
+inline bool dispatch_receivers(auto &receivers, io_buffer_ptr &buffer,
                                const Endpoint &endpoint) {
     using list_type = std::remove_reference_t<decltype(receivers)>;
 
@@ -100,8 +104,9 @@ inline void dispatch_receivers(auto &receivers, io_buffer_ptr &buffer,
         receivers1.pop_front();
         tmp.push_back(r);
         if (r.datagram_received(buffer, endpoint))
-            break;
+            return true;
     }
+    return false;
 }
 
 } // namespace ice

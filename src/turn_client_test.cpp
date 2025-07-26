@@ -3,12 +3,14 @@
 #include "scope_guard.hpp"
 #include "socket_transport.hpp"
 #include "turn_client.hpp"
+#include "candidate_pair.hpp"
 
 #include <iostream>
 
 using Transport = ice::datagram_transport<ice::net::ip::udp::socket>;
 using StunClient = ice::stun::client<ice::net::ip::udp::socket, true>;
 using TurnClient = ice::turn::client<Transport, StunClient, true>;
+using CandidatePair = ice::candidate_pair<typename TurnClient::impl_type, StunClient>;
 
 void allocate_test() {
     using namespace ice;
@@ -21,8 +23,7 @@ void allocate_test() {
     std::cout << "TURN server: " << server_ep.address().to_string() << ':'
               << server_ep.port() << '\n';
 
-    auto transport = std::make_shared<Transport>(ctx, ctx, net::ip::udp::v4());
-    transport->socket().bind(net::ip::udp::endpoint(net::ip::udp::v4(), 0));
+    auto transport = std::make_shared<Transport>(ctx, ctx, net::ip::udp::endpoint(net::ip::udp::v4(), 0));
     transport->socket().connect(server_ep);
     transport->start();
 
@@ -30,12 +31,17 @@ void allocate_test() {
 
     TurnClient client(ctx, transport, stun_client, server_ep, "samgaawaa",
                       "1234");
-    queue_datagram_receiver<net::ip::udp::endpoint> data_queue(
-        client.impl().shared_from_this(), 16);
 
     net::ip::udp::socket remote_peer(ctx, net::ip::udp::v4());
     remote_peer.bind(
         net::ip::udp::endpoint(net::ip::make_address("127.0.0.1"), 0));
+
+    auto peer = remote_peer.local_endpoint();
+    ice::candidate remote_c{
+        .endpoint = ice::endpoint(peer.address(), peer.port())
+    };
+    auto cpair = std::make_shared<CandidatePair>(ice::candidate{}, remote_c, client.impl().shared_from_this(), stun_client);
+    queue_datagram_receiver<net::ip::udp::endpoint> data_queue(cpair, 16);
 
     auto allocate_coro = [&]() -> ice::task<void> {
         auto relayed =
@@ -52,7 +58,6 @@ void allocate_test() {
             std::cerr << "Connect failed: " << ec.message() << '\n';
             co_return;
         }
-        auto peer = remote_peer.local_endpoint();
         std::cout << "Creat channel for " << peer.address() << ':'
                   << peer.port() << '\n';
         uint16_t channel_num = client.generate_channel_number();
@@ -63,11 +68,10 @@ void allocate_test() {
 
         std::cout << "\nSending data...\n";
         net::steady_timer timer{ctx};
-        std::string data = "Hello, world!";
+        std::string data = "\xcdHello, world!";
         begin_time = std::chrono::high_resolution_clock::now();
         while (true) {
-            auto [err, n] = co_await client.async_send_to(
-                net::const_buffer(data.data(), data.size()), peer);
+            auto [err, n] = co_await cpair->send(data.data(), data.size(), nullptr);
             if (err) {
                 std::cerr << "Send error: " << err.message() << '\n';
                 co_return;
@@ -84,7 +88,7 @@ void allocate_test() {
                 co_return;
             }
             std::cout << "Echo back " << msg->size() << " bytes: "
-                      << std::string_view{msg->begin(), msg->size()} << "\n\n";
+                      << std::string_view{(const char*)msg->begin() + 1, msg->size() - 1} << "\n\n";
             timer.expires_after(std::chrono::seconds(1));
             co_await timer.async_wait(asio2exec::use_sender);
         }

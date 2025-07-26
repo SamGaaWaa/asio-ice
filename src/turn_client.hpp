@@ -14,9 +14,8 @@ template <class NextLayer, class StunClient, bool IsDatagram> class client {};
 
 template <class NextLayer, class StunClient>
 class client<NextLayer, StunClient, true> {
-    using impl_type = impl::datagram_client<NextLayer, StunClient>;
-
   public:
+    using impl_type = impl::datagram_client<NextLayer, StunClient>;
     using next_layer_type = typename impl_type::next_layer_type;
     using stun_client_type = typename impl_type::stun_client_type;
     using endpoint_type = typename impl_type::endpoint_type;

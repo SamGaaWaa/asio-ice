@@ -5,7 +5,7 @@
 #include "packet.hpp"
 #include "udp_proxy.hpp"
 
-#if ASIOICE_USE_BOOST > 0
+#if ASIOICE_USE_BOOST_ASIO > 0
 #include <boost/asio/buffer.hpp>
 #include <boost/asio/ip/udp.hpp>
 namespace ice {

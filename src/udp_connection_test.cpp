@@ -3,7 +3,7 @@
 #include "scope_guard.hpp"
 #include "udp_connection.hpp"
 
-#if ASIOICE_USE_BOOST > 0
+#if ASIOICE_USE_BOOST_ASIO > 0
 #define ASIO_TO_EXEC_USE_BOOST 1
 #include "asio2exec.hpp"
 #include <boost/asio/awaitable.hpp>
@@ -45,10 +45,10 @@ void udp_connection_test() {
     net::io_context ctx;
     asio2exec::scheduler sched{ctx};
 
-    net::ip::udp::endpoint local_ep(net::ip::address::from_string("127.0.0.1"),
+    net::ip::udp::endpoint local_ep(net::ip::make_address("127.0.0.1"),
                                     8013),
-        remote1_ep(net::ip::address::from_string("127.0.0.1"), 8014),
-        remote2_ep(net::ip::address::from_string("127.0.0.1"), 8015);
+        remote1_ep(net::ip::make_address("127.0.0.1"), 8014),
+        remote2_ep(net::ip::make_address("127.0.0.1"), 8015);
 
     std::shared_ptr<udp_proxy> proxy =
         std::make_shared<udp_proxy>(ctx, local_ep, net::ip::udp::v4());

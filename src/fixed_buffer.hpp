@@ -5,7 +5,7 @@
 
 #include "config.hpp"
 
-#if ASIOICE_USE_BOOST > 0
+#if ASIOICE_USE_BOOST_ASIO > 0
 #include <boost/asio/buffer_registration.hpp>
 namespace ice {
 namespace net = boost::asio;

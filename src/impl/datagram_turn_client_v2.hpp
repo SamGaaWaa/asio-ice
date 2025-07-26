@@ -15,7 +15,7 @@
 #include "stun_client.hpp"
 #include "task.hpp"
 
-#if ASIOICE_USE_BOOST > 0
+#if ASIOICE_USE_BOOST_ASIO > 0
 #define ASIO_TO_EXEC_USE_BOOST 1
 #include <boost/asio/buffers_iterator.hpp>
 #include <boost/asio/io_context.hpp>

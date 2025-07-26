@@ -1,7 +1,7 @@
 #include "config.hpp"
 #include "mdns.hpp"
 
-#if CPPMDNS_USE_BOOST 
+#if CPPMDNS_USE_BOOST_ASIO
 #include <boost/asio.hpp>
 #define ASIO_TO_EXEC_USE_BOOST
 #else

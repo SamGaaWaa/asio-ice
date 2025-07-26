@@ -660,7 +660,7 @@ datagram_client<NextLayer, StunClient>::channel_state::refresh_task(auto self) {
                               this->_stop.get_future());
 }
 
-constexpr bool validate_turn_channel(const ice::io_buffer_ptr &buf,
+inline bool validate_turn_channel(const ice::io_buffer_ptr &buf,
                                      uint16_t &channel_number,
                                      uint16_t &len) noexcept {
     if (buf->size() < 4) {
@@ -690,7 +690,7 @@ bool datagram_client<NextLayer, StunClient>::datagram_received(
     io_buffer_ptr &buffer, const endpoint_type &endpoint) {
     if (!buffer || buffer->size() < 4 || endpoint != this->_server)
         return false;
-    char first_byte = *buffer->begin();
+    uint8_t first_byte = *buffer->begin();
     if (first_byte >= 64 && first_byte <= 79) {
         // TURN channel
         uint16_t ch, len;
@@ -739,7 +739,7 @@ bool datagram_client<NextLayer, StunClient>::datagram_received(
         }
         const std::byte *turn_data = indication.turn_data();
         std::size_t turn_data_len = indication.turn_data_size();
-        buffer->consume_front((const char *)turn_data - buffer->begin());
+        buffer->consume_front((const uint8_t *)turn_data - buffer->begin());
         buffer->consume_back(buffer->size() - turn_data_len);
         assert(buffer->size() == turn_data_len);
         net::ip::udp::endpoint from(indication.xor_peer_address.front().address,

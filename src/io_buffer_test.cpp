@@ -39,11 +39,11 @@ void benchmark(int n) {
     using namespace ice;
     io_buffer_pool pool(16);
 
-    char *max_addr = 0;
+    uint8_t *max_addr = 0;
     auto begin_time = std::chrono::high_resolution_clock::now();
     for (int i = 0; i < n; ++i) {
-        // io_buffer_ptr ptr(&pool);
-        io_buffer_ptr ptr(nullptr);
+         io_buffer_ptr ptr(&pool);
+        //io_buffer_ptr ptr(nullptr);
         if (ptr->begin() > max_addr)
             max_addr = ptr->begin();
     }

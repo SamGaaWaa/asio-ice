@@ -8,7 +8,7 @@
 #include "stun.hpp"
 #include "udp_connection.hpp"
 
-#if ASIOICE_USE_BOOST > 0
+#if ASIOICE_USE_BOOST_ASIO > 0
 #define ASIO_TO_EXEC_USE_BOOST 1
 #include <asio2exec.hpp>
 #include <boost/asio/buffer.hpp>
@@ -238,7 +238,7 @@ void parse_base64() {
 void write_test() {
     ice::stun::message msg, parsed;
     msg.mapped_address.emplace(
-        ice::net::ip::address_v4::from_string("127.0.0.1"), 8080);
+        ice::net::ip::make_address("127.0.0.1"), 8080);
     msg.integrities.emplace_back(ice::stun::message::integrity::SHA1);
     msg.integrities.emplace_back(ice::stun::message::integrity::SHA256);
     msg.use_fingerprint(true);
@@ -284,7 +284,7 @@ void request_test() {
         return;
     }
 
-    const auto &ep = resolve_result->endpoint();
+    const auto &ep = resolve_result.begin()->endpoint();
     std::cout << "STUN server: " << ep.address().to_string() << ':' << ep.port()
               << '\n';
 

@@ -2,7 +2,7 @@
 
 #include "config.hpp"
 
-#if ASIOICE_USE_BOOST > 0
+#if ASIOICE_USE_BOOST_ASIO > 0
 #include <boost/asio/buffer.hpp>
 namespace ice {
 namespace net = boost::asio;
@@ -31,7 +31,7 @@ class io_buffer {
               std::size_t tail_room = default_tail_room()) {
         if (head_room + tail_room == 0)
             return;
-        _data = new char[head_room + tail_room];
+        _data = new uint8_t[head_room + tail_room];
         _capacity = head_room + tail_room;
         _start = head_room;
         _end = head_room;
@@ -42,14 +42,14 @@ class io_buffer {
               std::size_t tail_room = default_tail_room())
         : io_buffer(head_room, (data ? size : 0) + tail_room) {
         if (data)
-            std::copy(static_cast<const char *>(data),
-                      static_cast<const char *>(data) + size, _data + _start);
+            std::copy(static_cast<const uint8_t *>(data),
+                      static_cast<const uint8_t *>(data) + size, _data + _start);
         _end += data ? size : 0;
     }
 
     io_buffer(const io_buffer &other) {
         if (other._data) {
-            _data = new char[other._capacity];
+            _data = new uint8_t[other._capacity];
             _capacity = other._capacity;
             _start = other._start;
             _end = other._end;
@@ -64,7 +64,7 @@ class io_buffer {
             reset();
             return *this;
         }
-        char *tmp = new char[other._capacity];
+        uint8_t *tmp = new uint8_t[other._capacity];
         reset();
         _data = tmp;
         _capacity = other._capacity;
@@ -117,8 +117,8 @@ class io_buffer {
         std::swap(_end, other._end);
     }
 
-    char *release() noexcept {
-        char *data = _data;
+    uint8_t *release() noexcept {
+        uint8_t *data = _data;
         _data = nullptr;
         _capacity = 0;
         _start = 0;
@@ -128,13 +128,13 @@ class io_buffer {
 
     void reset() noexcept { delete[] release(); }
 
-    char *begin() noexcept { return _data + _start; }
+    uint8_t *begin() noexcept { return _data + _start; }
 
-    const char *begin() const noexcept { return _data + _start; }
+    const uint8_t *begin() const noexcept { return _data + _start; }
 
-    char *end() noexcept { return _data + _end; }
+    uint8_t *end() noexcept { return _data + _end; }
 
-    const char *end() const noexcept { return _data + _end; }
+    const uint8_t *end() const noexcept { return _data + _end; }
 
     net::mutable_buffer buffer() noexcept {
         return net::mutable_buffer(data(), size());
@@ -221,7 +221,7 @@ class io_buffer {
         reshape(head_room(), new_tail_room);
     }
 
-    char *_data{nullptr};
+    uint8_t *_data{nullptr};
     std::size_t _capacity{0};
     std::size_t _start{0};
     std::size_t _end{0};

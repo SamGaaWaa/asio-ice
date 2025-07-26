@@ -8,7 +8,7 @@
 #include "error.hpp"
 #include "config.hpp"
 
-#if CPPMDNS_USE_BOOST > 0
+#if CPPMDNS_USE_BOOST_ASIO > 0
     #include <boost/asio/io_context.hpp>
     namespace mdns{
         namespace net = boost::asio;
@@ -18,7 +18,7 @@
     namespace mdns{
         namespace net = asio;
     }
-#endif // CPPMDNS_USE_BOOST
+#endif // CPPMDNS_USE_BOOST_ASIO
 
 #include "exec/task.hpp"
 

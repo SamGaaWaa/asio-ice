@@ -4,7 +4,7 @@
 #include "stun_client.hpp"
 #include "stun_protocol.hpp"
 
-#if ASIOICE_USE_BOOST > 0
+#if ASIOICE_USE_BOOST_ASIO > 0
 #define ASIO_TO_EXEC_USE_BOOST
 #include <boost/asio/buffer.hpp>
 #include <boost/asio/steady_timer.hpp>
@@ -40,7 +40,7 @@ void udp_request_test() {
         std::cerr << "Resolve error\n";
         return;
     }
-    const auto &server_ep = resolve_result->endpoint();
+    const auto &server_ep = resolve_result.begin()->endpoint();
     std::cout << "STUN server: " << server_ep.address().to_string() << ':'
               << server_ep.port() << '\n';
 

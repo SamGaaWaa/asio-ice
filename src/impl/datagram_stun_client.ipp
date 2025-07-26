@@ -98,7 +98,7 @@ ice::task<bool> datagram_client<LowestLayer>::request(
             buf.resize(n);
         }
         for (int i = 0; i < max_retries; ++i) {
-            auto [err, n] = co_await transport.template async_send_to(
+            auto [err, n] = co_await transport.async_send_to(
                 net::buffer(buf.data(), buf.size()), ep, asio2exec::use_sender);
             if (err) {
                 ICE_IN_DEBUG {

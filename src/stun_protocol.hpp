@@ -3,7 +3,7 @@
 #include "config.hpp"
 #include "receiver.hpp"
 
-#if ASIOICE_USE_BOOST > 0
+#if ASIOICE_USE_BOOST_ASIO > 0
 #include <boost/asio/io_context.hpp>
 namespace ice {
 namespace net = boost::asio;
