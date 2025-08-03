@@ -10,7 +10,7 @@
 using Transport = ice::datagram_transport<ice::net::ip::udp::socket>;
 using StunClient = ice::stun::client<ice::net::ip::udp::socket, true>;
 using TurnClient = ice::turn::client<Transport, StunClient, true>;
-using CandidatePair = ice::candidate_pair<typename TurnClient::impl_type, StunClient>;
+using CandidatePair = ice::candidate_pair<StunClient>;
 
 void allocate_test() {
     using namespace ice;
@@ -40,7 +40,10 @@ void allocate_test() {
     ice::candidate remote_c{
         .endpoint = ice::endpoint(peer.address(), peer.port())
     };
-    auto cpair = std::make_shared<CandidatePair>(ice::candidate{}, remote_c, client.impl().shared_from_this(), stun_client);
+
+    ice::candidate local_c;
+    local_c.transport = std::make_shared<ice::any_transport>(client.impl().shared_from_this());
+    auto cpair = std::make_shared<CandidatePair>(local_c, remote_c, stun_client);
     queue_datagram_receiver<net::ip::udp::endpoint> data_queue(cpair, 16);
 
     auto allocate_coro = [&]() -> ice::task<void> {

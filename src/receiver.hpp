@@ -25,6 +25,8 @@ struct datagram_receiver
           boost::intrusive::link_mode<boost::intrusive::auto_unlink>> {
     using endpoint_type = Endpoint;
 
+    datagram_receiver() noexcept = default;
+
     template <class Transport>
     datagram_receiver(std::shared_ptr<Transport> transport) {
         transport->add_receiver(*this);
@@ -58,13 +60,13 @@ struct datagram_receiver
 template <class Endpoint>
 struct queue_datagram_receiver : public datagram_receiver<Endpoint> {
     using endpoint_type = Endpoint;
-    using base_type = datagram_receiver<Endpoint>;
+    using base_type = datagram_receiver<endpoint_type>;
 
     template <class Transport>
     queue_datagram_receiver(
         std::shared_ptr<Transport> transport,
         std::size_t max = std::numeric_limits<std::size_t>::max())
-        : datagram_receiver<Endpoint>(std::move(transport)), _q(max) {}
+        : datagram_receiver<endpoint_type>(std::move(transport)), _q(max) {}
 
     bool empty() const noexcept { return _q.empty(); }
 
@@ -79,7 +81,7 @@ struct queue_datagram_receiver : public datagram_receiver<Endpoint> {
         return true;
     }
 
-    ice::async_queue<std::tuple<io_buffer_ptr, Endpoint>> _q;
+    ice::async_queue<std::tuple<io_buffer_ptr, endpoint_type>> _q;
 };
 
 template <class Endpoint>

@@ -30,7 +30,7 @@ struct endpoint {
     std::string to_string() const;
 
     template <class Endpoint>
-    auto convert_to() {
+    auto convert_to() const {
         return Endpoint{address, port};
     }
 };

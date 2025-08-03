@@ -12,7 +12,7 @@ namespace ice::utils {
 
 struct thread_entry {
     std::thread::id id;
-    std::any data;
+    
 };
 
 struct thread_list {

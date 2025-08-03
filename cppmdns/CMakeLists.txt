@@ -11,7 +11,7 @@ project(cppmdns)
 file(GLOB SRC_FILES "src/*.cpp")
 add_library(cppmdns STATIC ${SRC_FILES})
 
-find_package(Boost CONFIG REQUIRED)
+find_package(Boost 1.83 CONFIG REQUIRED)
 if(Boost_FOUND)
     message(STATUS "Boost found")
     target_link_libraries(cppmdns PUBLIC Boost::boost)
