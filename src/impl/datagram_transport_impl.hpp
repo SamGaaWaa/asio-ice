@@ -67,8 +67,7 @@ struct datagram_transport_impl
     template <class ConstBufferSequence, class... Args>
     auto async_send_to(const ConstBufferSequence &buffers,
                        const endpoint_type &destination, Args &&...args) {
-        return _sock.async_send_to(buffers, destination,
-                                   std::forward<Args>(args)...);
+        return _sock.async_send_to(buffers, destination, asio2exec::use_sender);
     }
 
     auto &receivers() noexcept { return _receivers; }

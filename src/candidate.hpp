@@ -29,19 +29,15 @@ enum struct candidate_type { host, srflx, prflx, relayed };
 std::string_view to_string(candidate_type type) noexcept;
 
 struct candidate {
-    std::string to_string();
+    std::string to_string() const;
     friend bool operator==(const candidate &lhs,
-                           const candidate &rhs) noexcept
-    {
+                           const candidate &rhs) noexcept {
         return lhs.foundation == rhs.foundation &&
-                lhs.component == rhs.component &&
-                lhs.transport_type == rhs.transport_type &&
-                lhs.priority == rhs.priority &&
-                lhs.endpoint == rhs.endpoint &&
-                lhs.type == rhs.type &&
-                lhs.related == rhs.related &&
-                lhs.tcptype == rhs.tcptype &&
-                lhs.generation == rhs.generation;
+               lhs.component == rhs.component &&
+               lhs.transport_type == rhs.transport_type &&
+               lhs.priority == rhs.priority && lhs.endpoint == rhs.endpoint &&
+               lhs.type == rhs.type && lhs.related == rhs.related &&
+               lhs.tcptype == rhs.tcptype && lhs.generation == rhs.generation;
     }
 
     std::string foundation;
@@ -53,7 +49,7 @@ struct candidate {
     std::optional<ice::endpoint> related;
     std::string tcptype;
     std::optional<uint32_t> generation;
-    std::shared_ptr<ice::any_transport> transport;
+    ice::any_transport transport;
 };
 
 static_assert(std::is_copy_constructible_v<candidate>);

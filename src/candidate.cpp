@@ -1,5 +1,6 @@
 #include "candidate.hpp"
 #include "hash.hpp"
+#include "json.hpp"
 
 #include <cstring>
 #include <iomanip>
@@ -62,6 +63,29 @@ uint32_t candidate_priority(uint8_t component, candidate_type type,
     }();
     return (uint32_t{1} << 24) * type_pref + (uint32_t{1} << 8) * preference +
            (256 - component);
+}
+
+std::string candidate::to_string() const {
+    nlohmann::json j;
+
+    j["foundation"] = this->foundation;
+    j["component"] = this->component;
+    j["transport"] = this->transport_type;
+    j["priority"] = this->priority;
+    j["endpoint"] = this->endpoint.to_string();
+    j["type"] = ice::to_string(this->type);
+
+    if (this->related) {
+        j["related"] = this->related->to_string();
+    }
+    if (!this->tcptype.empty()) {
+        j["tcptype"] = this->tcptype;
+    }
+    if (this->generation) {
+        j["generation"] = *this->generation;
+    }
+
+    return j.dump(2);
 }
 
 } // namespace ice

@@ -12,7 +12,6 @@ namespace ice::utils {
 
 struct thread_entry {
     std::thread::id id;
-    
 };
 
 struct thread_list {
@@ -22,7 +21,8 @@ struct thread_list {
         auto id = std::this_thread::get_id();
         auto entry = std::make_shared<thread_entry>(thread_entry{id});
         std::lock_guard lk{_mtx};
-        auto it = std::find_if(_ths.begin(), _ths.end(), [id](const auto& p) { return p->id == id; });
+        auto it = std::find_if(_ths.begin(), _ths.end(),
+                               [id](const auto &p) { return p->id == id; });
         if (it != _ths.end())
             return nullptr;
         auto raw = entry.get();
@@ -33,7 +33,8 @@ struct thread_list {
     void unregister_thread() noexcept {
         auto id = std::this_thread::get_id();
         std::lock_guard lk{_mtx};
-        auto it = std::find_if(_ths.begin(), _ths.end(), [id](const auto& p) { return p->id == id; });
+        auto it = std::find_if(_ths.begin(), _ths.end(),
+                               [id](const auto &p) { return p->id == id; });
         if (it == _ths.end())
             return;
         _ths.erase(it);
@@ -44,11 +45,12 @@ struct thread_list {
         return _ths;
     }
 
-    static auto& instance() noexcept {
+    static auto &instance() noexcept {
         static thread_list g_list{};
-        return g_list; 
+        return g_list;
     }
-private:
+
+  private:
     thread_list() = default;
 
     mutable std::mutex _mtx;
@@ -56,27 +58,22 @@ private:
 };
 
 struct registry_guard {
-    static auto& instance() noexcept {
+    static auto &instance() noexcept {
         thread_local registry_guard l_guard;
         return l_guard;
     }
 
-    thread_entry *entry() noexcept {
-        return _entry;
-    }
+    thread_entry *entry() noexcept { return _entry; }
 
-    const thread_entry *entry() const noexcept {
-        return _entry;
-    }
+    const thread_entry *entry() const noexcept { return _entry; }
 
     ~registry_guard() {
         if (_entry)
             thread_list::instance().unregister_thread();
     }
-private:
-    registry_guard():
-        _entry(thread_list::instance().register_thread())
-    {}
+
+  private:
+    registry_guard() : _entry(thread_list::instance().register_thread()) {}
 
     thread_entry *_entry;
 };
@@ -85,4 +82,4 @@ static thread_entry *local_entry() noexcept {
     return registry_guard::instance().entry();
 }
 
-}
+} // namespace ice::utils

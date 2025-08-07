@@ -47,7 +47,9 @@ template <class Socket> struct datagram_transport {
     const auto &socket() const noexcept { return _impl->socket(); }
     auto &context() noexcept { return _impl->context(); }
     const auto &context() const noexcept { return _impl->context(); }
-    const auto& local_endpoint() const noexcept { return _impl->local_endpoint(); }
+    const auto &local_endpoint() const noexcept {
+        return _impl->local_endpoint();
+    }
 
     std::size_t max_buffer_size() const noexcept {
         return _impl->max_buffer_size();

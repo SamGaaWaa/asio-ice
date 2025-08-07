@@ -10,6 +10,8 @@
 #include "stun_client.hpp"
 #include "task.hpp"
 #include "socket_transport.hpp"
+#include "stop_when.hpp"
+#include "scope_guard.hpp"
 
 #include <exec/async_scope.hpp>
 
@@ -18,7 +20,9 @@
 #include "asio2exec.hpp"
 #include <boost/asio/io_context.hpp>
 #include <boost/asio/ip/host_name.hpp>
+#include <boost/asio/ip/basic_endpoint.hpp>
 #include <boost/asio/ip/udp.hpp>
+#include <boost/asio/as_tuple.hpp>
 namespace ice {
 namespace net = boost::asio;
 }
@@ -26,7 +30,9 @@ namespace net = boost::asio;
 #include "asio2exec.hpp"
 #include <asio/io_context.hpp>
 #include <asio/ip/host_name.hpp>
+#include <asio/ip/basic_endpoint.hpp>
 #include <asio/ip/udp.hpp>
+#include <asio/as_tuple.hpp>
 namespace ice {
 namespace net = asio;
 }
@@ -38,38 +44,58 @@ namespace net = asio;
 #include <vector>
 #include <memory>
 #include <algorithm>
+#include <ranges>
 
-namespace ice {
+namespace ice::impl {
 
 template <class Layer>
-struct datagram_impl: std::enable_shared_from_this<datagram_impl<Layer>> {
+struct agent_datagram_impl
+    : std::enable_shared_from_this<agent_datagram_impl<Layer>> {
     using endpoint_type = typename Layer::endpoint_type;
-    using raw_transport = typename datagram_transport<Layer>;
+    using protocol_type = typename endpoint_type::protocol_type;
+    using raw_transport = datagram_transport<Layer>;
     using raw_transport_ptr = std::shared_ptr<raw_transport>;
 
-    datagram_impl(net::io_context &ctx, agent_config config) noexcept:
-        _ctx(ctx),
-        _config(std::move(config)),
-    {}
+    agent_datagram_impl(net::io_context &ctx, agent_config config) noexcept
+        : _ctx(ctx), _config(std::move(config)) {}
 
-    datagram_impl(const datagram_impl &) = delete;
-    datagram_impl &operator=(const datagram_impl &) = delete;
-    datagram_impl(datagram_impl &&) = delete;
-    datagram_impl &operator=(datagram_impl &&) = delete;
+    agent_datagram_impl(const agent_datagram_impl &) = delete;
+    agent_datagram_impl &operator=(const agent_datagram_impl &) = delete;
+    agent_datagram_impl(agent_datagram_impl &&) = delete;
+    agent_datagram_impl &operator=(agent_datagram_impl &&) = delete;
 
-    ice::task<std::vector<std::pair<raw_transport_ptr, ice::candidate>>>
-    get_component_candidates(
-        uint8_t component,
-        const std::vector<net::ip::address>& addresses,
-        std::chrono::milliseconds timeout);
+    ice::task<std::vector<ice::candidate>>
+    get_component_candidates(auto &stun_client, uint8_t component,
+                             const std::vector<net::ip::address> &addresses,
+                             std::chrono::milliseconds timeout, auto... self);
 
-private:
+    ice::task<void>
+    server_reflexive_candidate(std::vector<ice::candidate> &srflx_candidates,
+                               const ice::candidate &local_candidate,
+                               auto &client, const endpoint_type &stun_server,
+                               auto... self) noexcept;
+
+    ice::task<void> server_reflexive_candidate(
+        exec::async_scope &scope, std::vector<ice::candidate> &srflx_candidates,
+        const std::vector<ice::candidate> &local_candidates, auto &client,
+        const std::vector<std::string> &stun_servers, auto... self) noexcept;
+
+    ice::task<void>
+    resolve_server(net::ip::basic_resolver<protocol_type> &resolver,
+                   std::string_view stun_server,
+                   std::vector<endpoint_type> &endpoints);
+
+  private:
     net::io_context &_ctx;
     agent_config _config;
-    std::vector<raw_transport_ptr> _sockets;
 };
 
-static void get_local_addresses_test(uint64_t n) {
+} // namespace ice::impl
+
+#include "impl/ice_impl.ipp"
+
+inline void get_local_addresses_test(uint64_t n) {
+    using namespace ice;
     int addrs_num = 0;
     auto begin = std::chrono::high_resolution_clock::now();
     for (uint64_t i = 0; i < n; ++i) {
@@ -85,69 +111,42 @@ static void get_local_addresses_test(uint64_t n) {
               << "ns\n";
 }
 
-static void server_reflexive_endpoint_test(uint64_t n) try {
-    // net::io_context ctx;
+inline void gathering_test(uint64_t n) try {
+    using namespace ice;
+    net::io_context ctx;
 
-    // net::ip::udp::resolver resolver(ctx);
-    // auto resolve_result = resolver.resolve("14.29.112.241", "20002");
-    // if (resolve_result.empty()) {
-    //     std::cerr << "Resolve error\n";
-    //     return;
-    // }
-    // const auto &server_ep = resolve_result->endpoint();
-    // std::cout << "STUN server: " << server_ep.address().to_string() << ':'
-    //           << server_ep.port() << '\n';
+    stun::client<datagram_transport<net::ip::udp::socket>, true> client(ctx);
 
-    // net::ip::udp::socket sock(ctx, net::ip::udp::v4());
-    // sock.bind(net::ip::udp::endpoint(net::ip::udp::v4(), 0));
-    // stun::client<net::ip::udp::socket> client(ctx, sock);
+    agent_config config;
+    config.stun_servers = {"stun.l.google.com:19302", "14.29.112.241:20002"};
 
-    // auto recv_coro = [&]() -> ice::task<void> {
-    //     char buf[2048];
-    //     while (true) {
-    //         net::ip::udp::endpoint ep;
-    //         auto [err, n] = co_await sock.async_receive_from(
-    //             net::buffer(buf, sizeof(buf)), ep, asio2exec::use_sender);
-    //         if (err) {
-    //             std::cerr << "Receive error: " << err.message() << '\n';
-    //             co_return;
-    //         }
-    //         std::cout << "Received " << n << " bytes from "
-    //                   << ep.address().to_string() << ':' << ep.port() <<
-    //                   '\n';
-    //         if (!client.dispatch(ep, buf, n)) {
-    //             std::cerr << "Dispatch error\n";
-    //             co_return;
-    //         }
-    //     }
-    // };
+    std::vector<net::ip::address> local_addresses = get_local_addresses();
 
-    // asio2exec::scheduler sched{ctx};
-    // auto work = stdexec::when_all(
-    //     recv_coro(),
-    //     server_reflexive_endpoint(client, server_ep,
-    //     std::chrono::seconds(10)) |
-    //         stdexec::let_value([](std::optional<endpoint> &res) {
-    //             if (!res) {
-    //                 std::cerr << "Server reflexive endpoint not found\n";
-    //             } else {
-    //                 std::cout << "Server reflexive endpoint: "
-    //                           << res->address.to_string() << ':' << res->port
-    //                           << '\n';
-    //             }
-    //             return stdexec::just_stopped();
-    //         }));
-    // stdexec::start_detached(stdexec::starts_on(sched, std::move(work)));
-    // ctx.run();
+    auto agent =
+        std::make_shared<impl::agent_datagram_impl<net::ip::udp::socket>>(
+            ctx, config);
+
+    auto work =
+        agent->get_component_candidates(client, 0, local_addresses,
+                                        std::chrono::milliseconds(5 * 1000)) |
+        stdexec::then([](std::vector<candidate> candidates) {
+            std::cout << "Candidates: " << candidates.size() << '\n';
+            for (const auto &c : candidates)
+                std::cout << c.to_string() << '\n';
+        }) |
+        stdexec::upon_stopped([] { std::cout << "Timeout\n"; });
+
+    stdexec::start_detached(
+        stdexec::starts_on(asio2exec::scheduler{ctx}, std::move(work)));
+
+    ctx.run();
 } catch (const std::exception &e) {
     std::cerr << "Unhandled exception: " << e.what() << '\n';
 }
 
+namespace ice {
 void debug_test() {
     // get_local_addresses_test(1000);
-    server_reflexive_endpoint_test(1000);
+    gathering_test(1);
 }
-
 } // namespace ice
-
-#include "impl/ice_impl.ipp"

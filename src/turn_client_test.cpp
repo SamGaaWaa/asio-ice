@@ -23,7 +23,8 @@ void allocate_test() {
     std::cout << "TURN server: " << server_ep.address().to_string() << ':'
               << server_ep.port() << '\n';
 
-    auto transport = std::make_shared<Transport>(ctx, ctx, net::ip::udp::endpoint(net::ip::udp::v4(), 0));
+    auto transport = std::make_shared<Transport>(
+        ctx, ctx, net::ip::udp::endpoint(net::ip::udp::v4(), 0));
     transport->socket().connect(server_ep);
     transport->start();
 
@@ -37,13 +38,13 @@ void allocate_test() {
         net::ip::udp::endpoint(net::ip::make_address("127.0.0.1"), 0));
 
     auto peer = remote_peer.local_endpoint();
-    ice::candidate remote_c{
-        .endpoint = ice::endpoint(peer.address(), peer.port())
-    };
+    ice::candidate remote_c{.endpoint =
+                                ice::endpoint(peer.address(), peer.port())};
 
     ice::candidate local_c;
-    local_c.transport = std::make_shared<ice::any_transport>(client.impl().shared_from_this());
-    auto cpair = std::make_shared<CandidatePair>(local_c, remote_c, stun_client);
+    local_c.transport = client.impl().shared_from_this();
+    auto cpair =
+        std::make_shared<CandidatePair>(local_c, remote_c, stun_client);
     queue_datagram_receiver<net::ip::udp::endpoint> data_queue(cpair, 16);
 
     auto allocate_coro = [&]() -> ice::task<void> {
@@ -74,7 +75,8 @@ void allocate_test() {
         std::string data = "\xcdHello, world!";
         begin_time = std::chrono::high_resolution_clock::now();
         while (true) {
-            auto [err, n] = co_await cpair->send(data.data(), data.size(), nullptr);
+            auto [err, n] =
+                co_await cpair->send(data.data(), data.size(), nullptr);
             if (err) {
                 std::cerr << "Send error: " << err.message() << '\n';
                 co_return;
@@ -91,7 +93,9 @@ void allocate_test() {
                 co_return;
             }
             std::cout << "Echo back " << msg->size() << " bytes: "
-                      << std::string_view{(const char*)msg->begin() + 1, msg->size() - 1} << "\n\n";
+                      << std::string_view{(const char *)msg->begin() + 1,
+                                          msg->size() - 1}
+                      << "\n\n";
             timer.expires_after(std::chrono::seconds(1));
             co_await timer.async_wait(asio2exec::use_sender);
         }

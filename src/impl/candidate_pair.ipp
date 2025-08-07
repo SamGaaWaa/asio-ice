@@ -1,8 +1,7 @@
 namespace ice {
 
 template <class StunClient>
-bool
-candidate_pair<StunClient>::datagram_received(
+bool candidate_pair<StunClient>::datagram_received(
     io_buffer_ptr &buffer,
     const typename candidate_pair<StunClient>::endpoint_type &endpoint) {
     if (!buffer)
@@ -34,12 +33,18 @@ candidate_pair<StunClient>::datagram_received(
 }
 
 template <class StunClient>
-ice::task<bool>
-candidate_pair<StunClient>::request(const stun::message& req, stun::message& res, size_t retries) {
+ice::task<bool> candidate_pair<StunClient>::request(const stun::message &req,
+                                                    stun::message &res,
+                                                    size_t retries) {
     typename candidate_pair<StunClient>::endpoint_type from;
-    bool ret = co_await this->stun_client().request(*this->_local_candidate.transport, this->remote_endpoint(), req, from, res, retries);
+    bool ret = co_await this->stun_client().request(
+        this->_local_candidate.transport, this->remote_endpoint(), req, from,
+        res, retries);
     if (from != this->remote_endpoint()) {
-        ICE_IN_DEBUG{ std::cerr << "STUN request from unexpected endpoint: " << from.address() << ':' << from.port() << '\n'; }
+        ICE_IN_DEBUG {
+            std::cerr << "STUN request from unexpected endpoint: "
+                      << from.address() << ':' << from.port() << '\n';
+        }
         co_return false;
     }
     co_return ret;

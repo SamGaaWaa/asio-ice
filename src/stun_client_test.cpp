@@ -5,15 +5,16 @@
 #include "stun_protocol.hpp"
 
 #if ASIOICE_USE_BOOST_ASIO > 0
-#define ASIO_TO_EXEC_USE_BOOST
 #include <boost/asio/buffer.hpp>
 #include <boost/asio/steady_timer.hpp>
+#include <boost/asio/ip/udp.hpp>
 namespace ice {
 namespace net = boost::asio;
 }
 #else
 #include <asio/buffer.hpp>
 #include <asio/steady_timer.hpp>
+#include <asio/ip/udp.hpp>
 namespace ice {
 namespace net = asio;
 }
@@ -47,11 +48,13 @@ void udp_request_test() {
     auto transport = std::make_shared<datagram_transport<net::ip::udp::socket>>(
         ctx, ctx, net::ip::udp::v4());
     transport->socket().bind(net::ip::udp::endpoint(net::ip::udp::v4(), 0));
-    auto protocol = std::make_shared<
-        stun_protocol<datagram_transport<net::ip::udp::socket>, true>>(
-        ctx, transport);
+    // auto protocol = std::make_shared<
+    //     stun_protocol<datagram_transport<net::ip::udp::socket>, true>>(
+    //     ctx, transport);
 
     transport->start();
+
+    stun::client<datagram_transport<net::ip::udp::socket>, true> client(ctx);
 
     auto request_coro = [&]() -> ice::task<void> {
         stun::message req;
@@ -62,8 +65,8 @@ void udp_request_test() {
 
         stun::message resp;
         net::ip::udp::endpoint resp_from;
-        auto success =
-            co_await protocol->request(server_ep, req, resp_from, resp, 3);
+        auto success = co_await client.request(*transport, server_ep, req,
+                                               resp_from, resp, 3);
         if (!success) {
             std::cerr << "Request error\n";
             co_return;
@@ -82,7 +85,7 @@ void udp_request_test() {
     scope.spawn(stdexec::starts_on(sched, request_coro()));
     scope.spawn(stdexec::starts_on(
         sched, timer.async_wait(asio2exec::use_sender) |
-                   stdexec::then([&](auto) { protocol->client().stop(); })));
+                   stdexec::then([&](auto) { client.stop(); })));
     stdexec::sync_wait(scope.on_empty());
     std::cout << "Finish\n";
 }

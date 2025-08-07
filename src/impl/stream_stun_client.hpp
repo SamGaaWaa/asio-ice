@@ -1,12 +1,12 @@
 #pragma once
 
-#include "basic_any.hpp"
 #include "config.hpp"
 #include "shared_promise_v2.hpp"
 #include "stun.hpp"
 #include "task.hpp"
 
 #include <boost/intrusive/set.hpp>
+#include <boost/any/basic_any.hpp>
 
 #if ASIOICE_USE_BOOST_ASIO > 0
 #define ASIO_TO_EXEC_USE_BOOST 1
@@ -88,7 +88,7 @@ template <class NextLayer> struct stream_client {
         boost::intrusive::key_of_value<typename transaction::comparer>,
         boost::intrusive::constant_time_size<false>>;
 
-    ice::basic_any<32, 8> _any{};
+    boost::anys::basic_any<32, 8> _any{};
     net::io_context &_ctx;
     next_layer_type &_sock;
     endpoint_type _local;

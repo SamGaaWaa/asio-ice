@@ -2,6 +2,8 @@
 
 #include "config.hpp"
 
+#include <type_traits>
+
 #if ASIOICE_USE_BOOST_ASIO > 0
 #include <boost/asio/buffers_iterator.hpp>
 namespace ice {
@@ -18,7 +20,7 @@ namespace net = asio;
 
 namespace ice {
 
-template <std::size_t N = 128> struct buffer_wrapper {
+template <std::size_t N = 8> struct buffer_wrapper {
     template <class BufferSequence>
     buffer_wrapper(const BufferSequence &buffers) {
         auto buffer_first = net::buffer_sequence_begin(buffers);

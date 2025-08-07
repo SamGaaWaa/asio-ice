@@ -21,7 +21,8 @@ struct receiver_base {
 
 template <class Endpoint>
 struct datagram_receiver
-    : receiver_base, boost::intrusive::list_base_hook<
+    : receiver_base,
+      boost::intrusive::list_base_hook<
           boost::intrusive::link_mode<boost::intrusive::auto_unlink>> {
     using endpoint_type = Endpoint;
 

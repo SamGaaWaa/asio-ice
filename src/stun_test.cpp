@@ -237,8 +237,7 @@ void parse_base64() {
 
 void write_test() {
     ice::stun::message msg, parsed;
-    msg.mapped_address.emplace(
-        ice::net::ip::make_address("127.0.0.1"), 8080);
+    msg.mapped_address.emplace(ice::net::ip::make_address("127.0.0.1"), 8080);
     msg.integrities.emplace_back(ice::stun::message::integrity::SHA1);
     msg.integrities.emplace_back(ice::stun::message::integrity::SHA256);
     msg.use_fingerprint(true);

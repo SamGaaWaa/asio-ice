@@ -43,7 +43,8 @@ class io_buffer {
         : io_buffer(head_room, (data ? size : 0) + tail_room) {
         if (data)
             std::copy(static_cast<const uint8_t *>(data),
-                      static_cast<const uint8_t *>(data) + size, _data + _start);
+                      static_cast<const uint8_t *>(data) + size,
+                      _data + _start);
         _end += data ? size : 0;
     }
 

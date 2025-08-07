@@ -6,8 +6,10 @@
 namespace ice {
 
 struct agent_config {
+    bool use_loopback = false;
+    bool use_ipv6 = false;
     std::string transport = "udp";
-    ste::vector<std::string> stun_servers;
+    std::vector<std::string> stun_servers;
     std::string turn_server;
 };
 

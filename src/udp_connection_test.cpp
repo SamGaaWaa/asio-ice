@@ -45,8 +45,7 @@ void udp_connection_test() {
     net::io_context ctx;
     asio2exec::scheduler sched{ctx};
 
-    net::ip::udp::endpoint local_ep(net::ip::make_address("127.0.0.1"),
-                                    8013),
+    net::ip::udp::endpoint local_ep(net::ip::make_address("127.0.0.1"), 8013),
         remote1_ep(net::ip::make_address("127.0.0.1"), 8014),
         remote2_ep(net::ip::make_address("127.0.0.1"), 8015);
 

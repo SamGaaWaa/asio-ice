@@ -143,6 +143,9 @@ ice::task<bool> datagram_client<LowestLayer>::request(
             trans.unlink();
     });
 
+    datagram_client<LowestLayer>::response_receiver receiver{*this};
+    transport.add_receiver(receiver);
+
     auto recv_work = trans.done_promise.get_future() | stdexec::then([&] {
                          stop_retry.set_stopped();
                          return trans.success;
@@ -169,8 +172,14 @@ ice::task<bool> datagram_client<LowestLayer>::request(
         co_return false;
     }
     auto success = std::get<1>(*result);
-    assert(success.has_value());
-    co_return *success;
+    co_return success && *success;
+}
+
+template <class LowestLayer>
+bool datagram_client<LowestLayer>::response_receiver::datagram_received(
+    io_buffer_ptr &buffer, const endpoint_type &endpoint) {
+    return this->_self.dispatch_response(endpoint, buffer->data(),
+                                         buffer->size());
 }
 
 } // namespace ice::stun::impl

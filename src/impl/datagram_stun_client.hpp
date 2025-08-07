@@ -13,7 +13,6 @@
 #define ASIO_TO_EXEC_USE_BOOST 1
 #include <boost/asio/buffer.hpp>
 #include <boost/asio/io_context.hpp>
-#include <boost/asio/ip/udp.hpp>
 #include <boost/asio/steady_timer.hpp>
 namespace ice {
 namespace net = boost::asio;
@@ -21,7 +20,6 @@ namespace net = boost::asio;
 #else
 #include <asio/buffer.hpp>
 #include <asio/io_context.hpp>
-#include <asio/ip/udp.hpp>
 #include <asio/steady_timer.hpp>
 namespace ice {
 namespace net = asio;
@@ -34,6 +32,7 @@ namespace net = asio;
 #include "shared_promise_v2.hpp"
 #include "stun.hpp"
 #include "task.hpp"
+#include "receiver.hpp"
 
 namespace ice::stun::impl {
 
@@ -84,6 +83,17 @@ template <class LowestLayer> struct datagram_client {
         transaction,
         boost::intrusive::key_of_value<typename transaction::comparer>,
         boost::intrusive::constant_time_size<false>>;
+
+    struct response_receiver : ice::datagram_receiver<endpoint_type> {
+        explicit response_receiver(datagram_client &self) noexcept
+            : ice::datagram_receiver<endpoint_type>(), _self(self) {}
+
+        bool datagram_received(io_buffer_ptr &buffer,
+                               const endpoint_type &endpoint) override;
+
+      private:
+        datagram_client &_self;
+    };
 
     net::io_context &_ctx;
     transaction_set _transactions{};
