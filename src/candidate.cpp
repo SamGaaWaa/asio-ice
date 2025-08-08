@@ -65,7 +65,7 @@ uint32_t candidate_priority(uint8_t component, candidate_type type,
            (256 - component);
 }
 
-std::string candidate::to_string() const {
+std::string candidate::to_string(int indent) const {
     nlohmann::json j;
 
     j["foundation"] = this->foundation;
@@ -85,7 +85,35 @@ std::string candidate::to_string() const {
         j["generation"] = *this->generation;
     }
 
-    return j.dump(2);
+    return j.dump(indent);
+}
+
+bool operator==(const candidate &lhs, const candidate &rhs) noexcept {
+    return lhs.foundation == rhs.foundation && lhs.component == rhs.component &&
+           std::ranges::equal(lhs.transport_type, rhs.transport_type,
+                              [](char a, char b) noexcept {
+                                  return std::tolower(a) == std::tolower(b);
+                              }) &&
+           lhs.priority == rhs.priority && lhs.endpoint == rhs.endpoint &&
+           lhs.type == rhs.type && lhs.related == rhs.related &&
+           std::ranges::equal(lhs.tcptype, rhs.tcptype,
+                              [](char a, char b) noexcept {
+                                  return std::tolower(a) == std::tolower(b);
+                              }) &&
+           lhs.generation == rhs.generation;
+}
+
+bool candidate::can_pair_with(const candidate &other) const noexcept {
+    return this->type != ice::candidate_type::srflx &&
+           this->component == other.component &&
+           ((this->endpoint.address.is_v4() &&
+             other.endpoint.address.is_v4()) ||
+            (this->endpoint.address.is_v6() &&
+             other.endpoint.address.is_v6())) &&
+           std::ranges::equal(this->transport_type, other.transport_type,
+                              [](char a, char b) noexcept {
+                                  return std::tolower(a) == std::tolower(b);
+                              });
 }
 
 } // namespace ice

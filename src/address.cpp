@@ -16,9 +16,11 @@
 
 namespace ice {
 
-std::vector<net::ip::address> get_local_addresses() {
+std::vector<net::ip::address> get_local_addresses(bool use_ipv4,
+                                                  bool use_ipv6) {
     std::vector<net::ip::address> addresses;
-
+    if (!use_ipv4 && !use_ipv6)
+        return addresses;
 #ifdef _WIN32
     PIP_ADAPTER_ADDRESSES adapter_addrs = nullptr;
     ULONG out_buf_len = 0;
@@ -45,12 +47,12 @@ std::vector<net::ip::address> get_local_addresses() {
         for (PIP_ADAPTER_UNICAST_ADDRESS addr = adapter->FirstUnicastAddress;
              addr != nullptr; addr = addr->Next) {
             auto sa = addr->Address.lpSockaddr;
-            if (sa->sa_family == AF_INET) {
+            if (sa->sa_family == AF_INET && use_ipv4) {
                 auto sa_in = reinterpret_cast<struct sockaddr_in *>(sa);
                 net::ip::address_v4::bytes_type bytes;
                 std::memcpy(bytes.data(), &sa_in->sin_addr.s_addr, 4);
                 addresses.emplace_back(net::ip::address_v4(bytes));
-            } else if (sa->sa_family == AF_INET6) {
+            } else if (sa->sa_family == AF_INET6 && use_ipv6) {
                 auto sa_in6 = reinterpret_cast<struct sockaddr_in6 *>(sa);
                 net::ip::address_v6::bytes_type bytes;
                 std::memcpy(bytes.data(), sa_in6->sin6_addr.u.Byte, 16);
@@ -73,12 +75,12 @@ std::vector<net::ip::address> get_local_addresses() {
             continue;
         }
         const int family = ifa->ifa_addr->sa_family;
-        if (family == AF_INET) {
+        if (family == AF_INET && use_ipv4) {
             auto sa = reinterpret_cast<struct sockaddr_in *>(ifa->ifa_addr);
             net::ip::address_v4::bytes_type bytes;
             std::memcpy(bytes.data(), &sa->sin_addr.s_addr, 4);
             addresses.emplace_back(net::ip::address_v4(bytes));
-        } else if (family == AF_INET6) {
+        } else if (family == AF_INET6 && use_ipv6) {
             auto sa6 = reinterpret_cast<struct sockaddr_in6 *>(ifa->ifa_addr);
             net::ip::address_v6::bytes_type bytes;
             std::memcpy(bytes.data(), sa6->sin6_addr.s6_addr, 16);

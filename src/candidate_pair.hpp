@@ -1,7 +1,11 @@
 #pragma once
 
 #include <memory>
+#include <functional>
 #include <iostream>
+
+#include <boost/intrusive/list.hpp>
+#include <boost/intrusive/set.hpp>
 
 #include "config.hpp"
 #include "receiver.hpp"
@@ -26,7 +30,22 @@ namespace net = asio;
 
 namespace ice {
 
-struct candidate_pair_base {
+struct __check_list_tag;
+using __check_list_base_hook = boost::intrusive::list_base_hook<
+    boost::intrusive::tag<__check_list_tag>,
+    boost::intrusive::link_mode<boost::intrusive::auto_unlink>>;
+
+struct __triggered_check_queue_tag;
+using __triggered_check_queue_base_hook = boost::intrusive::list_base_hook<
+    boost::intrusive::tag<__triggered_check_queue_tag>,
+    boost::intrusive::link_mode<boost::intrusive::auto_unlink>>;
+
+struct candidate_pair_base :
+    //  public __check_list_base_hook,
+    public __triggered_check_queue_base_hook {
+    using request_handler_type =
+        std::function<void(candidate_pair_base &, ice::io_buffer_ptr)>;
+
     enum struct state {
         FROZEN = 0,
         WAITING = 1,
@@ -36,9 +55,11 @@ struct candidate_pair_base {
     };
 
     candidate_pair_base(ice::candidate local_candidate,
-                        ice::candidate remote_candidate)
+                        ice::candidate remote_candidate,
+                        request_handler_type request_handler = nullptr)
         : _local_candidate(std::move(local_candidate)),
-          _remote_candidate(std::move(remote_candidate)) {
+          _remote_candidate(std::move(remote_candidate)),
+          _request_handler(std::move(request_handler)) {
         if (!_local_candidate.transport)
             throw std::runtime_error("local candidate has no transport");
         _local_candidate.transport.connect(_remote_candidate.endpoint);
@@ -48,6 +69,12 @@ struct candidate_pair_base {
     candidate_pair_base &operator=(const candidate_pair_base &) = delete;
     candidate_pair_base(candidate_pair_base &&) = delete;
     candidate_pair_base &operator=(candidate_pair_base &&) = delete;
+
+    const auto &local_candidate() const noexcept { return _local_candidate; }
+    const auto &remote_candidate() const noexcept { return _remote_candidate; }
+
+    uint64_t priority() const noexcept { return _priority; }
+    void set_priority(bool ice_controlling) noexcept;
 
     virtual ~candidate_pair_base() = default;
 
@@ -71,9 +98,17 @@ struct candidate_pair_base {
         return send(data.data(), data.size(), std::move(self));
     }
 
+    void set_request_handler(request_handler_type handler) {
+        _request_handler = std::move(handler);
+    }
+
+    std::string to_string(int indent = 4) const;
+
   protected:
     ice::candidate _local_candidate;
     ice::candidate _remote_candidate;
+    uint64_t _priority{};
+    request_handler_type _request_handler;
     bool _nominated = false;
     bool _remote_nominated = false;
     state _state = state::FROZEN;
@@ -88,11 +123,10 @@ struct candidate_pair final
 
     candidate_pair(ice::candidate local_candidate,
                    ice::candidate remote_candidate,
-                   std::shared_ptr<StunClient> stun_client) noexcept
+                   StunClient &stun_client) noexcept
         : candidate_pair_base(std::move(local_candidate),
                               std::move(remote_candidate)),
-          datagram_receiver<endpoint_type>(),
-          _stun_client(std::move(stun_client)),
+          datagram_receiver<endpoint_type>(), _stun_client(&stun_client),
           _remote_endpoint(
               _remote_candidate.endpoint.convert_to<endpoint_type>()) {
         _local_candidate.transport.add_receiver(*this);
@@ -132,7 +166,7 @@ struct candidate_pair final
         boost::intrusive::list<datagram_receiver<endpoint_type>,
                                boost::intrusive::constant_time_size<false>>;
 
-    std::shared_ptr<StunClient> _stun_client;
+    StunClient *_stun_client;
     endpoint_type _remote_endpoint;
     receiver_list_t _receivers;
 };

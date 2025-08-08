@@ -134,9 +134,6 @@ ice::task<bool> datagram_client<NextLayer>::request_with_retry(
         resp.cls != stun::class_t::STUN_CLASS_RESP_SUCCESS ||
         resp.method != req.method || resp.integrities.empty()) {
         ICE_IN_DEBUG { std::cerr << "The second request failed\n"; }
-        std::cout << "req: " << req.to_string() << "\n"
-                  << "resp: " << resp.to_string() << "\n";
-        std::abort();
         co_return false;
     }
     this->_nonce = std::move(req.nonce);

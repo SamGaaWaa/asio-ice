@@ -48,6 +48,8 @@ struct interface {
     virtual void add_receiver(ice::receiver_base &receiver) = 0;
 
     virtual ice::endpoint local_endpoint() const = 0;
+
+    virtual bool equal_to(const interface &other) const noexcept = 0;
 };
 
 template <class Transport> struct transport_impl final : public interface {
@@ -131,6 +133,11 @@ template <class Transport> struct transport_impl final : public interface {
     ice::endpoint local_endpoint() const override {
         const auto ep = _transport->local_endpoint();
         return ice::endpoint{ep.address(), ep.port()};
+    }
+
+    bool equal_to(const interface &other) const noexcept override {
+        const auto *p = dynamic_cast<const transport_impl *>(&other);
+        return p && p->_transport == _transport;
     }
 
   private:
@@ -241,6 +248,15 @@ struct any_transport {
 
     void add_receiver(ice::receiver_base &receiver) {
         get_interface()->add_receiver(receiver);
+    }
+
+    bool equal_to(const any_transport &other) const noexcept {
+        return get_interface()->equal_to(*other.get_interface());
+    }
+
+    friend bool operator==(const any_transport &lhs,
+                           const any_transport &rhs) noexcept {
+        return lhs.equal_to(rhs);
     }
 
   private:

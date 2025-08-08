@@ -4,9 +4,9 @@ template <class StunClient>
 bool candidate_pair<StunClient>::datagram_received(
     io_buffer_ptr &buffer,
     const typename candidate_pair<StunClient>::endpoint_type &endpoint) {
-    if (!buffer)
+    if (endpoint != this->remote_endpoint() || !buffer)
         return false;
-    uint8_t first_byte = *buffer->begin();
+    const uint8_t first_byte = *buffer->begin();
     if (first_byte <= 3) {
         // STUN
         if (buffer->size() < ice::stun::HEADER_SIZE) {
@@ -21,13 +21,18 @@ bool candidate_pair<StunClient>::datagram_received(
                                                   buffer->size());
             return true;
         }
-        return false;
+        if (cls == stun::class_t::STUN_CLASS_REQUEST) {
+            if (this->_request_handler)
+                this->_request_handler(*this, std::move(buffer));
+            return true;
+        }
+        // indication, ignore
+        return true;
     } else if (first_byte >= 64 && first_byte <= 79) {
-        // TURN channel
-        return false;
+        // TURN channel, ignore
+        return true;
     }
-    if (endpoint != this->remote_endpoint())
-        return false;
+    // application data
     dispatch_receivers(this->receivers(), buffer, endpoint);
     return true;
 }

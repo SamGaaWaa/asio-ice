@@ -1,58 +1,6 @@
 namespace ice::impl {
 
 template <class Layer>
-ice::task<void> agent_datagram_impl<Layer>::resolve_server(
-    net::ip::basic_resolver<typename Layer::endpoint_type::protocol_type>
-        &resolver,
-    std::string_view stun_server,
-    std::vector<typename Layer::endpoint_type> &endpoints) {
-    if (stun_server.size() < 1)
-        co_return;
-    std::string_view host, port;
-    {
-        auto idx = stun_server.find_last_of(':');
-        if (idx == std::string_view::npos) {
-            host = stun_server;
-            port = "";
-        } else {
-            host = std::string_view{stun_server.data(), idx};
-            port = std::string_view{stun_server.begin() + idx + 1,
-                                    stun_server.end()};
-        }
-    }
-
-    auto opt = co_await (resolver.async_resolve(
-                             host, port, net::as_tuple(asio2exec::use_sender)) |
-                         stdexec::stopped_as_optional());
-    if (!opt) {
-        ICE_IN_DEBUG {
-            std::cerr << "server_reflexive_endpoint timeout: " << stun_server
-                      << '\n';
-        }
-        co_return;
-    }
-    const auto &[ec, result] = *opt;
-    if (ec) {
-        ICE_IN_DEBUG {
-            std::cerr << "server_reflexive_endpoint error " << stun_server
-                      << ": " << ec.message() << '\n';
-        }
-        co_return;
-    }
-    if (result.empty()) {
-        ICE_IN_DEBUG {
-            std::cerr << "server_reflexive_endpoint no result: " << stun_server
-                      << '\n';
-        }
-        co_return;
-    }
-
-    for (auto it = result.begin(); it != result.end(); ++it) {
-        endpoints.push_back(it->endpoint());
-    }
-}
-
-template <class Layer>
 ice::task<void> agent_datagram_impl<Layer>::server_reflexive_candidate(
     std::vector<ice::candidate> &srflx_candidates,
     const ice::candidate &local_candidate, auto &client,
@@ -116,35 +64,27 @@ ice::task<void> agent_datagram_impl<Layer>::server_reflexive_candidate(
 
 template <class Layer>
 ice::task<void> agent_datagram_impl<Layer>::server_reflexive_candidate(
-    exec::async_scope &scope, std::vector<ice::candidate> &srflx_candidates,
+    std::vector<ice::candidate> &srflx_candidates,
     const std::vector<ice::candidate> &local_candidates, auto &client,
-    const std::vector<std::string> &stun_servers, auto... self) noexcept try {
+    const std::vector<typename agent_datagram_impl<Layer>::endpoint_type>
+        &stun_servers,
+    auto... self) noexcept try {
     using Self = agent_datagram_impl<Layer>;
     using endpoint_type = typename Self::endpoint_type;
-    net::ip::basic_resolver<typename endpoint_type::protocol_type> resolver(
-        client.context());
-    std::vector<endpoint_type> endpoints;
-
-    asio2exec::scheduler sched{this->_ctx};
-    for (const auto &server : stun_servers) {
-        scope.spawn(stdexec::starts_on(
-            sched, resolve_server(resolver, server, endpoints)));
-    }
-    co_await scope.on_empty();
-
-    if (endpoints.empty()) {
-        ICE_IN_DEBUG { std::cerr << "no STUN servers found\n"; }
+    if (stun_servers.empty()) {
+        ICE_IN_DEBUG { std::cerr << "no STUN servers\n"; }
         co_return;
     }
+    exec::async_scope scope;
 
     ICE_IN_DEBUG {
-        for (const auto &endpoint : endpoints) {
+        for (const auto &endpoint : stun_servers) {
             std::cout << "resolved STUN server: " << endpoint.address() << ':'
                       << endpoint.port() << '\n';
         }
     }
 
-    for (const auto &endpoint : endpoints) {
+    for (const auto &endpoint : stun_servers) {
         for (const auto &local_candidate : local_candidates) {
             const typename Self::raw_transport *transport =
                 local_candidate.transport.get<typename Self::raw_transport>();
@@ -155,37 +95,32 @@ ice::task<void> agent_datagram_impl<Layer>::server_reflexive_candidate(
             if (transport->local_endpoint().address().is_v6() &&
                 !endpoint.address().is_v6())
                 continue;
-            scope.spawn(stdexec::starts_on(
-                sched, this->server_reflexive_candidate(srflx_candidates,
-                                                        local_candidate, client,
-                                                        endpoint)));
+            scope.spawn(this->server_reflexive_candidate(
+                srflx_candidates, local_candidate, client, endpoint));
         }
     }
-    co_await scope.on_empty();
+    co_await utils::on_scope_empty(scope);
 } catch (std::exception &e) {
     ICE_IN_DEBUG { std::cerr << e.what() << '\n'; }
     co_return;
 }
 
 template <class Layer>
-ice::task<std::vector<ice::candidate>>
-agent_datagram_impl<Layer>::get_component_candidates(
-    auto &stun_client, uint8_t component,
-    const std::vector<net::ip::address> &addresses,
-    std::chrono::milliseconds timeout, auto... self) {
+ice::task<void> agent_datagram_impl<Layer>::get_component_candidates(
+    std::vector<ice::candidate> &component_candidates, auto &stun_client,
+    uint8_t component, const std::vector<net::ip::address> &addresses,
+    auto... self) {
     using Self = agent_datagram_impl<Layer>;
-    std::vector<ice::candidate> result;
 
     if (addresses.empty()) {
-        co_return result;
+        co_return;
     }
 
-    std::vector<Self::raw_transport_ptr> host_transports;
     std::vector<ice::candidate> host_candidates;
-    host_transports.reserve(addresses.size());
     host_candidates.reserve(addresses.size());
     for (const auto &address : addresses) {
-        if ((!this->_config.use_ipv6 && address.is_v6()) ||
+        if ((!this->_config.use_ipv4 && address.is_v4()) ||
+            (!this->_config.use_ipv6 && address.is_v6()) ||
             (!this->_config.use_loopback && address.is_loopback())) {
             ICE_IN_DEBUG {
                 std::cerr << "Skipping address: " << address << '\n';
@@ -230,7 +165,6 @@ agent_datagram_impl<Layer>::get_component_candidates(
 
         auto transport =
             std::make_shared<Self::raw_transport>(this->_ctx, std::move(sock));
-        host_transports.push_back(transport);
         transport->start();
 
         ICE_IN_DEBUG {
@@ -251,36 +185,127 @@ agent_datagram_impl<Layer>::get_component_candidates(
             .transport = std::move(transport)});
     }
     if (host_candidates.empty())
-        co_return result;
+        co_return;
 
-    std::vector<ice::candidate> srflx_candidates;
-
-    if (!this->_config.stun_servers.empty()) {
-        exec::async_scope scope;
-        net::steady_timer timer(this->_ctx, timeout);
-        co_await stdexec::when_all(
-            this->server_reflexive_candidate(scope, srflx_candidates,
-                                             host_candidates, stun_client,
-                                             this->_config.stun_servers),
-            timer.async_wait(asio2exec::use_sender) |
-                stdexec::then([&scope](auto ec) {
-                    ICE_IN_DEBUG {
-                        std::cout << "get_component_candidates timeout\n";
-                    }
-                    scope.request_stop();
-                }) |
-                stdexec::upon_stopped([&scope] {
-                    ICE_IN_DEBUG {
-                        std::cout << "get_component_candidates canceled\n";
-                    }
-                    scope.request_stop();
-                }));
-        co_await scope.on_empty();
+    if (!this->_config.stun_servers.empty() && !this->_config.turn_server) {
+        co_await this->server_reflexive_candidate(component_candidates,
+                                                  host_candidates, stun_client,
+                                                  this->_config.stun_servers);
     }
 
-    result.append_range(host_candidates);
-    result.append_range(srflx_candidates);
-    co_return result;
+    // TODO: Add TURN candidates
+
+    this->_local_candidates.append_range(
+        std::views::as_rvalue(host_candidates));
+    co_return;
+}
+
+template <class Layer>
+ice::task<void> agent_datagram_impl<Layer>::gather_candidates(auto... self) {
+    if (this->_config.component_count == 0) {
+        throw std::runtime_error("component_count must be greater than 0");
+    }
+    ice::stun::client<Layer, true> stun_client(this->_ctx);
+    std::vector<net::ip::address> addresses =
+        get_local_addresses(this->_config.use_ipv4, this->_config.use_ipv6);
+
+    if (this->_config.component_count == 1) {
+        co_await get_component_candidates(this->_local_candidates, stun_client,
+                                          1, addresses);
+        co_return;
+    }
+
+    exec::async_scope scope;
+    // TODO: use components set
+    for (uint8_t component = 1; component <= this->_config.component_count;
+         ++component) {
+        scope.spawn(get_component_candidates(
+            this->_local_candidates, stun_client, component, addresses));
+    }
+    co_await utils::on_scope_empty(scope);
+}
+
+inline bool __validate_remote_candidate(const ice::candidate &c) noexcept {
+    switch (c.type) {
+    case ice::candidate_type::host:
+    case ice::candidate_type::srflx:
+    case ice::candidate_type::relayed:
+        return true;
+    default:
+        return false;
+    }
+}
+
+template <class Layer>
+void agent_datagram_impl<Layer>::sort_check_list() noexcept {
+    std::ranges::sort(this->_check_list,
+                      [](const auto &a, const auto &b) noexcept {
+                          return a->priority() > b->priority();
+                      });
+}
+
+template <class Layer> void agent_datagram_impl<Layer>::clear() noexcept {
+    for (auto &p : this->_check_list) {
+        p->set_request_handler(nullptr);
+    }
+}
+
+template <class Layer>
+ice::candidate_pair_base *agent_datagram_impl<Layer>::find_pair(
+    const ice::any_transport &transport,
+    const ice::candidate &remote_candidate) const noexcept {
+    for (const auto &p : this->_check_list) {
+        if (p->local_candidate().transport == transport &&
+            p->remote_candidate() == remote_candidate)
+            return p.get();
+    }
+    return nullptr;
+}
+
+template <class Layer>
+ice::task<bool> agent_datagram_impl<Layer>::add_remote_candidate(
+    ice::candidate remote_candidate, auto... self) {
+    if (auto it = std::ranges::find(this->_remote_candidates, remote_candidate);
+        it != this->_remote_candidates.end()) {
+        ICE_IN_DEBUG {
+            std::cout << "Remote candidate already exists: "
+                      << remote_candidate.to_string() << '\n';
+        }
+        co_return true;
+    }
+
+    // TODO: resolve mDNS hostnames
+    if (false) {
+    }
+
+    if (!__validate_remote_candidate(remote_candidate)) {
+        ICE_IN_DEBUG {
+            std::cout << "Invalid remote candidate: "
+                      << remote_candidate.to_string() << '\n';
+        }
+        co_return false;
+    }
+
+    this->_remote_candidates.push_back(remote_candidate);
+
+    for (const auto &c : this->_local_candidates) {
+        if (c.can_pair_with(remote_candidate) &&
+            this->find_pair(c.transport, remote_candidate) == nullptr) {
+            auto c_pair = std::make_shared<ice::candidate_pair<
+                typename agent_datagram_impl<Layer>::stun_client_type>>(
+                c, remote_candidate, this->_stun_client);
+            c_pair->set_request_handler(
+                [this, p = this->shared_from_this()](ice::candidate_pair_base &,
+                                                     ice::io_buffer_ptr req) {
+                    // TODO: Handle STUN requests
+                });
+            c_pair->set_priority(this->_ice_controlling);
+            this->_check_list.emplace_back(std::move(c_pair));
+        }
+    }
+
+    this->sort_check_list();
+    co_return true;
 }
 
 } // namespace ice::impl

@@ -28,7 +28,7 @@ void allocate_test() {
     transport->socket().connect(server_ep);
     transport->start();
 
-    auto stun_client = std::make_shared<StunClient>(ctx);
+    StunClient stun_client(ctx);
 
     TurnClient client(transport, server_ep, "samgaawaa", "1234");
 

@@ -34,6 +34,7 @@ struct endpoint {
     }
 };
 
-std::vector<net::ip::address> get_local_addresses();
+std::vector<net::ip::address> get_local_addresses(bool use_ipv4 = true,
+                                                  bool use_ipv6 = true);
 
 } // namespace ice

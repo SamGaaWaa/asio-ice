@@ -29,16 +29,9 @@ enum struct candidate_type { host, srflx, prflx, relayed };
 std::string_view to_string(candidate_type type) noexcept;
 
 struct candidate {
-    std::string to_string() const;
-    friend bool operator==(const candidate &lhs,
-                           const candidate &rhs) noexcept {
-        return lhs.foundation == rhs.foundation &&
-               lhs.component == rhs.component &&
-               lhs.transport_type == rhs.transport_type &&
-               lhs.priority == rhs.priority && lhs.endpoint == rhs.endpoint &&
-               lhs.type == rhs.type && lhs.related == rhs.related &&
-               lhs.tcptype == rhs.tcptype && lhs.generation == rhs.generation;
-    }
+    bool can_pair_with(const candidate &other) const noexcept;
+    std::string to_string(int indent = 4) const;
+    friend bool operator==(const candidate &lhs, const candidate &rhs) noexcept;
 
     std::string foundation;
     uint8_t component;
@@ -57,6 +50,8 @@ static_assert(std::is_copy_assignable_v<candidate>);
 static_assert(std::is_nothrow_move_constructible_v<candidate>);
 static_assert(std::is_nothrow_move_assignable_v<candidate>);
 static_assert(std::equality_comparable<candidate>);
+
+bool operator==(const candidate &lhs, const candidate &rhs) noexcept;
 
 std::string candidate_foundation(candidate_type type,
                                  std::string_view transport,
