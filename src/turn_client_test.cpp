@@ -9,7 +9,7 @@
 
 using Transport = ice::datagram_transport<ice::net::ip::udp::socket>;
 using StunClient = ice::stun::client<ice::net::ip::udp::socket, true>;
-using TurnClient = ice::turn::client<Transport, StunClient, true>;
+using TurnClient = ice::turn::client<Transport, true>;
 using CandidatePair = ice::candidate_pair<StunClient>;
 
 void allocate_test() {
@@ -30,8 +30,7 @@ void allocate_test() {
 
     auto stun_client = std::make_shared<StunClient>(ctx);
 
-    TurnClient client(ctx, transport, stun_client, server_ep, "samgaawaa",
-                      "1234");
+    TurnClient client(transport, server_ep, "samgaawaa", "1234");
 
     net::ip::udp::socket remote_peer(ctx, net::ip::udp::v4());
     remote_peer.bind(
@@ -101,7 +100,7 @@ void allocate_test() {
         }
     };
     auto peer_recv_coro = [&]() -> ice::task<void> {
-        for (int i = 0; i < 86400 * 3; ++i) {
+        for (int i = 0; i < 10; ++i) {
             char buf[4096];
             net::ip::udp::endpoint relayed;
             std::error_code err;

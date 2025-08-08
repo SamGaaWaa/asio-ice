@@ -10,23 +10,21 @@ constexpr bool is_channel_data(const void *data, std::size_t size) noexcept {
     return (static_cast<const uint8_t *>(data)[0] & 0xC0) == 0x40;
 }
 
-template <class NextLayer, class StunClient, bool IsDatagram> class client {};
+template <class NextLayer, bool IsDatagram> class client {};
 
-template <class NextLayer, class StunClient>
-class client<NextLayer, StunClient, true> {
+template <class NextLayer> class client<NextLayer, true> {
   public:
-    using impl_type = impl::datagram_client<NextLayer, StunClient>;
+    using impl_type = impl::datagram_client<NextLayer>;
     using next_layer_type = typename impl_type::next_layer_type;
     using stun_client_type = typename impl_type::stun_client_type;
     using endpoint_type = typename impl_type::endpoint_type;
 
-    client(net::io_context &ctx, std::shared_ptr<next_layer_type> transport,
-           std::shared_ptr<stun_client_type> stun_client,
+    client(std::shared_ptr<next_layer_type> transport,
            const endpoint_type &server, std::string username,
            std::string password)
-        : _impl(std::make_shared<impl_type>(
-              ctx, std::move(transport), std::move(stun_client), server,
-              std::move(username), std::move(password))) {}
+        : _impl(std::make_shared<impl_type>(std::move(transport), server,
+                                            std::move(username),
+                                            std::move(password))) {}
 
     client(const client &) = delete;
     client &operator=(const client &) = delete;

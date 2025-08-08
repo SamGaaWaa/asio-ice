@@ -1,6 +1,5 @@
 #pragma once
 
-#include <boost/container/flat_map.hpp>
 #include <boost/intrusive/list.hpp>
 #include <boost/intrusive/set.hpp>
 
@@ -45,39 +44,35 @@ namespace net = asio;
 
 namespace ice::turn::impl {
 
-template <class NextLayer, class StunClient>
+template <class NextLayer>
 struct datagram_client
     : ice::datagram_receiver<typename NextLayer::endpoint_type>,
-      std::enable_shared_from_this<datagram_client<NextLayer, StunClient>> {
+      std::enable_shared_from_this<datagram_client<NextLayer>> {
     using base_type = ice::datagram_receiver<typename NextLayer::endpoint_type>;
     using next_layer_type = NextLayer;
-    using stun_client_type = StunClient;
+    using stun_client_type = ice::stun::client<next_layer_type, true>;
     using endpoint_type = typename next_layer_type::endpoint_type;
     using buffer_sequence_type = ice::buffer_wrapper<128>;
 
-    datagram_client(net::io_context &ctx,
-                    std::shared_ptr<next_layer_type> transport,
-                    std::shared_ptr<stun_client_type> stun_client,
+    datagram_client(std::shared_ptr<next_layer_type> transport,
                     const endpoint_type &server, std::string username,
                     std::string password)
-        : base_type(transport),
+        : base_type(std::move(transport)),
           _next_layer(base_type::template transport<next_layer_type>()),
-          _stun_client(std::move(stun_client)), _server(server),
-          _username(std::move(username)), _password(std::move(password)),
-          _data_queue(128) {}
+          _stun_client(_next_layer.context()), _server(server),
+          _username(std::move(username)), _password(std::move(password)) {}
 
     void stop() noexcept {
         if (!_is_running)
             return;
         _is_running = false;
         do_delete_allocation();
-        _data_queue.close();
     }
 
     bool is_running() const noexcept { return _is_running; }
 
-    const auto &context() const noexcept { return _stun_client->context(); }
-    auto &context() noexcept { return _stun_client->context(); }
+    const auto &context() const noexcept { return _next_layer.context(); }
+    auto &context() noexcept { return _next_layer.context(); }
 
     const auto &next_layer() const noexcept { return _next_layer; }
     auto &next_layer() noexcept { return _next_layer; }
@@ -88,8 +83,8 @@ struct datagram_client
 
     const auto &remote_endpoint() const noexcept { return _server; }
 
-    auto &stun_client() noexcept { return *_stun_client; }
-    const auto &stun_client() const noexcept { return *_stun_client; }
+    auto &stun_client() noexcept { return _stun_client; }
+    const auto &stun_client() const noexcept { return _stun_client; }
 
     const std::string &username() const noexcept { return _username; }
     const std::string &password() const noexcept { return _password; }
@@ -99,9 +94,9 @@ struct datagram_client
                             auto... self) {
         if (!_is_running)
             co_return false;
-        co_return co_await _stun_client->request(next_layer(), _server, msg,
-                                                 from, resp, retries,
-                                                 std::move(self)...);
+        co_return co_await _stun_client.request(next_layer(), _server, msg,
+                                                from, resp, retries,
+                                                std::move(self)...);
     }
 
     /*
@@ -186,9 +181,8 @@ struct datagram_client
                            channel_list_base_hook,
                            channel_to_peer_base_hook,
                            peer_to_channel_base_hook {
-        channel_state(
-            std::shared_ptr<datagram_client<NextLayer, StunClient>> client,
-            uint16_t channel, net::ip::udp::endpoint peer) noexcept
+        channel_state(std::shared_ptr<datagram_client<NextLayer>> client,
+                      uint16_t channel, net::ip::udp::endpoint peer) noexcept
             : _client{std::move(client)}, _channel{channel},
               _peer{std::move(peer)} {}
 
@@ -257,7 +251,7 @@ struct datagram_client
 
         ice::task<void> refresh_task(auto self);
 
-        std::shared_ptr<datagram_client<NextLayer, StunClient>> _client;
+        std::shared_ptr<datagram_client<NextLayer>> _client;
         std::shared_ptr<permission_state> _permission{nullptr};
         uint16_t _channel;
         net::ip::udp::endpoint _peer;
@@ -285,9 +279,8 @@ struct datagram_client
 
     struct permission_state : std::enable_shared_from_this<permission_state>,
                               permission_set_base_hook {
-        permission_state(
-            std::shared_ptr<datagram_client<NextLayer, StunClient>> client,
-            const net::ip::address &ip) noexcept
+        permission_state(std::shared_ptr<datagram_client<NextLayer>> client,
+                         const net::ip::address &ip) noexcept
             : _client(std::move(client)), _ip(ip) {}
 
         permission_state(const permission_state &) = delete;
@@ -324,7 +317,7 @@ struct datagram_client
       private:
         ice::task<void> refresh_task(auto self);
 
-        std::shared_ptr<datagram_client<NextLayer, StunClient>> _client;
+        std::shared_ptr<datagram_client<NextLayer>> _client;
         net::ip::address _ip;
         channel_list_type _channels;
         ice::shared_promise<void> _stop;
@@ -340,7 +333,7 @@ struct datagram_client
                                boost::intrusive::constant_time_size<false>>;
 
     next_layer_type &_next_layer;
-    std::shared_ptr<stun_client_type> _stun_client;
+    stun_client_type _stun_client;
     endpoint_type _server;
     std::string _nonce{};
     std::string _realm{};
@@ -353,7 +346,6 @@ struct datagram_client
     uint32_t _lifetime{0};
     std::optional<ice::endpoint> _relayed_address{};
     std::optional<ice::endpoint> _reflex_address{};
-    ice::async_queue<ice::io_buffer_ptr> _data_queue;
     receiver_list_t _receivers;
     ice::shared_promise<void> _stop_refresh_allocation_task{};
     permission_set_type _permissions{};
