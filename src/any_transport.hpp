@@ -30,18 +30,19 @@ namespace __any_transport_detail {
 
 struct interface {
     virtual ice::task<std::tuple<std::error_code, std::size_t>>
-    send_to(std::span<net::const_buffer> data, ice::endpoint dst,
-            std::shared_ptr<void> self) = 0;
+    send_to(ice::buffer_wrapper data, ice::endpoint dst) = 0;
 
     virtual ice::task<std::tuple<std::error_code, std::size_t>>
-    send_to(const void *data, std::size_t size, ice::endpoint dst,
-            std::shared_ptr<void> self) = 0;
+    send_to(const void *data, std::size_t size, ice::endpoint dst) = 0;
 
     virtual ice::task<std::tuple<std::error_code, std::size_t>>
-    send(std::span<net::const_buffer> data, std::shared_ptr<void> self) = 0;
+    send(ice::buffer_wrapper data) = 0;
 
     virtual ice::task<std::tuple<std::error_code, std::size_t>>
-    send(const void *data, std::size_t size, std::shared_ptr<void> self) = 0;
+    send(const void *data, std::size_t size) = 0;
+
+    virtual const void *data() const noexcept = 0;
+    virtual void *data() noexcept = 0;
 
     virtual void connect(const ice::endpoint &endpoint) = 0;
 
@@ -54,6 +55,8 @@ struct interface {
 
 template <class Transport> struct transport_impl final : public interface {
     using endpoint_type = typename Transport::endpoint_type;
+
+    // TODO: use concept
     static constexpr bool is_datagram =
         std::is_same_v<endpoint_type, net::ip::udp::endpoint>;
 
@@ -74,28 +77,23 @@ template <class Transport> struct transport_impl final : public interface {
     }
 
     ice::task<std::tuple<std::error_code, std::size_t>>
-    send_to(std::span<net::const_buffer> data, ice::endpoint dst,
-            std::shared_ptr<void> self) override {
+    send_to(ice::buffer_wrapper data, ice::endpoint dst) override {
         auto remote = dst.convert_to<endpoint_type>();
-        co_return co_await _transport->async_send_to(data, remote,
-                                                     std::move(self));
+        co_return co_await _transport->async_send_to(data, remote);
     }
 
     ice::task<std::tuple<std::error_code, std::size_t>>
-    send_to(const void *data, std::size_t size, ice::endpoint dst,
-            std::shared_ptr<void> self) override {
+    send_to(const void *data, std::size_t size, ice::endpoint dst) override {
         auto remote = dst.convert_to<endpoint_type>();
         co_return co_await _transport->async_send_to(
-            net::const_buffer(data, size), remote, std::move(self));
+            net::const_buffer(data, size), remote);
     }
 
     ice::task<std::tuple<std::error_code, std::size_t>>
-    send(std::span<net::const_buffer> data,
-         std::shared_ptr<void> self) override {
+    send(ice::buffer_wrapper data) override {
         // TODO: Uses concept
         if constexpr (is_datagram) {
-            co_return co_await _transport->async_send_to(data, _remote,
-                                                         std::move(self));
+            co_return co_await _transport->async_send_to(data, _remote);
         } else {
             // TODO
             co_return {};
@@ -103,16 +101,19 @@ template <class Transport> struct transport_impl final : public interface {
     }
 
     ice::task<std::tuple<std::error_code, std::size_t>>
-    send(const void *data, std::size_t size,
-         std::shared_ptr<void> self) override {
+    send(const void *data, std::size_t size) override {
         if constexpr (is_datagram) {
             co_return co_await _transport->async_send_to(
-                net::const_buffer(data, size), _remote, std::move(self));
+                net::const_buffer(data, size), _remote);
         } else {
             // TODO
             co_return {};
         }
     }
+
+    const void *data() const noexcept override { return _transport.get(); }
+
+    void *data() noexcept override { return _transport.get(); }
 
     void connect(const ice::endpoint &endpoint) override {
         _remote = endpoint.convert_to<endpoint_type>();
@@ -176,6 +177,10 @@ struct any_transport {
         return *this;
     }
 
+    const void *data() const noexcept { return get_interface()->data(); }
+
+    void *data() noexcept { return get_interface()->data(); }
+
     bool empty() const noexcept { return _any.empty(); }
 
     operator bool() const noexcept { return !empty(); }
@@ -208,34 +213,31 @@ struct any_transport {
     }
 
     ice::task<std::tuple<std::error_code, std::size_t>>
-    send_to(std::span<net::const_buffer> data, const ice::endpoint &dst,
-            std::shared_ptr<void> self) {
-        return get_interface()->send_to(data, dst, std::move(self));
+    send_to(ice::buffer_wrapper data, const ice::endpoint &dst) {
+        return get_interface()->send_to(data, dst);
     }
 
     ice::task<std::tuple<std::error_code, std::size_t>>
-    send_to(const void *data, std::size_t size, const ice::endpoint &dst,
-            std::shared_ptr<void> self) {
-        return get_interface()->send_to(data, size, dst, std::move(self));
+    send_to(const void *data, std::size_t size, const ice::endpoint &dst) {
+        return get_interface()->send_to(data, size, dst);
     }
 
     ice::task<std::tuple<std::error_code, std::size_t>>
-    send(std::span<net::const_buffer> data, std::shared_ptr<void> self) {
-        return get_interface()->send(data, std::move(self));
+    send(ice::buffer_wrapper data) {
+        return get_interface()->send(data);
     }
 
-    ice::task<std::tuple<std::error_code, std::size_t>>
-    send(const void *data, std::size_t size, std::shared_ptr<void> self) {
-        return get_interface()->send(data, size, std::move(self));
+    ice::task<std::tuple<std::error_code, std::size_t>> send(const void *data,
+                                                             std::size_t size) {
+        return get_interface()->send(data, size);
     }
 
-    template <class Endpoint>
+    template <class BufferSequence, class Endpoint>
     ice::task<std::tuple<std::error_code, std::size_t>>
-    async_send_to(buffer_wrapper<16> buffers, Endpoint destination,
+    async_send_to(const BufferSequence &buffers, const Endpoint &destination,
                   auto... self) {
-        co_return co_await send_to(
-            std::span{buffers.buffers().data(), buffers.buffers().size()},
-            ice::endpoint{destination.address(), destination.port()}, nullptr);
+        return get_interface()->send_to(
+            buffers, ice::endpoint{destination.address(), destination.port()});
     }
 
     void connect(const ice::endpoint &endpoint) {

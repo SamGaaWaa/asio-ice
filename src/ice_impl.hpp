@@ -13,6 +13,7 @@
 #include "stop_when.hpp"
 #include "scope_guard.hpp"
 #include "on_scope_empty.hpp"
+#include "small_set.hpp"
 
 #include <exec/async_scope.hpp>
 
@@ -106,6 +107,14 @@ struct agent_datagram_impl
     find_pair(const ice::any_transport &transport,
               const ice::candidate &remote_candidate) const noexcept;
 
+    ice::candidate_pair_base *pick_next_pair() noexcept;
+
+    void unfreeze_initial() noexcept;
+
+    ice::task<bool> connect(auto... self);
+
+    void check_complete(const ice::candidate_pair_base &pair) noexcept;
+
   private:
     using triggered_check_queue_type = boost::intrusive::list<
         candidate_pair_base,
@@ -115,6 +124,9 @@ struct agent_datagram_impl
     using check_list_type =
         std::vector<std::shared_ptr<ice::candidate_pair_base>>;
 
+    using valid_list_type =
+        std::vector<std::shared_ptr<ice::candidate_pair_base>>;
+
     net::io_context &_ctx;
     config_type _config;
     bool _ice_controlling = true;
@@ -122,6 +134,7 @@ struct agent_datagram_impl
     std::vector<ice::candidate> _remote_candidates{};
     stun_client_type _stun_client; // use for connectivity checks
     check_list_type _check_list{};
+    valid_list_type _valid_list{};
     triggered_check_queue_type _triggered_check_queue{};
 };
 
@@ -284,6 +297,9 @@ inline ice::task<void> gather_task(ice::net::io_context &ctx) try {
                   << " to " << p->remote_candidate().endpoint.to_string()
                   << '\n';
     }
+
+    std::cout << "\nConnecting...\n";
+    bool connected = co_await agent1->connect();
 } catch (const std::exception &e) {
     std::cerr << "Unhandled exception: " << e.what() << '\n';
     co_return;

@@ -52,7 +52,7 @@ struct datagram_client
     using next_layer_type = NextLayer;
     using stun_client_type = ice::stun::client<next_layer_type, true>;
     using endpoint_type = typename next_layer_type::endpoint_type;
-    using buffer_sequence_type = ice::buffer_wrapper<128>;
+    using buffer_sequence_type = ice::buffer_wrapper;
 
     datagram_client(std::shared_ptr<next_layer_type> transport,
                     const endpoint_type &server, std::string username,

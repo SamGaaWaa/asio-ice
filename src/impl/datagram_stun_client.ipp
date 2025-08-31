@@ -8,7 +8,7 @@ void datagram_client<LowestLayer>::stop() noexcept {
 template <class LowestLayer>
 bool datagram_client<LowestLayer>::dispatch_response(
     const typename datagram_client<LowestLayer>::endpoint_type &ep,
-    const void *data, std::size_t size) noexcept {
+    const void *data, std::size_t size, const void *transport) noexcept {
     if (!this->is_running())
         return false;
     if (message::is_not_stun(data, size) || !message::is_response(data, size))
@@ -23,6 +23,8 @@ bool datagram_client<LowestLayer>::dispatch_response(
         // TODO: May be an application message
         return false;
     }
+    if (it->transport)
+        *it->transport = transport;
     it->response.reset();
     if (!it->response.parse(data, size)) {
         ICE_IN_DEBUG { std::cerr << "Parse response failed\n"; }
@@ -76,7 +78,7 @@ ice::task<bool> datagram_client<LowestLayer>::request(
     const typename datagram_client<LowestLayer>::endpoint_type &ep,
     const stun::message &msg,
     typename datagram_client<LowestLayer>::endpoint_type &from,
-    stun::message &resp, std::size_t max_retries, auto... self) {
+    stun::message &resp, std::size_t max_retries, const void **recv_transport) {
     ice::shared_promise<void> stop_receiver, stop_retry;
     auto retry_coro = [&, this]() -> ice::task<bool> {
         std::chrono::milliseconds retry_rto(500);
@@ -136,14 +138,18 @@ ice::task<bool> datagram_client<LowestLayer>::request(
         ICE_IN_DEBUG { std::cout << "Transaction already in progress\n"; }
         co_return false;
     }
-    transaction trans{.request{msg}, .response_from{from}, .response{resp}};
+    transaction trans{.request{msg},
+                      .response_from{from},
+                      .response{resp},
+                      .transport{recv_transport}};
     this->_transactions.insert(it, trans);
     utils::scope_guard on_exit([&]() noexcept {
         if (trans.is_linked())
             trans.unlink();
     });
 
-    datagram_client<LowestLayer>::response_receiver receiver{*this};
+    datagram_client<LowestLayer>::response_receiver<Transport> receiver{
+        transport, *this};
     transport.add_receiver(receiver);
 
     auto recv_work = trans.done_promise.get_future() | stdexec::then([&] {
@@ -176,10 +182,18 @@ ice::task<bool> datagram_client<LowestLayer>::request(
 }
 
 template <class LowestLayer>
-bool datagram_client<LowestLayer>::response_receiver::datagram_received(
-    io_buffer_ptr &buffer, const endpoint_type &endpoint) {
-    return this->_self.dispatch_response(endpoint, buffer->data(),
-                                         buffer->size());
+template <class Transport1>
+bool datagram_client<LowestLayer>::response_receiver<
+    Transport1>::datagram_received(io_buffer_ptr &buffer,
+                                   const endpoint_type &endpoint) {
+    if constexpr (std::is_same_v<std::decay_t<Transport1>,
+                                 ice::any_transport>) {
+        return this->_self.dispatch_response(
+            endpoint, buffer->data(), buffer->size(), this->transport.data());
+    } else {
+        return this->_self.dispatch_response(endpoint, buffer->data(),
+                                             buffer->size(), &this->transport);
+    }
 }
 
 } // namespace ice::stun::impl

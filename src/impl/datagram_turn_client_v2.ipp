@@ -711,7 +711,7 @@ bool datagram_client<NextLayer>::datagram_received(
         if (cls == stun::class_t::STUN_CLASS_RESP_SUCCESS ||
             cls == stun::class_t::STUN_CLASS_RESP_ERROR) {
             this->stun_client().dispatch_response(endpoint, buffer->data(),
-                                                  buffer->size());
+                                                  buffer->size(), nullptr);
             return true;
         }
         if (cls == stun::class_t::STUN_CLASS_REQUEST) {

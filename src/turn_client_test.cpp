@@ -74,8 +74,7 @@ void allocate_test() {
         std::string data = "\xcdHello, world!";
         begin_time = std::chrono::high_resolution_clock::now();
         while (true) {
-            auto [err, n] =
-                co_await cpair->send(data.data(), data.size(), nullptr);
+            auto [err, n] = co_await cpair->send(data.data(), data.size());
             if (err) {
                 std::cerr << "Send error: " << err.message() << '\n';
                 co_return;

@@ -245,6 +245,7 @@ void agent_datagram_impl<Layer>::sort_check_list() noexcept {
 }
 
 template <class Layer> void agent_datagram_impl<Layer>::clear() noexcept {
+    this->_triggered_check_queue.clear();
     for (auto &p : this->_check_list) {
         p->set_request_handler(nullptr);
     }
@@ -295,7 +296,8 @@ ice::task<bool> agent_datagram_impl<Layer>::add_remote_candidate(
                 typename agent_datagram_impl<Layer>::stun_client_type>>(
                 c, remote_candidate, this->_stun_client);
             c_pair->set_request_handler(
-                [this, p = this->shared_from_this()](ice::candidate_pair_base &,
+                [this, p = this->shared_from_this()](const ice::endpoint& from,
+                                                     const ice::endpoint& to,
                                                      ice::io_buffer_ptr req) {
                     // TODO: Handle STUN requests
                 });
@@ -306,6 +308,191 @@ ice::task<bool> agent_datagram_impl<Layer>::add_remote_candidate(
 
     this->sort_check_list();
     co_return true;
+}
+
+template <class Layer>
+ice::candidate_pair_base *
+agent_datagram_impl<Layer>::pick_next_pair() noexcept {
+    if (this->_check_list.empty()) {
+        return nullptr;
+    }
+
+    /*
+       If the triggered-check queue associated with the checklist
+       contains one or more candidate pairs, the agent removes the top
+       pair from the queue, performs a connectivity check on that pair,
+       puts the candidate pair state to In-Progress, and aborts the
+       subsequent steps.
+    */
+    if (!this->_triggered_check_queue.empty()) {
+        auto &p = this->_triggered_check_queue.front();
+        this->_triggered_check_queue.pop_front();
+        p.set_state(ice::candidate_pair_base::state_t::IN_PROGRESS);
+        return &p;
+    }
+
+    if (std::ranges::none_of(this->_check_list, [](const auto &p) noexcept {
+            return p->state() == ice::candidate_pair_base::state_t::WAITING;
+        })) {
+        /*
+            If there is no candidate pair in the Waiting state, and if there
+            are one or more pairs in the Frozen state, the agent checks the
+            foundation associated with each pair in the Frozen state.  For a
+            given foundation, if there is no pair (in any checklist in the
+            checklist set) in the Waiting or In-Progress state, the agent
+            puts the candidate pair state to Waiting and continues with the
+            next step.
+        */
+        for (auto &p : this->_check_list) {
+            if (p->state() != ice::candidate_pair_base::state_t::FROZEN)
+                continue;
+            if (std::ranges::none_of(this->_check_list, [&p](const auto
+                                                                 &pp) noexcept {
+                    return p->foundation() == pp->foundation() &&
+                           pp->state() ==
+                               ice::candidate_pair_base::state_t::IN_PROGRESS;
+                })) {
+                p->set_state(ice::candidate_pair_base::state_t::WAITING);
+            }
+        }
+    }
+
+    candidate_pair_base *result = nullptr;
+    for (auto &p : this->_check_list) {
+        if (p->state() != ice::candidate_pair_base::state_t::WAITING)
+            continue;
+        if (!result || p->priority() > result->priority()) {
+            result = p.get();
+            continue;
+        }
+        if (p->priority() == result->priority() &&
+            p->component() < result->component()) {
+            result = p.get();
+        }
+    }
+    if (result) {
+        /*
+            If there are one or more candidate pairs in the Waiting state,
+            the agent picks the highest-priority candidate pair (if there are
+            multiple pairs with the same priority, the pair with the lowest
+            component ID is picked) in the Waiting state, performs a
+            connectivity check on that pair, puts the candidate pair state to
+            In-Progress, and aborts the subsequent steps.
+        */
+        result->set_state(ice::candidate_pair_base::state_t::IN_PROGRESS);
+        return result;
+    }
+
+    /*
+        If this step is reached, no check could be performed for the
+        checklist that was picked.  So, without waiting for timer Ta to
+        expire again, select the next checklist in the Running state and
+        return to step #1.  If this happens for every single checklist in
+        the Running state, meaning there are no remaining candidate pairs
+        to perform connectivity checks for, abort these steps.
+    */
+    return nullptr;
+}
+
+template <class Layer>
+void agent_datagram_impl<Layer>::unfreeze_initial() noexcept {
+    ice::small_set<std::string_view> seen_foundations;
+    std::vector<ice::candidate_pair_base *> pairs(this->_check_list.size(),
+                                                  nullptr);
+    std::transform(this->_check_list.begin(), this->_check_list.end(),
+                   pairs.begin(), [](auto &p) noexcept { return p.get(); });
+    std::ranges::sort(pairs, [](const auto &a, const auto &b) noexcept {
+        if (a->component() == b->component())
+            return a->priority() > b->priority();
+        return a->component() < b->component();
+    });
+    for (auto p : pairs) {
+        if (seen_foundations.contains(p->foundation()))
+            continue;
+        seen_foundations.insert(p->foundation());
+        p->set_state(ice::candidate_pair_base::state_t::WAITING);
+    }
+}
+
+template <class Layer>
+void agent_datagram_impl<Layer>::check_complete(
+    const ice::candidate_pair_base &pair) noexcept {
+    if (pair.state() != ice::candidate_pair_base::state_t::SUCCEEDED)
+        return;
+    for (auto &p : this->_check_list) {
+        if (p->state() == ice::candidate_pair_base::state_t::FROZEN &&
+            p->foundation() == pair.foundation())
+            p->set_state(ice::candidate_pair_base::state_t::WAITING);
+    }
+}
+
+template <class Layer>
+ice::task<bool> agent_datagram_impl<Layer>::connect(auto... self) {
+    this->unfreeze_initial();
+
+    // TODO: Handle early checks
+    {}
+
+    net::steady_timer ta{this->context()};
+    exec::async_scope scope;
+    ice::shared_promise<bool> done;
+    while (true)
+        try {
+            utils::scope_guard on_err([&]() noexcept { scope.request_stop(); });
+            auto *p = this->pick_next_pair();
+            if (!p) {
+                if (std::ranges::any_of(this->_check_list, [](const auto
+                                                                  &p) noexcept {
+                        return p->state() ==
+                               ice::candidate_pair_base::state_t::IN_PROGRESS;
+                    })) {
+                    auto ret = co_await (done.get_future() |
+                                         stdexec::stopped_as_optional());
+                    if (!ret)
+                        break;
+                    on_err.dismiss();
+                    continue;
+                }
+                ICE_IN_DEBUG { std::cout << "No pairs to check, exiting\n"; }
+                on_err.dismiss();
+                break;
+            }
+            assert(p->state() ==
+                   ice::candidate_pair_base::state_t::IN_PROGRESS);
+            auto fake_check = [](auto p, auto &done,
+                                 auto agent) -> ice::task<void> {
+                std::cout << "performing check on pair: " << p->to_string()
+                          << "\n";
+                net::steady_timer t{agent->context()};
+                if (rand() % 2) {
+                    t.expires_after(std::chrono::milliseconds(100));
+                    co_await t.async_wait(asio2exec::use_sender);
+                    p->set_state(ice::candidate_pair_base::state_t::SUCCEEDED);
+                } else {
+                    t.expires_after(std::chrono::seconds(10));
+                    co_await t.async_wait(asio2exec::use_sender);
+                    p->set_state(ice::candidate_pair_base::state_t::FAILED);
+                }
+                agent->check_complete(*p);
+                std::cout << "check finished: " << p << '\n';
+                done.set_value(true);
+            };
+            scope.spawn(
+                stdexec::starts_on(asio2exec::scheduler{this->context()},
+                                   fake_check(p, done, this)));
+            ta.expires_after(std::chrono::milliseconds(50));
+            if (auto ret = co_await (ta.async_wait(asio2exec::use_sender) |
+                                     stdexec::stopped_as_optional());
+                !ret)
+                break;
+            on_err.dismiss();
+        } catch (const std::exception &e) {
+            ICE_IN_DEBUG { std::cout << "Exception: " << e.what() << '\n'; }
+            break;
+        }
+    ICE_IN_DEBUG { std::cout << "Waiting for all checks to finish\n"; }
+    co_await utils::on_scope_empty(scope);
+    co_return false;
 }
 
 } // namespace ice::impl

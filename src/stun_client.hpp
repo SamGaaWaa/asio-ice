@@ -22,15 +22,17 @@ template <class LowestLayer> class client<LowestLayer, true> {
     auto &context() noexcept { return _impl.context(); }
 
     bool dispatch_response(const endpoint_type &ep, const void *data,
-                           std::size_t size) noexcept {
-        return _impl.dispatch_response(ep, data, size);
+                           std::size_t size, const void *transport) noexcept {
+        return _impl.dispatch_response(ep, data, size, transport);
     }
 
     template <class Transport>
     ice::task<bool> request(Transport &transport, const endpoint_type &ep,
                             const stun::message &msg, endpoint_type &from,
-                            stun::message &resp, std::size_t retries) {
-        return _impl.request(transport, ep, msg, from, resp, retries);
+                            stun::message &resp, std::size_t retries,
+                            const void **recv_transport = nullptr) {
+        return _impl.request(transport, ep, msg, from, resp, retries,
+                             recv_transport);
     }
 
   private:

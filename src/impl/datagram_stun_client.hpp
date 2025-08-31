@@ -33,6 +33,7 @@ namespace net = asio;
 #include "stun.hpp"
 #include "task.hpp"
 #include "receiver.hpp"
+#include "any_transport.hpp"
 
 namespace ice::stun::impl {
 
@@ -53,13 +54,13 @@ template <class LowestLayer> struct datagram_client {
     auto &context() noexcept { return _ctx; }
 
     bool dispatch_response(const endpoint_type &ep, const void *data,
-                           std::size_t size) noexcept;
+                           std::size_t size, const void *transport) noexcept;
 
     template <class Transport>
     ice::task<bool> request(Transport &transport, const endpoint_type &ep,
                             const stun::message &msg, endpoint_type &from,
                             stun::message &resp, std::size_t retries,
-                            auto... self);
+                            const void **recv_transport = nullptr);
 
   private:
     struct transaction
@@ -75,6 +76,7 @@ template <class LowestLayer> struct datagram_client {
         const stun::message &request;
         endpoint_type &response_from;
         stun::message &response;
+        const void **transport;
         bool success{false};
         ice::shared_promise<void> done_promise{};
     };
@@ -84,14 +86,18 @@ template <class LowestLayer> struct datagram_client {
         boost::intrusive::key_of_value<typename transaction::comparer>,
         boost::intrusive::constant_time_size<false>>;
 
+    template <class Transport1>
     struct response_receiver : ice::datagram_receiver<endpoint_type> {
-        explicit response_receiver(datagram_client &self) noexcept
-            : ice::datagram_receiver<endpoint_type>(), _self(self) {}
+        explicit response_receiver(Transport1 &t,
+                                   datagram_client &self) noexcept
+            : ice::datagram_receiver<endpoint_type>(), transport(t),
+              _self(self) {}
 
         bool datagram_received(io_buffer_ptr &buffer,
                                const endpoint_type &endpoint) override;
 
       private:
+        Transport1 &transport;
         datagram_client &_self;
     };
 

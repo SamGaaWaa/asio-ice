@@ -2,7 +2,6 @@
 #include "scope_guard.hpp"
 #include "socket_transport.hpp"
 #include "stun_client.hpp"
-#include "stun_protocol.hpp"
 
 #if ASIOICE_USE_BOOST_ASIO > 0
 #include <boost/asio/buffer.hpp>

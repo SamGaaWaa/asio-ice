@@ -52,15 +52,15 @@ std::string candidate_pair_base::to_string(int indent) const {
     res["priority"] = this->priority();
     res["state"] = [](auto state) noexcept {
         switch (state) {
-        case candidate_pair_base::state::FROZEN:
+        case candidate_pair_base::state_t::FROZEN:
             return "FROZEN";
-        case candidate_pair_base::state::WAITING:
+        case candidate_pair_base::state_t::WAITING:
             return "WAITING";
-        case candidate_pair_base::state::IN_PROGRESS:
+        case candidate_pair_base::state_t::IN_PROGRESS:
             return "IN_PROGRESS";
-        case candidate_pair_base::state::SUCCEEDED:
+        case candidate_pair_base::state_t::SUCCEEDED:
             return "SUCCESSED";
-        case candidate_pair_base::state::FAILED:
+        case candidate_pair_base::state_t::FAILED:
             return "FAILED";
         default:
             return "";

@@ -42,11 +42,13 @@ using __triggered_check_queue_base_hook = boost::intrusive::list_base_hook<
 
 struct candidate_pair_base :
     //  public __check_list_base_hook,
-    public __triggered_check_queue_base_hook {
-    using request_handler_type =
-        std::function<void(candidate_pair_base &, ice::io_buffer_ptr)>;
+    __triggered_check_queue_base_hook,
+    std::enable_shared_from_this<candidate_pair_base> {
 
-    enum struct state {
+    using request_handler_type =
+        std::function<void(const ice::endpoint& from, const ice::endpoint& to, ice::io_buffer_ptr)>;
+
+    enum struct state_t {
         FROZEN = 0,
         WAITING = 1,
         IN_PROGRESS = 2,
@@ -59,10 +61,17 @@ struct candidate_pair_base :
                         request_handler_type request_handler = nullptr)
         : _local_candidate(std::move(local_candidate)),
           _remote_candidate(std::move(remote_candidate)),
-          _request_handler(std::move(request_handler)) {
+          // TODO: What is candidate pair's foundation?
+          _foundation{}, _request_handler(std::move(request_handler)) {
         if (!_local_candidate.transport)
             throw std::runtime_error("local candidate has no transport");
         _local_candidate.transport.connect(_remote_candidate.endpoint);
+        if (_local_candidate.foundation > _remote_candidate.foundation)
+            _foundation =
+                _remote_candidate.foundation + _local_candidate.foundation;
+        else
+            _foundation =
+                _local_candidate.foundation + _remote_candidate.foundation;
     }
 
     candidate_pair_base(const candidate_pair_base &) = delete;
@@ -76,26 +85,44 @@ struct candidate_pair_base :
     uint64_t priority() const noexcept { return _priority; }
     void set_priority(bool ice_controlling) noexcept;
 
+    state_t state() const noexcept { return _state; }
+    void set_state(state_t state) noexcept { _state = state; }
+
+    const std::string &foundation() const noexcept {
+        // TODO: What is candidate pair foundation?
+        return _foundation;
+    }
+
+    auto component() const noexcept { return _local_candidate.component; }
+
+    bool in_triggered_queue() const noexcept {
+        return __triggered_check_queue_base_hook::is_linked();
+    }
+
     virtual ~candidate_pair_base() = default;
 
     virtual ice::task<bool> request(const stun::message &req,
-                                    stun::message &res, size_t retries) = 0;
+                                    stun::message &res, size_t retries)
+    {
+        co_return false;
+    }
 
-    virtual void add_receiver(ice::receiver_base &receiver) noexcept = 0;
+    virtual void add_receiver(ice::receiver_base &receiver) noexcept {};
 
+    template <class BufferSequence>
     ice::task<std::tuple<std::error_code, std::size_t>>
-    send(std::span<net::const_buffer> data, std::shared_ptr<void> self) {
-        return _local_candidate.transport.send(data, std::move(self));
+    send(const BufferSequence &data) {
+        return _local_candidate.transport.send(data);
+    }
+
+    ice::task<std::tuple<std::error_code, std::size_t>> send(const void *data,
+                                                             std::size_t size) {
+        return _local_candidate.transport.send(data, size);
     }
 
     ice::task<std::tuple<std::error_code, std::size_t>>
-    send(const void *data, std::size_t size, std::shared_ptr<void> self) {
-        return _local_candidate.transport.send(data, size, std::move(self));
-    }
-
-    ice::task<std::tuple<std::error_code, std::size_t>>
-    send(const net::const_buffer &data, std::shared_ptr<void> self) {
-        return send(data.data(), data.size(), std::move(self));
+    send(const net::const_buffer &data) {
+        return send(data.data(), data.size());
     }
 
     void set_request_handler(request_handler_type handler) {
@@ -107,18 +134,18 @@ struct candidate_pair_base :
   protected:
     ice::candidate _local_candidate;
     ice::candidate _remote_candidate;
+    std::string _foundation;
     uint64_t _priority{};
     request_handler_type _request_handler;
     bool _nominated = false;
     bool _remote_nominated = false;
-    state _state = state::FROZEN;
+    state_t _state = state_t::FROZEN;
 };
 
 template <class StunClient>
 struct candidate_pair final
     : candidate_pair_base,
-      datagram_receiver<typename StunClient::endpoint_type>,
-      std::enable_shared_from_this<candidate_pair<StunClient>> {
+      datagram_receiver<typename StunClient::endpoint_type> {
     using endpoint_type = typename StunClient::endpoint_type;
 
     candidate_pair(ice::candidate local_candidate,
