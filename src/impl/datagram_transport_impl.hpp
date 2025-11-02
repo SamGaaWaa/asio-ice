@@ -30,7 +30,7 @@ struct datagram_transport_impl
     : std::enable_shared_from_this<datagram_transport_impl<Socket>> {
     using endpoint_type = typename Socket::endpoint_type;
     using receiver_list_t =
-        boost::intrusive::list<datagram_receiver<endpoint_type>,
+        boost::intrusive::list<datagram_receiver,
                                boost::intrusive::constant_time_size<false>>;
 
     datagram_transport_impl(net::io_context &ctx, Socket &&sock) noexcept

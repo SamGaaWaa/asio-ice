@@ -4,3 +4,4 @@ clang-build
 gcc-build
 turn.log
 wireshark
+*.log

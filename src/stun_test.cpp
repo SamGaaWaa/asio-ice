@@ -3,10 +3,9 @@
 
 #include "address.hpp"
 #include "base64.hpp"
-#include "hash.hpp"
+#include "hash2.hpp"
 #include "json.hpp"
 #include "stun.hpp"
-#include "udp_connection.hpp"
 
 #if ASIOICE_USE_BOOST_ASIO > 0
 #define ASIO_TO_EXEC_USE_BOOST 1

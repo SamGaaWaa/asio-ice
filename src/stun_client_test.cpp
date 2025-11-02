@@ -1,7 +1,7 @@
 #include "config.hpp"
 #include "scope_guard.hpp"
 #include "socket_transport.hpp"
-#include "stun_client.hpp"
+#include "stun_transaction.hpp"
 
 #if ASIOICE_USE_BOOST_ASIO > 0
 #include <boost/asio/buffer.hpp>
@@ -53,7 +53,7 @@ void udp_request_test() {
 
     transport->start();
 
-    stun::client<datagram_transport<net::ip::udp::socket>, true> client(ctx);
+    stun::transaction_set transactions;
 
     auto request_coro = [&]() -> ice::task<void> {
         stun::message req;
@@ -63,15 +63,15 @@ void udp_request_test() {
         req.fill_random_transaction_id();
 
         stun::message resp;
-        net::ip::udp::endpoint resp_from;
-        auto success = co_await client.request(*transport, server_ep, req,
-                                               resp_from, resp, 3);
+        ice::endpoint resp_source;
+        auto success = co_await stun::basic_request(
+            *transport, transactions, req, server_ep, resp, resp_source, 3);
         if (!success) {
             std::cerr << "Request error\n";
             co_return;
         }
-        std::cout << "Received response from " << resp_from.address() << ':'
-                  << resp_from.port() << '\n';
+        std::cout << "Received response from " << resp_source.address() << ':'
+                  << resp_source.port() << '\n';
         std::cout << resp.to_string() << '\n';
     };
 
@@ -84,7 +84,7 @@ void udp_request_test() {
     scope.spawn(stdexec::starts_on(sched, request_coro()));
     scope.spawn(stdexec::starts_on(
         sched, timer.async_wait(asio2exec::use_sender) |
-                   stdexec::then([&](auto) { client.stop(); })));
+                   stdexec::then([&](auto) { transport->stop(); })));
     stdexec::sync_wait(scope.on_empty());
     std::cout << "Finish\n";
 }

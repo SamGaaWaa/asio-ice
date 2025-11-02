@@ -553,11 +553,11 @@ datagram_client<NextLayer>::create_permission(std::ranges::view auto peers,
                                               auto... self) {
     if (!this->_is_running || peers.empty() || !this->_relayed_address)
         co_return false;
-    if (this->_relayed_address->address.is_v4() &&
+    if (this->_relayed_address->address().is_v4() &&
         std::ranges::any_of(
             peers, [](const auto &peer) noexcept { return !peer.is_v4(); }))
         co_return false;
-    if (this->_relayed_address->address.is_v6() &&
+    if (this->_relayed_address->address().is_v6() &&
         std::ranges::any_of(
             peers, [](const auto &peer) noexcept { return !peer.is_v6(); }))
         co_return false;
@@ -570,12 +570,12 @@ datagram_client<NextLayer>::create_permission(std::ranges::view auto peers,
         req.xor_peer_address.emplace_back(peer, 0);
     std::ranges::sort(req.xor_peer_address,
                       [](const auto &a, const auto &b) noexcept {
-                          return a.address < b.address;
+                          return a.address() < b.address();
                       });
     {
         const auto [first, last] = std::ranges::unique(
             req.xor_peer_address, [](const auto &a, const auto &b) noexcept {
-                return a.address == b.address;
+                return a.address() == b.address();
             });
         req.xor_peer_address.erase(first, last);
     }
@@ -699,8 +699,8 @@ datagram_client<NextLayer>::channel_bind(net::ip::udp::endpoint peer,
         ICE_IN_DEBUG { std::cout << "Haven't allocate.\n"; }
         co_return false;
     }
-    if ((this->_relayed_address->address.is_v4() && !peer.address().is_v4()) ||
-        (this->_relayed_address->address.is_v6() && !peer.address().is_v6())) {
+    if ((this->_relayed_address->address().is_v4() && !peer.address().is_v4()) ||
+        (this->_relayed_address->address().is_v6() && !peer.address().is_v6())) {
         ICE_IN_DEBUG {
             std::cout << "Peer address is not the same type as the relayed "
                          "address.\n";
@@ -759,8 +759,7 @@ datagram_client<NextLayer>::read(
                     const auto &msg = v.first;
                     const auto &ep = v.second;
                     assert(msg.type() == message_type::turn_channel);
-                    return ep.address == this->remote_endpoint().address() &&
-                           ep.port == this->remote_endpoint().port();
+                    return ep == this->remote_endpoint();
                 });
             if (it == turn_q.end())
                 break;
@@ -791,8 +790,7 @@ datagram_client<NextLayer>::read(
                     auto cls = stun::message::get_class(msg.data(), msg.size());
                     auto method =
                         stun::message::get_method(msg.data(), msg.size());
-                    return ep.address == this->remote_endpoint().address() &&
-                           ep.port == this->remote_endpoint().port() &&
+                    return ep == this->remote_endpoint() &&
                            ((cls == stun::class_t::STUN_CLASS_INDICATION &&
                              method == stun::method_t::STUN_METHOD_DATA) ||
                             cls == stun::class_t::STUN_CLASS_RESP_SUCCESS ||

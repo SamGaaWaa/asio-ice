@@ -37,8 +37,8 @@ namespace net = asio;
 
 namespace ice::stun::impl {
 
-template <class LowestLayer> struct datagram_client {
-    using endpoint_type = typename LowestLayer::endpoint_type;
+struct datagram_client {
+    using endpoint_type = net::ip::udp::endpoint;
 
     datagram_client(net::io_context &ctx) noexcept : _ctx(ctx) {}
 
@@ -87,14 +87,14 @@ template <class LowestLayer> struct datagram_client {
         boost::intrusive::constant_time_size<false>>;
 
     template <class Transport1>
-    struct response_receiver : ice::datagram_receiver<endpoint_type> {
+    struct response_receiver : ice::datagram_receiver {
         explicit response_receiver(Transport1 &t,
                                    datagram_client &self) noexcept
-            : ice::datagram_receiver<endpoint_type>(), transport(t),
+            : ice::datagram_receiver(), transport(t),
               _self(self) {}
 
         bool datagram_received(io_buffer_ptr &buffer,
-                               const endpoint_type &endpoint) override;
+                               const ice::endpoint &endpoint) override;
 
       private:
         Transport1 &transport;

@@ -44,9 +44,12 @@ struct interface {
     virtual const void *data() const noexcept = 0;
     virtual void *data() noexcept = 0;
 
+    virtual const net::io_context &context() const noexcept = 0;
+    virtual net::io_context &context() noexcept = 0;
+
     virtual void connect(const ice::endpoint &endpoint) = 0;
 
-    virtual void add_receiver(ice::receiver_base &receiver) = 0;
+    virtual void add_receiver(ice::datagram_receiver &receiver) = 0;
 
     virtual ice::endpoint local_endpoint() const = 0;
 
@@ -54,14 +57,12 @@ struct interface {
 };
 
 template <class Transport> struct transport_impl final : public interface {
-    using endpoint_type = typename Transport::endpoint_type;
 
     // TODO: use concept
-    static constexpr bool is_datagram =
-        std::is_same_v<endpoint_type, net::ip::udp::endpoint>;
+    static constexpr bool is_datagram = Transport::is_datagram();
 
     transport_impl(std::shared_ptr<Transport> transport) noexcept
-        : _transport(transport) {}
+        : _transport(std::move(transport)) {}
 
     transport_impl(const transport_impl &) noexcept = default;
     transport_impl &operator=(const transport_impl &) noexcept = default;
@@ -78,15 +79,23 @@ template <class Transport> struct transport_impl final : public interface {
 
     ice::task<std::tuple<std::error_code, std::size_t>>
     send_to(ice::buffer_wrapper data, ice::endpoint dst) override {
-        auto remote = dst.convert_to<endpoint_type>();
-        co_return co_await _transport->async_send_to(data, remote);
+        if constexpr (is_datagram) {
+            co_return co_await _transport->async_send_to(data, dst);
+        } else {
+            // TODO: implement
+            co_return {};
+        }
     }
 
     ice::task<std::tuple<std::error_code, std::size_t>>
     send_to(const void *data, std::size_t size, ice::endpoint dst) override {
-        auto remote = dst.convert_to<endpoint_type>();
-        co_return co_await _transport->async_send_to(
-            net::const_buffer(data, size), remote);
+        if constexpr (is_datagram) {
+            co_return co_await _transport->async_send_to(
+                net::const_buffer(data, size), dst);
+        } else {
+            // TODO: implement
+            co_return {};
+        }
     }
 
     ice::task<std::tuple<std::error_code, std::size_t>>
@@ -115,35 +124,31 @@ template <class Transport> struct transport_impl final : public interface {
 
     void *data() noexcept override { return _transport.get(); }
 
-    void connect(const ice::endpoint &endpoint) override {
-        _remote = endpoint.convert_to<endpoint_type>();
+    const net::io_context &context() const noexcept override {
+        return _transport->context();
     }
 
-    void add_receiver(ice::receiver_base &receiver) override {
-        // TODO: Uses concept
-        if constexpr (is_datagram) {
-            auto *r = dynamic_cast<ice::datagram_receiver<endpoint_type> *>(
-                &receiver);
-            if (r) {
-                _transport->add_receiver(*r);
-            }
-        } else {
-        }
+    net::io_context &context() noexcept override {
+        return _transport->context();
+    }
+
+    void connect(const ice::endpoint &endpoint) override { _remote = endpoint; }
+
+    void add_receiver(ice::datagram_receiver &receiver) override {
+        _transport->add_receiver(receiver);
     }
 
     ice::endpoint local_endpoint() const override {
-        const auto ep = _transport->local_endpoint();
-        return ice::endpoint{ep.address(), ep.port()};
+        return _transport->local_endpoint();
     }
 
     bool equal_to(const interface &other) const noexcept override {
-        const auto *p = dynamic_cast<const transport_impl *>(&other);
-        return p && p->_transport == _transport;
+        return other.data() == data();
     }
 
   private:
     std::shared_ptr<Transport> _transport;
-    endpoint_type _remote{};
+    ice::endpoint _remote{};
 };
 
 } // namespace __any_transport_detail
@@ -180,6 +185,12 @@ struct any_transport {
     const void *data() const noexcept { return get_interface()->data(); }
 
     void *data() noexcept { return get_interface()->data(); }
+
+    const net::io_context &context() const noexcept {
+        return get_interface()->context();
+    }
+
+    net::io_context &context() noexcept { return get_interface()->context(); }
 
     bool empty() const noexcept { return _any.empty(); }
 
@@ -248,7 +259,7 @@ struct any_transport {
         return get_interface()->local_endpoint();
     }
 
-    void add_receiver(ice::receiver_base &receiver) {
+    void add_receiver(ice::datagram_receiver &receiver) {
         get_interface()->add_receiver(receiver);
     }
 

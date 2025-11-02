@@ -1,9 +1,110 @@
 namespace ice::turn::impl {
 
 template <class NextLayer>
+ice::task<bool> datagram_client<NextLayer>::request(const stun::message &req,
+                                                    ice::endpoint &from,
+                                                    stun::message &resp,
+                                                    std::size_t retries,
+                                                    auto... self) noexcept {
+    auto it = this->_transactions.lower_bound(req.transaction_id);
+    if (it != this->_transactions.end() &&
+        it->request.transaction_id == req.transaction_id) {
+        ICE_IN_DEBUG { std::cout << "Transaction already in progress\n"; }
+        co_return false;
+    }
+    stun::transaction trans(this->context(), req, this->_server, resp);
+    this->_transactions.insert(it, trans);
+
+    bool ret = false;
+    utils::inplace_receiver<std::error_code> retry_receiver;
+    asio2exec::scheduler sched{this->context()};
+    auto retry_op = retry_receiver.start(
+        stdexec::starts_on(sched, trans.run(this->_next_layer)));
+    stdexec::start(retry_op);
+
+    while (true) {
+        ret = false;
+        auto new_state =
+            co_await (trans.on_state_change() | stdexec::continues_on(sched) |
+                      stdexec::stopped_as_optional());
+        if (!new_state.has_value()) {
+            goto END;
+        }
+        if (trans.state() == stun::transaction::state_t::ERROR) {
+            goto END;
+        }
+        assert(trans.state() == stun::transaction::state_t::DONE);
+        assert(resp.transaction_id == req.transaction_id);
+        assert(resp.is_response());
+        if (resp.cls == stun::class_t::STUN_CLASS_RESP_ERROR) {
+            // If the error response contains unknown comprehension-required
+            // attributes, or if the error response does not contain an
+            // ERROR-CODE attribute, then the transaction is simply considered
+            // to have failed.
+            if (!resp.error_code.has_value()) {
+                goto END;
+            }
+            if (resp.error_code->code == 401 || resp.error_code->code == 438) {
+                ret = true;
+                goto END;
+            }
+            // If the response is an error response with an error code of 400
+            // (Bad Request) and does not contain either the MESSAGE-INTEGRITY
+            // or MESSAGE-INTEGRITY-SHA256 attribute, then the response MUST be
+            // discarded, as if it were never received.  This means that
+            // retransmits, if applicable, will continue.
+            if (resp.error_code->code == 400 && resp.integrities.empty()) {
+                continue;
+            }
+        }
+        // For all other responses, if the NONCE attribute starts with the
+        // "nonce cookie" with the STUN Security Feature "Password algorithms"
+        // bit set to 1 but PASSWORD-ALGORITHMS is not present, the response
+        // MUST be ignored.
+        if (resp.nonce.starts_with(stun::STUN_NONCE_COOKIE) &&
+            (resp.security_features() & 0x01) && resp.pwd_algorithms.empty()) {
+            continue;
+        }
+        // The client looks for the MESSAGE-INTEGRITY or MESSAGE-INTEGRITY-
+        // SHA256 attribute in the response (either success or failure).  If
+        // present, the client computes the message integrity over the response
+        // as defined in Sections 14.5 or 14.6, using the same password it
+        // utilized for the request.  If the resulting value matches the
+        // contents of the MESSAGE-INTEGRITY or MESSAGE-INTEGRITY-SHA256
+        // attribute, the response is considered authenticated.  If the value
+        // does not match, or if both MESSAGE-INTEGRITY and MESSAGE-INTEGRITY-
+        // SHA256 are absent, the processing depends on the request being sent
+        // over a reliable or an unreliable transport.
+        if (resp.integrities.empty() ||
+            std::any_of(resp.integrities.begin(), resp.integrities.end(),
+                        [&req, &resp](const auto i) {
+                            return !i.verify(req.hmac_key(), resp);
+                        })) {
+            // If the request was sent over an unreliable transport, the
+            // response MUST be discarded, as if it had never been received.
+            // This means that retransmits, if applicable, will continue.  If
+            // all the responses received are discarded, then instead of
+            // signaling a timeout after ending the transaction, the layer MUST
+            // signal that the integrity protection was violated.
+            ICE_IN_DEBUG { std::cout << "Integrity check failed\n"; }
+            continue;
+        }
+        ret = true;
+        break;
+    }
+END:
+    from = trans.response_source;
+    if (trans.is_linked())
+        trans.unlink();
+    trans.stop_retring();
+    co_await retry_receiver.wait();
+    co_return ret;
+}
+
+template <class NextLayer>
 ice::task<bool> datagram_client<NextLayer>::request_with_retry(
     stun::message &req, stun::message &resp, std::size_t retries) {
-    typename datagram_client<NextLayer>::endpoint_type resp_from;
+    ice::endpoint resp_source;
     if (!this->_nonce.empty()) {
         // Once a request/response transaction has completed, the client will
         // have been presented a realm and nonce by the server and selected a
@@ -27,8 +128,8 @@ ice::task<bool> datagram_client<NextLayer>::request_with_retry(
         req.integrities.emplace_back(this->_integrity);
         req.set_hmac_key(this->_hmac_key);
     }
-    bool success = co_await this->request(req, resp_from, resp, retries);
-    if (!success || resp_from != this->remote_endpoint())
+    bool success = co_await this->request(req, resp_source, resp, retries);
+    if (!success || resp_source != this->remote_endpoint())
         co_return false;
     if (resp.cls != stun::class_t::STUN_CLASS_RESP_ERROR &&
         resp.cls != stun::class_t::STUN_CLASS_RESP_SUCCESS)
@@ -110,8 +211,8 @@ ice::task<bool> datagram_client<NextLayer>::request_with_retry(
         req.use_fingerprint(true);
 
         // Send the second request
-        success = co_await this->request(req, resp_from, resp, retries);
-        if (!success || resp_from != this->remote_endpoint() ||
+        success = co_await this->request(req, resp_source, resp, retries);
+        if (!success || resp_source != this->remote_endpoint() ||
             resp.cls != stun::class_t::STUN_CLASS_RESP_SUCCESS ||
             resp.method != req.method || resp.integrities.empty()) {
             ICE_IN_DEBUG { std::cerr << "The second request failed\n"; }
@@ -129,8 +230,8 @@ ice::task<bool> datagram_client<NextLayer>::request_with_retry(
     ICE_IN_DEBUG { std::cout << "Stale nonce, retrying...\n"; }
     req.nonce = std::move(resp.nonce);
     req.fill_random_transaction_id();
-    success = co_await this->request(req, resp_from, resp, retries);
-    if (!success || resp_from != this->remote_endpoint() ||
+    success = co_await this->request(req, resp_source, resp, retries);
+    if (!success || resp_source != this->remote_endpoint() ||
         resp.cls != stun::class_t::STUN_CLASS_RESP_SUCCESS ||
         resp.method != req.method || resp.integrities.empty()) {
         ICE_IN_DEBUG { std::cerr << "The second request failed\n"; }
@@ -176,7 +277,7 @@ void datagram_client<NextLayer>::start_refresh_allocation_task() {
 }
 
 template <class NextLayer>
-ice::task<std::optional<net::ip::udp::endpoint>>
+ice::task<std::optional<ice::endpoint>>
 datagram_client<NextLayer>::create_allocation(auto lifetime, auto... self) {
     if (!this->is_running())
         co_return std::nullopt;
@@ -207,8 +308,7 @@ datagram_client<NextLayer>::create_allocation(auto lifetime, auto... self) {
     this->_relayed_address = resp.xor_relayed_address;
     this->_reflex_address = resp.xor_mapped_address;
     start_refresh_allocation_task();
-    co_return net::ip::udp::endpoint{this->_relayed_address->address,
-                                     this->_relayed_address->port};
+    co_return this->_relayed_address;
 }
 
 template <class NextLayer>
@@ -374,11 +474,11 @@ datagram_client<NextLayer>::create_permission(std::ranges::view auto peers,
                                               auto... self) {
     if (!this->is_running() || peers.empty() || !this->_relayed_address)
         co_return false;
-    if (this->_relayed_address->address.is_v4() &&
+    if (this->_relayed_address->address().is_v4() &&
         std::ranges::any_of(
             peers, [](const auto &peer) noexcept { return !peer.is_v4(); }))
         co_return false;
-    if (this->_relayed_address->address.is_v6() &&
+    if (this->_relayed_address->address().is_v6() &&
         std::ranges::any_of(
             peers, [](const auto &peer) noexcept { return !peer.is_v6(); }))
         co_return false;
@@ -391,12 +491,12 @@ datagram_client<NextLayer>::create_permission(std::ranges::view auto peers,
         req.xor_peer_address.emplace_back(peer, 0);
     std::ranges::sort(req.xor_peer_address,
                       [](const auto &a, const auto &b) noexcept {
-                          return a.address < b.address;
+                          return a.address() < b.address();
                       });
     {
         const auto [first, last] = std::ranges::unique(
             req.xor_peer_address, [](const auto &a, const auto &b) noexcept {
-                return a.address == b.address;
+                return a.address() == b.address();
             });
         req.xor_peer_address.erase(first, last);
     }
@@ -410,14 +510,14 @@ datagram_client<NextLayer>::create_permission(std::ranges::view auto peers,
     }
     ICE_IN_DEBUG { std::cout << "Create or refresh permissions success\n"; }
     for (const auto &peer : req.xor_peer_address) {
-        auto it = this->_permissions.lower_bound(peer.address);
-        if (it != this->_permissions.end() && it->ip() == peer.address) {
+        auto it = this->_permissions.lower_bound(peer.address());
+        if (it != this->_permissions.end() && it->ip() == peer.address()) {
             // TODO: update lifetime
             continue;
         }
         auto state =
             std::make_shared<datagram_client<NextLayer>::permission_state>(
-                this->shared_from_this(), peer.address);
+                this->shared_from_this(), peer.address());
         state->start();
         this->_permissions.insert_before(it, *state);
     }
@@ -482,7 +582,7 @@ datagram_client<NextLayer>::async_send_to(
         buffers.buffers().emplace_back(pad, 4 - data_size % 4);
     }
     co_return co_await this->next_layer().async_send_to(
-        buffers.buffers(), this->remote_endpoint(), asio2exec::use_sender);
+        buffers.buffers(), this->_server, asio2exec::use_sender);
 }
 
 template <class NextLayer>
@@ -492,19 +592,18 @@ auto datagram_client<NextLayer>::send_channel_data(
     auto data_size = net::buffer_size(buffers.buffers());
     return stdexec::just(std::move(buffers), std::array<char, 4>{},
                          std::move(self)...) |
-           stdexec::let_value([this, channel,
-                               data_size](auto &buffers, auto &header,
+           stdexec::let_value(
+               [this, channel, data_size](auto &buffers, auto &header,
                                           const auto &...self) noexcept {
-               binary::write_big<uint16_t>(header.data(), channel);
-               binary::write_big<uint16_t>(header.data() + 2,
-                                           (uint16_t)data_size);
-               buffers.buffers().insert(
-                   buffers.buffers().begin(),
-                   net::const_buffer(header.data(), header.size()));
-               return this->next_layer().async_send_to(buffers.buffers(),
-                                                       this->remote_endpoint(),
-                                                       asio2exec::use_sender);
-           });
+                   binary::write_big<uint16_t>(header.data(), channel);
+                   binary::write_big<uint16_t>(header.data() + 2,
+                                               (uint16_t)data_size);
+                   buffers.buffers().insert(
+                       buffers.buffers().begin(),
+                       net::const_buffer(header.data(), header.size()));
+                   return this->next_layer().async_send_to(
+                       buffers.buffers(), this->_server, asio2exec::use_sender);
+               });
 }
 
 template <class NextLayer>
@@ -517,8 +616,10 @@ datagram_client<NextLayer>::channel_bind(net::ip::udp::endpoint peer,
         ICE_IN_DEBUG { std::cout << "Haven't allocate.\n"; }
         co_return false;
     }
-    if ((this->_relayed_address->address.is_v4() && !peer.address().is_v4()) ||
-        (this->_relayed_address->address.is_v6() && !peer.address().is_v6())) {
+    if ((this->_relayed_address->address().is_v4() &&
+         !peer.address().is_v4()) ||
+        (this->_relayed_address->address().is_v6() &&
+         !peer.address().is_v6())) {
         ICE_IN_DEBUG {
             std::cout << "Peer address is not the same type as the relayed "
                          "address.\n";
@@ -676,7 +777,7 @@ inline bool validate_turn_channel(const ice::io_buffer_ptr &buf,
 
 template <class NextLayer>
 bool datagram_client<NextLayer>::datagram_received(
-    io_buffer_ptr &buffer, const endpoint_type &endpoint) {
+    io_buffer_ptr &buffer, const ice::endpoint &endpoint) {
     if (!buffer || buffer->size() < 4 || endpoint != this->_server)
         return false;
     uint8_t first_byte = *buffer->begin();
@@ -710,8 +811,8 @@ bool datagram_client<NextLayer>::datagram_received(
             ice::stun::message::get_class(buffer->data(), buffer->size());
         if (cls == stun::class_t::STUN_CLASS_RESP_SUCCESS ||
             cls == stun::class_t::STUN_CLASS_RESP_ERROR) {
-            this->stun_client().dispatch_response(endpoint, buffer->data(),
-                                                  buffer->size(), nullptr);
+            dispatch_stun_response(this->_transactions, endpoint,
+                                   buffer->data(), buffer->size(), nullptr);
             return true;
         }
         if (cls == stun::class_t::STUN_CLASS_REQUEST) {
@@ -731,9 +832,8 @@ bool datagram_client<NextLayer>::datagram_received(
         buffer->consume_front((const uint8_t *)turn_data - buffer->begin());
         buffer->consume_back(buffer->size() - turn_data_len);
         assert(buffer->size() == turn_data_len);
-        net::ip::udp::endpoint from(indication.xor_peer_address.front().address,
-                                    indication.xor_peer_address.front().port);
-        dispatch_receivers(this->receivers(), buffer, from);
+        dispatch_receivers(this->receivers(), buffer,
+                           indication.xor_peer_address.front());
         return true;
     }
     // ignore

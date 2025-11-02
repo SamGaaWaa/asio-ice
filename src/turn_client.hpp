@@ -16,11 +16,9 @@ template <class NextLayer> class client<NextLayer, true> {
   public:
     using impl_type = impl::datagram_client<NextLayer>;
     using next_layer_type = typename impl_type::next_layer_type;
-    using stun_client_type = typename impl_type::stun_client_type;
-    using endpoint_type = typename impl_type::endpoint_type;
 
     client(std::shared_ptr<next_layer_type> transport,
-           const endpoint_type &server, std::string username,
+           const ice::endpoint &server, std::string username,
            std::string password)
         : _impl(std::make_shared<impl_type>(std::move(transport), server,
                                             std::move(username),
@@ -42,6 +40,8 @@ template <class NextLayer> class client<NextLayer, true> {
 
     ~client() noexcept { stop(); }
 
+    static constexpr bool is_datagram() noexcept { return true; }
+
     bool is_running() const noexcept { return _impl->is_running(); }
 
     void stop() noexcept { _impl->stop(); }
@@ -61,13 +61,10 @@ template <class NextLayer> class client<NextLayer, true> {
         return _impl->remote_endpoint();
     }
 
-    auto &stun_client() noexcept { return _impl->stun_client(); }
-    const auto &stun_client() const noexcept { return _impl->stun_client(); }
-
     const std::string &username() const noexcept { return _impl->username(); }
     const std::string &password() const noexcept { return _impl->password(); }
 
-    ice::task<bool> request(const stun::message &msg, endpoint_type &from,
+    ice::task<bool> request(const stun::message &msg, ice::endpoint &from,
                             stun::message &resp, std::size_t retries,
                             auto... self) {
         return _impl->request(msg, from, resp, retries, std::move(self)...);
@@ -76,8 +73,8 @@ template <class NextLayer> class client<NextLayer, true> {
     /*
         Only support UDP between server and peer
     */
-    ice::task<std::optional<net::ip::udp::endpoint>>
-    create_allocation(auto lifetime, auto... self) {
+    ice::task<std::optional<ice::endpoint>> create_allocation(auto lifetime,
+                                                              auto... self) {
         return _impl->create_allocation(lifetime, std::move(self)...);
     }
 
@@ -118,7 +115,7 @@ template <class NextLayer> class client<NextLayer, true> {
     template <class ConstBufferSequence>
     ice::task<std::tuple<std::error_code, std::size_t>>
     async_send_to(const ConstBufferSequence &buffers,
-                  const endpoint_type &destination, auto... self) {
+                  const ice::endpoint &destination, auto... self) {
         return _impl->async_send_to(buffers, destination, std::move(self)...);
     }
 
@@ -128,7 +125,7 @@ template <class NextLayer> class client<NextLayer, true> {
         return _impl->send_channel_data(buffers, channel, std::move(self)...);
     }
 
-    void add_receiver(datagram_receiver<endpoint_type> &receiver) noexcept {
+    void add_receiver(datagram_receiver &receiver) noexcept {
         _impl->add_receiver(receiver);
     }
 

@@ -54,7 +54,7 @@ template <class _ReceiverId> struct __operation {
         using __id = __operation;
 
         run_loop *__loop_;
-        STDEXEC_ATTRIBUTE((no_unique_address)) _Receiver __rcvr_;
+        _Receiver __rcvr_;
 
         static void __execute_impl(__task *__p) noexcept {
             auto &__rcvr = static_cast<__t *>(__p)->__rcvr_;

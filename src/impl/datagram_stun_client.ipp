@@ -185,7 +185,7 @@ template <class LowestLayer>
 template <class Transport1>
 bool datagram_client<LowestLayer>::response_receiver<
     Transport1>::datagram_received(io_buffer_ptr &buffer,
-                                   const endpoint_type &endpoint) {
+                                   const ice::endpoint &endpoint) {
     if constexpr (std::is_same_v<std::decay_t<Transport1>,
                                  ice::any_transport>) {
         return this->_self.dispatch_response(

@@ -5,7 +5,7 @@
 
 namespace ice::stun {
 
-template <class LowestLayer, bool IsDatagram> class client {};
+template <bool IsDatagram> class client {};
 
 template <class LowestLayer> class client<LowestLayer, true> {
     using impl_type = impl::datagram_client<LowestLayer>;

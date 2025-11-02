@@ -4,7 +4,7 @@
 #include "config.hpp"
 #include "message_pool.hpp"
 #include "shared_promise_v2.hpp"
-#include "stun_client.hpp"
+// #include "stun_client.hpp"
 #include "task.hpp"
 
 #include <boost/container/flat_map.hpp>

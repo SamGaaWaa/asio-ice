@@ -21,14 +21,14 @@ template <class NextLayer, bool IsDatagram> struct stun_protocol {};
 
 template <class NextLayer>
 struct stun_protocol<NextLayer, true>
-    : datagram_receiver<typename NextLayer::endpoint_type> {
+    : datagram_receiver {
     using next_layer_type = NextLayer;
     using endpoint_type = typename next_layer_type::endpoint_type;
     using stun_client_type = stun::client<next_layer_type, true>;
 
     stun_protocol(net::io_context &ctx,
                   std::shared_ptr<NextLayer> next_layer) noexcept
-        : datagram_receiver<typename NextLayer::endpoint_type>(
+        : datagram_receiver(
               std::move(next_layer)),
           _client(std::make_shared<stun_client_type>(ctx)) {}
 
@@ -52,7 +52,7 @@ struct stun_protocol<NextLayer, true>
     }
 
     bool datagram_received(io_buffer_ptr &buffer,
-                           const endpoint_type &endpoint) override {
+                           const ice::endpoint &endpoint) override {
         if (!buffer)
             return false;
         if (_client->dispatch_response(endpoint, buffer->data(),

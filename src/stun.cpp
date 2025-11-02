@@ -1,7 +1,7 @@
 #include "stun.hpp"
 #include "base64.hpp"
 #include "binary.hpp"
-#include "hash.hpp"
+#include "hash2.hpp"
 #include "scope_guard.hpp"
 
 #include "json.hpp"
@@ -451,8 +451,8 @@ static int parse_address(const void *data, std::size_t buf_size,
             return -1;
         net::ip::address_v4::bytes_type bytes;
         std::copy(iter, iter + 4, bytes.begin());
-        address.address = net::ip::address_v4(bytes);
-        address.port = port;
+        address.address(net::ip::address_v4(bytes));
+        address.port(port);
         return 8;
     } else if (protocol == 2) {
         // IPv6
@@ -460,8 +460,8 @@ static int parse_address(const void *data, std::size_t buf_size,
             return -1;
         net::ip::address_v6::bytes_type bytes;
         std::copy(iter, iter + 16, bytes.data());
-        address.address = net::ip::address_v6(bytes);
-        address.port = port;
+        address.address(net::ip::address_v6(bytes));
+        address.port(port);
         return 4 + 16;
     }
     return -1;
@@ -479,21 +479,21 @@ static int parse_xor_address(const void *data, std::size_t buf_size,
         // IPv4
         if (4 + 4 > buf_size)
             return -1;
-        address.port = binary::ntoh<uint16_t>(
+        address.port(binary::ntoh<uint16_t>(
             mapped_address->port ^
-            *reinterpret_cast<const uint16_t *>(&header->magic));
-        address.address = net::ip::address_v4(binary::ntoh<uint32_t>(
+            *reinterpret_cast<const uint16_t *>(&header->magic)));
+        address.address(net::ip::address_v4(binary::ntoh<uint32_t>(
             *reinterpret_cast<const uint32_t *>(mapped_address->address()) ^
-            header->magic));
+            header->magic)));
         return 4 + 4;
     } else if (binary::ntoh<uint8_t>(mapped_address->family) == 2) {
         // IPv6
         if (4 + 16 > buf_size)
             return -1;
         net::ip::address_v6::bytes_type bytes;
-        address.port = binary::ntoh<uint16_t>(
+        address.port(binary::ntoh<uint16_t>(
             mapped_address->port ^
-            *reinterpret_cast<const uint16_t *>(&header->magic));
+            *reinterpret_cast<const uint16_t *>(&header->magic)));
         const uint32_t *v32 =
             reinterpret_cast<const uint32_t *>(mapped_address->address());
         uint32_t *a32 = reinterpret_cast<uint32_t *>(bytes.data());
@@ -501,7 +501,7 @@ static int parse_xor_address(const void *data, std::size_t buf_size,
             reinterpret_cast<const uint32_t *>(&header->magic);
         for (int i = 0; i < 4; ++i)
             a32[i] = v32[i] ^ mask[i];
-        address.address = net::ip::address_v6(bytes);
+        address.address(net::ip::address_v6(bytes));
         return 4 + 16;
     }
     return -1;
@@ -1011,20 +1011,20 @@ static int write_address(void *data, std::size_t buf_size,
         return -1;
     value_mapped_address_t *mapped =
         reinterpret_cast<value_mapped_address_t *>(data);
-    mapped->port = binary::hton<uint16_t>(address.port);
+    mapped->port = binary::hton<uint16_t>(address.port());
     mapped->pad = 0;
-    if (address.address.is_v4()) {
+    if (address.address().is_v4()) {
         if (4 + 4 > buf_size)
             return -1;
         mapped->family = 1;
         binary::write_big<uint32_t>(mapped->address(),
-                                    address.address.to_v4().to_uint());
+                                    address.address().to_v4().to_uint());
         return 4 + 4;
-    } else if (address.address.is_v6()) {
+    } else if (address.address().is_v6()) {
         if (4 + 16 > buf_size)
             return -1;
         mapped->family = 2;
-        auto bytes = address.address.to_v6().to_bytes();
+        auto bytes = address.address().to_v6().to_bytes();
         std::memcpy(mapped->address(), bytes.data(), bytes.size());
         return 4 + 16;
     }
@@ -1037,21 +1037,21 @@ static int write_xor_address(void *data, std::size_t buf_size,
         return -1;
     value_mapped_address_t *mapped =
         reinterpret_cast<value_mapped_address_t *>(data);
-    mapped->port = header->magic ^ binary::hton<uint16_t>(address.port);
+    mapped->port = header->magic ^ binary::hton<uint16_t>(address.port());
     mapped->pad = 0;
-    if (address.address.is_v4()) {
+    if (address.address().is_v4()) {
         if (4 + 4 > buf_size)
             return -1;
         mapped->family = 1;
         uint32_t *value = reinterpret_cast<uint32_t *>(mapped->address());
         *value = header->magic ^
-                 binary::hton<uint32_t>(address.address.to_v4().to_uint());
+                 binary::hton<uint32_t>(address.address().to_v4().to_uint());
         return 4 + 4;
-    } else if (address.address.is_v6()) {
+    } else if (address.address().is_v6()) {
         if (4 + 16 > buf_size)
             return -1;
         mapped->family = 2;
-        auto bytes = address.address.to_v6().to_bytes();
+        auto bytes = address.address().to_v6().to_bytes();
         const uint32_t *mask =
             reinterpret_cast<const uint32_t *>(&header->magic);
         uint32_t *value = reinterpret_cast<uint32_t *>(mapped->address());
@@ -1580,14 +1580,14 @@ std::size_t message::serialized_size() const noexcept {
     }
 
     if (this->mapped_address) {
-        if (this->mapped_address->address.is_v4())
+        if (this->mapped_address->address().is_v4())
             total += 4 + 4 + 4;
         else
             total += 4 + 4 + 16;
     }
 
     if (this->xor_mapped_address) {
-        if (this->xor_mapped_address->address.is_v4())
+        if (this->xor_mapped_address->address().is_v4())
             total += 4 + 4 + 4;
         else
             total += 4 + 4 + 16;
@@ -1646,14 +1646,14 @@ std::size_t message::serialized_size() const noexcept {
     }
 
     for (const auto &peer : this->xor_peer_address) {
-        if (peer.address.is_v4())
+        if (peer.address().is_v4())
             total += 4 + 4 + 4;
         else
             total += 4 + 4 + 16;
     }
 
     if (this->xor_relayed_address) {
-        if (this->xor_relayed_address->address.is_v4())
+        if (this->xor_relayed_address->address().is_v4())
             total += 4 + 4 + 4;
         else
             total += 4 + 4 + 16;
@@ -1717,9 +1717,9 @@ void message::prepend_nonce_cookie() {
 
 static nlohmann::json to_json(const endpoint &ep) {
     nlohmann::json obj;
-    obj["family"] = ep.address.is_v4() ? "ipv4" : "ipv6";
-    obj["port"] = ep.port;
-    obj["address"] = ep.address.to_string();
+    obj["family"] = ep.address().is_v4() ? "ipv4" : "ipv6";
+    obj["port"] = ep.port();
+    obj["address"] = ep.address().to_string();
     return obj;
 }
 

@@ -12,6 +12,7 @@
 #include "candidate.hpp"
 #include "task.hpp"
 #include "stun.hpp"
+#include "stun_transaction.hpp"
 
 #if ASIOICE_USE_BOOST_ASIO > 0
 #define ASIO_TO_EXEC_USE_BOOST 1
@@ -40,13 +41,8 @@ using __triggered_check_queue_base_hook = boost::intrusive::list_base_hook<
     boost::intrusive::tag<__triggered_check_queue_tag>,
     boost::intrusive::link_mode<boost::intrusive::auto_unlink>>;
 
-struct candidate_pair_base :
-    //  public __check_list_base_hook,
-    __triggered_check_queue_base_hook,
-    std::enable_shared_from_this<candidate_pair_base> {
-
-    using request_handler_type =
-        std::function<void(const ice::endpoint& from, const ice::endpoint& to, ice::io_buffer_ptr)>;
+struct candidate_pair final : datagram_receiver,
+                              __triggered_check_queue_base_hook {
 
     enum struct state_t {
         FROZEN = 0,
@@ -56,28 +52,37 @@ struct candidate_pair_base :
         FAILED = 4
     };
 
-    candidate_pair_base(ice::candidate local_candidate,
-                        ice::candidate remote_candidate,
-                        request_handler_type request_handler = nullptr)
-        : _local_candidate(std::move(local_candidate)),
+    using request_handler_type =
+        std::function<void(const ice::endpoint &from, const ice::endpoint &to,
+                           ice::io_buffer_ptr)>;
+
+    candidate_pair(ice::candidate local_candidate,
+                   ice::candidate remote_candidate,
+                   stun::transaction_set &transactions)
+        : datagram_receiver(), _local_candidate(std::move(local_candidate)),
           _remote_candidate(std::move(remote_candidate)),
-          // TODO: What is candidate pair's foundation?
-          _foundation{}, _request_handler(std::move(request_handler)) {
+          _transactions(transactions) {
         if (!_local_candidate.transport)
             throw std::runtime_error("local candidate has no transport");
-        _local_candidate.transport.connect(_remote_candidate.endpoint);
         if (_local_candidate.foundation > _remote_candidate.foundation)
             _foundation =
                 _remote_candidate.foundation + _local_candidate.foundation;
         else
             _foundation =
                 _local_candidate.foundation + _remote_candidate.foundation;
+        _local_candidate.transport.add_receiver(*this);
     }
 
-    candidate_pair_base(const candidate_pair_base &) = delete;
-    candidate_pair_base &operator=(const candidate_pair_base &) = delete;
-    candidate_pair_base(candidate_pair_base &&) = delete;
-    candidate_pair_base &operator=(candidate_pair_base &&) = delete;
+    auto &receivers() noexcept { return _receivers; }
+
+    const auto &receivers() const noexcept { return _receivers; }
+
+    void add_receiver(datagram_receiver &receiver) noexcept {
+        _receivers.push_back(receiver);
+    }
+
+    bool datagram_received(io_buffer_ptr &buffer,
+                           const ice::endpoint &endpoint) override;
 
     const auto &local_candidate() const noexcept { return _local_candidate; }
     const auto &remote_candidate() const noexcept { return _remote_candidate; }
@@ -86,6 +91,7 @@ struct candidate_pair_base :
     void set_priority(bool ice_controlling) noexcept;
 
     state_t state() const noexcept { return _state; }
+
     void set_state(state_t state) noexcept { _state = state; }
 
     const std::string &foundation() const noexcept {
@@ -99,25 +105,17 @@ struct candidate_pair_base :
         return __triggered_check_queue_base_hook::is_linked();
     }
 
-    virtual ~candidate_pair_base() = default;
-
-    virtual ice::task<bool> request(const stun::message &req,
-                                    stun::message &res, size_t retries)
-    {
-        co_return false;
-    }
-
-    virtual void add_receiver(ice::receiver_base &receiver) noexcept {};
-
     template <class BufferSequence>
     ice::task<std::tuple<std::error_code, std::size_t>>
     send(const BufferSequence &data) {
-        return _local_candidate.transport.send(data);
+        return _local_candidate.transport.send_to(data,
+                                                  _remote_candidate.endpoint);
     }
 
     ice::task<std::tuple<std::error_code, std::size_t>> send(const void *data,
                                                              std::size_t size) {
-        return _local_candidate.transport.send(data, size);
+        return _local_candidate.transport.send_to(data, size,
+                                                  _remote_candidate.endpoint);
     }
 
     ice::task<std::tuple<std::error_code, std::size_t>>
@@ -131,7 +129,11 @@ struct candidate_pair_base :
 
     std::string to_string(int indent = 4) const;
 
-  protected:
+  private:
+    using receiver_list_t =
+        boost::intrusive::list<datagram_receiver,
+                               boost::intrusive::constant_time_size<false>>;
+
     ice::candidate _local_candidate;
     ice::candidate _remote_candidate;
     std::string _foundation;
@@ -140,64 +142,8 @@ struct candidate_pair_base :
     bool _nominated = false;
     bool _remote_nominated = false;
     state_t _state = state_t::FROZEN;
-};
-
-template <class StunClient>
-struct candidate_pair final
-    : candidate_pair_base,
-      datagram_receiver<typename StunClient::endpoint_type> {
-    using endpoint_type = typename StunClient::endpoint_type;
-
-    candidate_pair(ice::candidate local_candidate,
-                   ice::candidate remote_candidate,
-                   StunClient &stun_client) noexcept
-        : candidate_pair_base(std::move(local_candidate),
-                              std::move(remote_candidate)),
-          datagram_receiver<endpoint_type>(), _stun_client(&stun_client),
-          _remote_endpoint(
-              _remote_candidate.endpoint.convert_to<endpoint_type>()) {
-        _local_candidate.transport.add_receiver(*this);
-    }
-
-    const endpoint_type &remote_endpoint() const noexcept {
-        return _remote_endpoint;
-    }
-
-    auto &stun_client() noexcept { return *_stun_client; }
-
-    const auto &stun_client() const noexcept { return *_stun_client; }
-
-    auto &receivers() noexcept { return _receivers; }
-
-    const auto &receivers() const noexcept { return _receivers; }
-
-    void add_receiver(datagram_receiver<endpoint_type> &receiver) noexcept {
-        _receivers.push_back(receiver);
-    }
-
-    void add_receiver(ice::receiver_base &receiver) noexcept override {
-        auto r = dynamic_cast<datagram_receiver<endpoint_type> *>(&receiver);
-        if (!r)
-            return;
-        add_receiver(*r);
-    }
-
-    bool datagram_received(io_buffer_ptr &buffer,
-                           const endpoint_type &endpoint) override;
-
-    ice::task<bool> request(const stun::message &req, stun::message &res,
-                            size_t retries) override;
-
-  private:
-    using receiver_list_t =
-        boost::intrusive::list<datagram_receiver<endpoint_type>,
-                               boost::intrusive::constant_time_size<false>>;
-
-    StunClient *_stun_client;
-    endpoint_type _remote_endpoint;
-    receiver_list_t _receivers;
+    stun::transaction_set &_transactions;
+    receiver_list_t _receivers{};
 };
 
 } // namespace ice
-
-#include "impl/candidate_pair.ipp"

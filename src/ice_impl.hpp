@@ -7,13 +7,13 @@
 #include "config.hpp"
 #include "scope_guard.hpp"
 #include "stun.hpp"
-#include "stun_client.hpp"
 #include "task.hpp"
 #include "socket_transport.hpp"
 #include "stop_when.hpp"
 #include "scope_guard.hpp"
 #include "on_scope_empty.hpp"
 #include "small_set.hpp"
+#include "stun_transaction.hpp"
 
 #include <exec/async_scope.hpp>
 
@@ -55,16 +55,13 @@ template <class Layer>
 struct agent_datagram_impl
     : std::enable_shared_from_this<agent_datagram_impl<Layer>> {
     using socket_type = Layer;
-    using endpoint_type = typename Layer::endpoint_type;
-    using protocol_type = typename endpoint_type::protocol_type;
     using raw_transport = datagram_transport<Layer>;
     using raw_transport_ptr = std::shared_ptr<raw_transport>;
-    using stun_client_type = ice::stun::client<Layer, true>;
-    using config_type = agent_config<endpoint_type>;
+    using config_type = agent_config;
 
     agent_datagram_impl(net::io_context &ctx, config_type config) noexcept
         : _ctx(ctx), _config(std::move(config)),
-          _ice_controlling(_config.ice_controlling), _stun_client{ctx} {}
+          _ice_controlling(_config.ice_controlling) {}
 
     agent_datagram_impl(const agent_datagram_impl &) = delete;
     agent_datagram_impl &operator=(const agent_datagram_impl &) = delete;
@@ -78,61 +75,77 @@ struct agent_datagram_impl
 
     const auto &candidate_pairs() const noexcept { return _check_list; }
 
+    const auto &local_username() const noexcept { return _local_username; }
+    const auto &remote_username() const noexcept { return _remote_username; }
+    const auto &local_password() const noexcept { return _local_password; }
+    const auto &remote_password() const noexcept { return _remote_password; }
+
     void clear() noexcept;
+
+    void build_request(stun::message &req, ice::candidate_pair &pair,
+                       bool nominate) noexcept;
+
+    ice::task<bool> request(ice::candidate_pair &pair, const stun::message &req,
+                            stun::message &resp) noexcept;
+
+    ice::task<void> check_start(ice::candidate_pair &pair) noexcept;
 
     ice::task<void> gather_candidates(auto... self);
 
     ice::task<bool> add_remote_candidate(ice::candidate c, auto... self);
 
-    ice::task<void>
-    get_component_candidates(std::vector<ice::candidate> &component_candidates,
-                             auto &stun_client, uint8_t component,
-                             const std::vector<net::ip::address> &addresses,
-                             auto... self);
+    ice::task<void> get_component_candidates(
+        std::vector<ice::candidate> &component_candidates, uint8_t component,
+        const std::vector<net::ip::address> &addresses, auto... self);
 
     ice::task<void>
     server_reflexive_candidate(std::vector<ice::candidate> &srflx_candidates,
                                const ice::candidate &local_candidate,
-                               auto &client, const endpoint_type &stun_server,
+                               stun::transaction_set &transactions,
+                               const ice::endpoint &stun_server,
                                auto... self) noexcept;
 
     ice::task<void> server_reflexive_candidate(
         std::vector<ice::candidate> &srflx_candidates,
-        const std::vector<ice::candidate> &local_candidates, auto &client,
-        const std::vector<endpoint_type> &stun_servers, auto... self) noexcept;
+        const std::vector<ice::candidate> &local_candidates,
+        const std::vector<ice::endpoint> &stun_servers, auto... self) noexcept;
 
     void sort_check_list() noexcept;
 
-    ice::candidate_pair_base *
+    ice::candidate_pair *
     find_pair(const ice::any_transport &transport,
               const ice::candidate &remote_candidate) const noexcept;
 
-    ice::candidate_pair_base *pick_next_pair() noexcept;
+    ice::candidate_pair *pick_next_pair() noexcept;
 
     void unfreeze_initial() noexcept;
 
     ice::task<bool> connect(auto... self);
 
-    void check_complete(const ice::candidate_pair_base &pair) noexcept;
+    void check_complete(const ice::candidate_pair &pair) noexcept;
 
   private:
     using triggered_check_queue_type = boost::intrusive::list<
-        candidate_pair_base,
+        candidate_pair,
         boost::intrusive::base_hook<__triggered_check_queue_base_hook>,
         boost::intrusive::constant_time_size<false>>;
 
-    using check_list_type =
-        std::vector<std::shared_ptr<ice::candidate_pair_base>>;
+    using check_list_type = std::vector<std::shared_ptr<ice::candidate_pair>>;
 
-    using valid_list_type =
-        std::vector<std::shared_ptr<ice::candidate_pair_base>>;
+    using valid_list_type = std::vector<std::shared_ptr<ice::candidate_pair>>;
 
     net::io_context &_ctx;
+    stun::transaction_set _transactions{}; // use for connectivity checks
     config_type _config;
     bool _ice_controlling = true;
+    bool _remote_is_lite = false;
+    std::string _local_username;
+    std::string _remote_username;
+    std::string _local_password;
+    std::string _remote_password;
+    uint64_t _tie_breaker = 0;
     std::vector<ice::candidate> _local_candidates{};
     std::vector<ice::candidate> _remote_candidates{};
-    stun_client_type _stun_client; // use for connectivity checks
     check_list_type _check_list{};
     valid_list_type _valid_list{};
     triggered_check_queue_type _triggered_check_queue{};
@@ -142,10 +155,9 @@ struct agent_datagram_impl
 
 #include "impl/ice_impl.ipp"
 
-inline ice::task<void>
-resolve_server(ice::net::ip::udp::resolver &resolver,
-               std::string_view stun_server,
-               std::vector<ice::net::ip::udp::endpoint> &endpoints) {
+inline ice::task<void> resolve_server(ice::net::ip::udp::resolver &resolver,
+                                      std::string_view stun_server,
+                                      std::vector<ice::endpoint> &endpoints) {
     using namespace ice;
     if (stun_server.size() < 1)
         co_return;
@@ -187,7 +199,7 @@ resolve_server(ice::net::ip::udp::resolver &resolver,
     }
 
     for (auto it = result.begin(); it != result.end(); ++it) {
-        endpoints.push_back(it->endpoint());
+        endpoints.emplace_back(it->endpoint());
     }
 }
 
@@ -214,7 +226,7 @@ inline ice::task<void> gather_task(ice::net::io_context &ctx) try {
     const char *stun_servers[] = {"stun.l.google.com:19302",
                                   "14.29.112.241:20002"};
 
-    agent_config<> config;
+    agent_config config;
     config.component_count = 2; // 1 for RTP, 1 for RTCP
     {
         net::ip::udp::resolver resolver(ctx);

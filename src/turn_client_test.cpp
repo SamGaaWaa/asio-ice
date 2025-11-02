@@ -4,16 +4,19 @@
 #include "socket_transport.hpp"
 #include "turn_client.hpp"
 #include "candidate_pair.hpp"
+// #include "leak_detector.hpp"
 
 #include <iostream>
 
 using Transport = ice::datagram_transport<ice::net::ip::udp::socket>;
-using StunClient = ice::stun::client<ice::net::ip::udp::socket, true>;
 using TurnClient = ice::turn::client<Transport, true>;
-using CandidatePair = ice::candidate_pair<StunClient>;
 
-void allocate_test() {
+void allocate_test(std::size_t epoch_count) {
     using namespace ice;
+    // debug::leak_detector_start();
+    // utils::scope_guard stop_leak_detector([]()noexcept {
+    // debug::leak_detector_stop(); });
+
     std::chrono::high_resolution_clock::time_point begin_time, end_time;
     std::size_t total_bytes = 0;
     net::io_context ctx;
@@ -28,7 +31,7 @@ void allocate_test() {
     transport->socket().connect(server_ep);
     transport->start();
 
-    StunClient stun_client(ctx);
+    stun::transaction_set transactions;
 
     TurnClient client(transport, server_ep, "samgaawaa", "1234");
 
@@ -43,8 +46,8 @@ void allocate_test() {
     ice::candidate local_c;
     local_c.transport = client.impl().shared_from_this();
     auto cpair =
-        std::make_shared<CandidatePair>(local_c, remote_c, stun_client);
-    queue_datagram_receiver<net::ip::udp::endpoint> data_queue(cpair, 16);
+        std::make_shared<ice::candidate_pair>(local_c, remote_c, transactions);
+    queue_datagram_receiver data_queue(cpair, 16);
 
     auto allocate_coro = [&]() -> ice::task<void> {
         auto relayed =
@@ -73,6 +76,7 @@ void allocate_test() {
         net::steady_timer timer{ctx};
         std::string data = "\xcdHello, world!";
         begin_time = std::chrono::high_resolution_clock::now();
+
         while (true) {
             auto [err, n] = co_await cpair->send(data.data(), data.size());
             if (err) {
@@ -99,7 +103,7 @@ void allocate_test() {
         }
     };
     auto peer_recv_coro = [&]() -> ice::task<void> {
-        for (int i = 0; i < 10; ++i) {
+        for (int i = 0; i < epoch_count; ++i) {
             char buf[4096];
             net::ip::udp::endpoint relayed;
             std::error_code err;
@@ -144,4 +148,6 @@ void allocate_test() {
               << " MB/s\n";
 }
 
-int main(int argc, char *argv[]) { allocate_test(); }
+int main(int argc, char *argv[]) {
+    allocate_test(argc > 1 ? std::atoi(argv[1]) : 10);
+}

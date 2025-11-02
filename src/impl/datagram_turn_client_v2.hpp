@@ -8,11 +8,11 @@
 #include "binary.hpp"
 #include "impl/buffer_wrapper.hpp"
 #include "io_buffer.hpp"
-#include "message.hpp"
 #include "receiver.hpp"
 #include "shared_promise_v2.hpp"
-#include "stun_client.hpp"
 #include "task.hpp"
+#include "stun_transaction.hpp"
+#include "inplace_receiver.hpp"
 
 #if ASIOICE_USE_BOOST_ASIO > 0
 #define ASIO_TO_EXEC_USE_BOOST 1
@@ -46,21 +46,19 @@ namespace ice::turn::impl {
 
 template <class NextLayer>
 struct datagram_client
-    : ice::datagram_receiver<typename NextLayer::endpoint_type>,
+    : ice::datagram_receiver,
       std::enable_shared_from_this<datagram_client<NextLayer>> {
-    using base_type = ice::datagram_receiver<typename NextLayer::endpoint_type>;
+    using base_type = ice::datagram_receiver;
     using next_layer_type = NextLayer;
-    using stun_client_type = ice::stun::client<next_layer_type, true>;
-    using endpoint_type = typename next_layer_type::endpoint_type;
     using buffer_sequence_type = ice::buffer_wrapper;
 
     datagram_client(std::shared_ptr<next_layer_type> transport,
-                    const endpoint_type &server, std::string username,
+                    const ice::endpoint &server, std::string username,
                     std::string password)
         : base_type(std::move(transport)),
           _next_layer(base_type::template transport<next_layer_type>()),
-          _stun_client(_next_layer.context()), _server(server),
-          _username(std::move(username)), _password(std::move(password)) {}
+          _server(server), _username(std::move(username)),
+          _password(std::move(password)) {}
 
     void stop() noexcept {
         if (!_is_running)
@@ -68,6 +66,8 @@ struct datagram_client
         _is_running = false;
         do_delete_allocation();
     }
+
+    static constexpr bool is_datagram() noexcept { return true; }
 
     bool is_running() const noexcept { return _is_running; }
 
@@ -83,27 +83,21 @@ struct datagram_client
 
     const auto &remote_endpoint() const noexcept { return _server; }
 
-    auto &stun_client() noexcept { return _stun_client; }
-    const auto &stun_client() const noexcept { return _stun_client; }
+    auto &transaction_set() noexcept { return _transactions; }
+    const auto &transaction_set() const noexcept { return _transactions; }
 
     const std::string &username() const noexcept { return _username; }
     const std::string &password() const noexcept { return _password; }
 
-    ice::task<bool> request(const stun::message &msg, endpoint_type &from,
+    ice::task<bool> request(const stun::message &msg, ice::endpoint &from,
                             stun::message &resp, std::size_t retries,
-                            auto... self) {
-        if (!_is_running)
-            co_return false;
-        co_return co_await _stun_client.request(next_layer(), _server, msg,
-                                                from, resp, retries,
-                                                std::move(self)...);
-    }
+                            auto... self) noexcept;
 
     /*
         Only support UDP between server and peer
     */
-    ice::task<std::optional<net::ip::udp::endpoint>>
-    create_allocation(auto lifetime, auto... self);
+    ice::task<std::optional<ice::endpoint>> create_allocation(auto lifetime,
+                                                              auto... self);
 
     uint16_t generate_channel_number() const;
 
@@ -143,13 +137,13 @@ struct datagram_client
     const auto &expired_channel() const noexcept { return _expired_channel; }
 
     bool datagram_received(io_buffer_ptr &buffer,
-                           const endpoint_type &endpoint) override;
+                           const ice::endpoint &endpoint) override;
 
     auto &receivers() noexcept { return _receivers; }
 
     const auto &receivers() const noexcept { return _receivers; }
 
-    void add_receiver(datagram_receiver<endpoint_type> &receiver) noexcept {
+    void add_receiver(datagram_receiver &receiver) noexcept {
         receivers().push_back(receiver);
     }
 
@@ -329,12 +323,12 @@ struct datagram_client
         boost::intrusive::constant_time_size<false>>;
 
     using receiver_list_t =
-        boost::intrusive::list<datagram_receiver<endpoint_type>,
+        boost::intrusive::list<datagram_receiver,
                                boost::intrusive::constant_time_size<false>>;
 
     next_layer_type &_next_layer;
-    stun_client_type _stun_client;
-    endpoint_type _server;
+    stun::transaction_set _transactions{};
+    ice::endpoint _server;
     std::string _nonce{};
     std::string _realm{};
     const std::string _username{};

@@ -3,7 +3,47 @@
 
 namespace ice {
 
-void candidate_pair_base::set_priority(bool ice_controlling) noexcept {
+bool candidate_pair::datagram_received(io_buffer_ptr &buffer,
+                                       const ice::endpoint &endpoint) {
+    if (!buffer) [[unlikely]] // ignore empty buffers
+        return true;
+    const uint8_t first_byte = *buffer->begin();
+    if (first_byte <= 3) [[unlikely]] {
+        // STUN
+        if (buffer->size() < ice::stun::HEADER_SIZE) {
+            // invalid STUN, ignore
+            return true;
+        }
+        auto cls =
+            ice::stun::message::get_class(buffer->data(), buffer->size());
+        if (cls == stun::class_t::STUN_CLASS_RESP_SUCCESS ||
+            cls == stun::class_t::STUN_CLASS_RESP_ERROR) {
+            dispatch_stun_response(this->_transactions, endpoint,
+                                   buffer->data(), buffer->size(),
+                                   this->_local_candidate.transport.data());
+            return true;
+        }
+        if (cls == stun::class_t::STUN_CLASS_REQUEST) {
+            if (this->_request_handler)
+                this->_request_handler(endpoint,
+                                       this->_local_candidate.endpoint,
+                                       std::move(buffer));
+            return true;
+        }
+        // indication, ignore
+        return true;
+    } else if (first_byte >= 64 && first_byte <= 79) [[unlikely]] {
+        // TURN channel, ignore
+        return true;
+    }
+    if (endpoint != this->remote_candidate().endpoint)
+        return false;
+    // application data
+    dispatch_receivers(this->receivers(), buffer, endpoint);
+    return true;
+}
+
+void candidate_pair::set_priority(bool ice_controlling) noexcept {
     uint64_t G = ice_controlling ? this->local_candidate().priority
                                  : this->remote_candidate().priority;
     uint64_t D = ice_controlling ? this->remote_candidate().priority
@@ -12,7 +52,7 @@ void candidate_pair_base::set_priority(bool ice_controlling) noexcept {
         (1llu << 32) * std::min(G, D) + 2 * std::max(G, D) + (G > D ? 1 : 0);
 }
 
-std::string candidate_pair_base::to_string(int indent) const {
+std::string candidate_pair::to_string(int indent) const {
     nlohmann::json local, remote;
 
     local["foundation"] = this->local_candidate().foundation;
@@ -52,15 +92,15 @@ std::string candidate_pair_base::to_string(int indent) const {
     res["priority"] = this->priority();
     res["state"] = [](auto state) noexcept {
         switch (state) {
-        case candidate_pair_base::state_t::FROZEN:
+        case candidate_pair::state_t::FROZEN:
             return "FROZEN";
-        case candidate_pair_base::state_t::WAITING:
+        case candidate_pair::state_t::WAITING:
             return "WAITING";
-        case candidate_pair_base::state_t::IN_PROGRESS:
+        case candidate_pair::state_t::IN_PROGRESS:
             return "IN_PROGRESS";
-        case candidate_pair_base::state_t::SUCCEEDED:
+        case candidate_pair::state_t::SUCCEEDED:
             return "SUCCESSED";
-        case candidate_pair_base::state_t::FAILED:
+        case candidate_pair::state_t::FAILED:
             return "FAILED";
         default:
             return "";

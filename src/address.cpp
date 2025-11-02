@@ -94,7 +94,9 @@ std::vector<net::ip::address> get_local_addresses(bool use_ipv4,
 }
 
 std::string endpoint::to_string() const {
-    return address.to_string() + ":" + std::to_string(port);
+    return std::visit([](const auto& e) {
+        return e.address().to_string() + ":" + std::to_string(e.port());
+    }, _data);
 }
 
 } // namespace ice

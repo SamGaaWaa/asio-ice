@@ -1,5 +1,5 @@
 #include "candidate.hpp"
-#include "hash.hpp"
+#include "hash2.hpp"
 #include "json.hpp"
 
 #include <cstring>
@@ -106,10 +106,10 @@ bool operator==(const candidate &lhs, const candidate &rhs) noexcept {
 bool candidate::can_pair_with(const candidate &other) const noexcept {
     return this->type != ice::candidate_type::srflx &&
            this->component == other.component &&
-           ((this->endpoint.address.is_v4() &&
-             other.endpoint.address.is_v4()) ||
-            (this->endpoint.address.is_v6() &&
-             other.endpoint.address.is_v6())) &&
+           ((this->endpoint.address().is_v4() &&
+             other.endpoint.address().is_v4()) ||
+            (this->endpoint.address().is_v6() &&
+             other.endpoint.address().is_v6())) &&
            std::ranges::equal(this->transport_type, other.transport_type,
                               [](char a, char b) noexcept {
                                   return std::tolower(a) == std::tolower(b);

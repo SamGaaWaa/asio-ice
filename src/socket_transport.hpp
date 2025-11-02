@@ -31,6 +31,8 @@ template <class Socket> struct datagram_transport {
 
     ~datagram_transport() { stop(); }
 
+    static constexpr bool is_datagram() noexcept { return true; }
+
     void start() {
         if (_impl)
             _impl->start();
@@ -65,7 +67,7 @@ template <class Socket> struct datagram_transport {
                                     std::forward<Args>(args)...);
     }
 
-    void add_receiver(datagram_receiver<endpoint_type> &receiver) noexcept {
+    void add_receiver(datagram_receiver &receiver) noexcept {
         _impl->receivers().push_back(receiver);
     }
 

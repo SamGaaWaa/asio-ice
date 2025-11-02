@@ -1,4 +1,4 @@
-#include "hash.hpp"
+#include "hash2.hpp"
 
 #include <openssl/core_names.h>
 #include <openssl/evp.h>

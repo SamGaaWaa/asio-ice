@@ -21,9 +21,10 @@ namespace net = asio;
 namespace ice {
 
 struct buffer_wrapper {
-    // TODO: 
-    static constexpr std::size_t  max_buffers_count = 64;
-    using buffer_sequence_type = boost::container::static_vector<net::const_buffer, max_buffers_count>;
+    // TODO:
+    static constexpr std::size_t max_buffers_count = 8;
+    using buffer_sequence_type =
+        boost::container::static_vector<net::const_buffer, max_buffers_count>;
 
     template <class BufferSequence>
     buffer_wrapper(const BufferSequence &buffers) {
