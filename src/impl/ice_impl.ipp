@@ -43,7 +43,8 @@ ice::task<void> agent_datagram_impl<Layer>::server_reflexive_candidate(
     srflx_candidates.emplace_back(ice::candidate{
         .foundation =
             candidate_foundation(candidate_type::srflx, this->_config.transport,
-                                 local_candidate.endpoint.address()),
+                                 local_candidate.endpoint.address(),
+                                 stun_server.address()),
         .component = local_candidate.component,
         .transport_type = this->_config.transport,
         .priority = candidate_priority(local_candidate.component,
@@ -421,7 +422,7 @@ void agent_datagram_impl<Layer>::check_complete(
 }
 
 template <class Layer>
-ice::task<bool> agent_datagram_impl<Layer>::connect(auto... self) {
+ice::task<bool> agent_datagram_impl<Layer>::connect(auto... self) noexcept {
     this->unfreeze_initial();
 
     // TODO: Handle early checks
@@ -489,17 +490,119 @@ ice::task<bool> agent_datagram_impl<Layer>::connect(auto... self) {
 }
 
 template <class Layer>
-ice::task<void>
-agent_datagram_impl<Layer>::check_start(ice::candidate_pair &pair) noexcept {
-    pair.set_state(ice::candidate_pair::state_t::IN_PROGRESS);
+void
+agent_datagram_impl<Layer>::switch_role(bool ice_controlling) noexcept {
+    ICE_IN_DEBUG { std::cout << "Switching to " << (ice_controlling ? "controlling" : "controlled") << " role\n"; }
+    this->_ice_controlling = ice_controlling;
+    for (auto& p: this->_check_list) {
+        p->set_priority(ice_controlling);
+    }
+    this->sort_check_list();
+}
 
+template <class Layer>
+ice::task<void>
+agent_datagram_impl<Layer>::check(ice::candidate_pair &pair) noexcept {
+    pair.set_state(ice::candidate_pair::state_t::IN_PROGRESS);
+    utils::scope_guard on_err([&]() noexcept {
+        if (pair.state() == ice::candidate_pair::state_t::IN_PROGRESS)
+            pair.set_state(ice::candidate_pair::state_t::FAILED);
+        else {
+            ICE_IN_DEBUG { std::cout << "Current check had been canceled\n"; }
+        }
+    });
     bool nominate = this->_ice_controlling && !this->_remote_is_lite;
 
-    while (true) {
-        stun::message request;
-        this->build_request(request, pair, nominate);
-    }
+    stun::message::integrity subsequent_algo{stun::message::integrity::SHA1};
+    do {
+        stun::message req;
+        this->build_request(req, pair, nominate);
+        if (i == 0) {
+            req.integrities.emplace_back(stun::message::integrity::SHA1);
+            req.integrities.emplace_back(stun::message::integrity::SHA256);
+        } else {
+            req.integrities.push_back(subsequent_algo);
+        }
+        req.set_hmac_key(this->remote_password());
 
+        ICE_IN_DEBUG { std::cout << "Performing check on pair: " << pair.to_stirng(0) << '\n'; }
+        stun::message resp;
+        bool ret = co_await this->request(pair, req, resp);
+        ICE_IN_DEBUG { std::cout << "Check " << (ret ? "success: " : "failed: ") << pair.to_string(0) << '\n'; }
+
+        if (!ret) {
+            co_return;
+        }
+        assert(!resp.integrities.empty());
+        subsequent_algo = resp.integrities.back();
+        if (resp.cls == stun::class_t::STUN_CLASS_RESP_ERROR) {
+            assert(resp.error_code.has_value());
+            ICE_IN_DEBUG { std::cout << "ERROR response with error code: " << resp.error_code->reason << '\n'; }
+            
+            if (resp.error_code->code == 487) {
+                // switch role
+                if (req.ice_controlled)
+                    this->switch_role(true);
+                else if (req.ice_controlling)
+                    this->switch_role(false);
+                assert(!pair.in_triggered_queue())
+                pair.set_state(ice::candidate_pair::state_t::WAITING);
+                this->_triggered_check_queue.push_back(pair);
+                // TODO: change tiebreaker value 
+                break;
+            }
+
+            co_return;
+        }
+        
+        // success
+        assert(resp.xor_mapped_address);
+        assert(resp.priority);
+        if (std::ranges::none_of(this->_check_list, [&resp] (const auto& p) noexcept {
+            return p->local_candidate().endpoint == *resp.xor_mapped_address;
+        })) {
+            ICE_IN_DEBUG { std::cout << "Peer-Reflexive endpoint: " << resp.xor_mapped_address->to_stirng() << '\n'; }
+        }
+
+        // construct valid pair
+        auto local_it = std::ranges::find_if(this->_local_candidate, [&resp] (const auto& p) noexcept {
+            return *resp.xor_mapped_address == p.endpoint;
+        });
+        if (local_it == this->_local_candidate.end()) {
+            // Peer-Reflexive Candidates
+            this->_local_candidate.emplace_back(ice::candidate{
+                .foundation = candidate_foundation(
+                    ice::candidate_type::prflx,
+                    pair.local_candidate().transport_type,
+                    pair.local_candidate().type == ice::candidate_type::host ?
+                        pair.local_candidate().endpoint.address() :
+                        pair.local_candidate().related.value().address(),
+                    pair.remote_candidate().endpoint.address()
+                ),
+                .component = pair.local_candidate().component,
+                .transport_type = pair.local_candidate().transport_type,
+                .priority = *resp.priority,
+                .endpoint = *resp.xor_mapped_address,
+                .type = ice::candidate_type::prflx,
+                .related = pair.local_candidate().endpoint,
+                .transport = pair.local_candidate().transport
+            });
+            local_it = this->_local_candidate.begin() + this->_local_candidate.size() - 1;
+            ICE_IN_DEBUG { std::cout << "Peer-Reflexive Candidate: " << local_it->to_stirng() << '\n'; }
+        }
+
+        auto valid_p = std::make_shared<ice::candidate_pair>(
+            ice::candidate{
+
+            },
+            ice::candidate{
+
+            },
+            this->_transactions
+        );
+    } while (false);
+
+    on_err.dismiss();
     co_return;
 }
 
@@ -525,9 +628,7 @@ void agent_datagram_impl<Layer>::build_request(stun::message &req,
     req.username = std::move(tx_username);
     req.priority =
         ice::candidate_priority(pair.component(), candidate_type::prflx);
-    req.integrities.emplace_back(stun::message::integrity::SHA1);
-    req.integrities.emplace_back(stun::message::integrity::SHA256);
-    req.set_hmac_key(this->remote_password());
+    req.use_fingerprint = true;
 
     if (this->_ice_controlling) {
         req.ice_controlling = this->_tie_breaker;
@@ -556,7 +657,7 @@ agent_datagram_impl<Layer>::request(ice::candidate_pair &pair,
     bool ret = false;
     utils::inplace_receiver<std::error_code> retry_receiver;
     auto retry_op = retry_receiver.start(stdexec::starts_on(
-        asio2exec::scheduler{this->context()}, trans.run(this->_next_layer)));
+        asio2exec::scheduler{this->context()}, trans.run(pair.local_candidate().transport)));
     stdexec::start(retry_op);
 
     while (true) {
@@ -573,6 +674,30 @@ agent_datagram_impl<Layer>::request(ice::candidate_pair &pair,
         assert(resp.transaction_id == req.transaction_id);
         assert(resp.is_response());
 
+        // The client looks for the MESSAGE-INTEGRITY or the MESSAGE-INTEGRITY-
+        // SHA256 attribute in the response.  If present and if the client only
+        // sent one of the MESSAGE-INTEGRITY or MESSAGE-INTEGRITY-SHA256
+        // attributes in the request (because of the external indication in
+        // Section 9.1.2 or because this is a subsequent request as defined in
+        // Section 9.1.5), the algorithm in the response has to match;
+        // otherwise, the response MUST be discarded.
+        if (resp.integrities.empty() || resp.integrities.size() > 2) {
+            ICE_IN_DEBUG { std::cout << "Integrity algorithm mismatch\n"; }
+            continue;
+        }
+        if (resp.integrities.size() == 1) {
+            if (!std::range::contains(req.integrities, resp.integrities.front())) {
+                ICE_IN_DEBUG { std::cout << "Integrity algorithm mismatch\n"; }
+                continue;
+            }
+        } else {
+            std::ranges::sort(resp.integrities);
+            if (resp.integrities != req.integrities) {
+                ICE_IN_DEBUG { std::cout << "Integrity algorithm mismatch\n"; }
+                continue;
+            }
+        }
+
         // The client then computes the message integrity over the response as
         // defined in Section 14.5 for the MESSAGE-INTEGRITY attribute or
         // Section 14.6 for the MESSAGE-INTEGRITY-SHA256 attribute, using the
@@ -583,8 +708,7 @@ agent_datagram_impl<Layer>::request(ice::candidate_pair &pair,
         // INTEGRITY and MESSAGE-INTEGRITY-SHA256 are absent, the processing
         // depends on whether the request was sent over a reliable or an
         // unreliable transport.
-        if (resp.integrities.empty() ||
-            std::any_of(resp.integrities.begin(), resp.integrities.end(),
+        if (std::any_of(resp.integrities.begin(), resp.integrities.end(),
                         [&req, &resp](const auto i) {
                             return !i.verify(req.hmac_key(), resp);
                         })) {
@@ -597,6 +721,27 @@ agent_datagram_impl<Layer>::request(ice::candidate_pair &pair,
             ICE_IN_DEBUG { std::cout << "Integrity check failed\n"; }
             continue;
         }
+
+        if (trans.response_transport != pair.local_candidate().transport.data() ||
+            trans.response_source != pair.remote_candidate().endpoint)
+        {
+            ICE_IN_DEBUG { std::cout << "Non-Symmetric Transport Addresses\n"; }
+            break;
+        }
+
+        if (resp.cls == stun::class_t::STUN_CLASS_RESP_ERROR) {
+            if (!resp.error_code.has_value()) {
+                ICE_IN_DEBUG { std::cout << "Unknown error\n"; }
+                break;
+            }
+        } else {
+            if (!resp.xor_mapped_address.has_value() ||
+                !resp.priority) {
+                ICE_IN_DEBUG { std::cout << "Invalid response\n"; }
+                break;
+            }
+        }
+
         ret = true;
         break;
     }

@@ -138,11 +138,11 @@ struct candidate_pair final : datagram_receiver,
     ice::candidate _remote_candidate;
     std::string _foundation;
     uint64_t _priority{};
-    request_handler_type _request_handler;
     bool _nominated = false;
     bool _remote_nominated = false;
     state_t _state = state_t::FROZEN;
     stun::transaction_set &_transactions;
+    request_handler_type _request_handler;
     receiver_list_t _receivers{};
 };
 

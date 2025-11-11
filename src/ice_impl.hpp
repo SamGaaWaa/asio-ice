@@ -88,7 +88,9 @@ struct agent_datagram_impl
     ice::task<bool> request(ice::candidate_pair &pair, const stun::message &req,
                             stun::message &resp) noexcept;
 
-    ice::task<void> check_start(ice::candidate_pair &pair) noexcept;
+    ice::task<void> check(ice::candidate_pair &pair) noexcept;
+
+    void switch_role(bool ice_controlling) noexcept;
 
     ice::task<void> gather_candidates(auto... self);
 
@@ -120,7 +122,7 @@ struct agent_datagram_impl
 
     void unfreeze_initial() noexcept;
 
-    ice::task<bool> connect(auto... self);
+    ice::task<bool> connect(auto... self) noexcept;
 
     void check_complete(const ice::candidate_pair &pair) noexcept;
 
@@ -289,7 +291,7 @@ inline ice::task<void> gather_task(ice::net::io_context &ctx) try {
 
         if (p->local_candidate().type == candidate_type::srflx) {
             std::cerr
-                << "Agent1 has a srflx candidate, but it should not be used.\n";
+                << "Candidate pair's local candidate is a srflx candidate, but it should not be used.\n";
             std::abort();
         }
         std::cout << "Type: " << ice::to_string(p->local_candidate().type)
@@ -301,7 +303,7 @@ inline ice::task<void> gather_task(ice::net::io_context &ctx) try {
     for (const auto &p : agent2->candidate_pairs()) {
         if (p->local_candidate().type == candidate_type::srflx) {
             std::cerr
-                << "Agent2 has a srflx candidate, but it should not be used.\n";
+                << "Candidate pair's local candidate is a srflx candidate, but it should not be used.\n";
             std::abort();
         }
         std::cout << "Type: " << ice::to_string(p->local_candidate().type)

@@ -34,16 +34,19 @@ static std::string md5_hex(const std::string &key) {
 
 std::string candidate_foundation(candidate_type type,
                                  std::string_view transport,
-                                 const net::ip::address &base_address) {
+                                 const net::ip::address &base_address,
+                                 std::optional<net::ip::address> server) {
     std::string key;
     std::string_view type_str = to_string(type);
     std::string addr_str = base_address.to_string();
-    key.reserve(type_str.size() + 2 + transport.size() + addr_str.size());
+    key.reserve(type_str.size() + 2 + transport.size() + addr_str.size() + 16);
     key += type_str;
     key += '|';
     key += transport;
     key += '|';
     key += addr_str;
+    if (type != ice::candidate_type::host)
+        key += server.value().to_stirng();
     return md5_hex(key);
 }
 

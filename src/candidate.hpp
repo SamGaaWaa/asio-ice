@@ -55,7 +55,8 @@ bool operator==(const candidate &lhs, const candidate &rhs) noexcept;
 
 std::string candidate_foundation(candidate_type type,
                                  std::string_view transport,
-                                 const net::ip::address &base_address);
+                                 const net::ip::address &base_address,
+                                 std::optional<net::ip::address> server = {});
 
 uint32_t candidate_priority(uint8_t component, candidate_type type,
                             uint32_t preference = 65535) noexcept;
