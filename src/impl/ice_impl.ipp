@@ -264,6 +264,8 @@ ice::candidate_pair *agent_datagram_impl<Layer>::find_pair(
 template <class Layer>
 ice::task<bool> agent_datagram_impl<Layer>::add_remote_candidate(
     ice::candidate remote_candidate, auto... self) {
+    remote_candidate.transport.clear();
+    remote_candidate.related.reset();
     if (auto it = std::ranges::find(this->_remote_candidates, remote_candidate);
         it != this->_remote_candidates.end()) {
         ICE_IN_DEBUG {
@@ -453,27 +455,12 @@ ice::task<bool> agent_datagram_impl<Layer>::connect(auto... self) noexcept {
                 break;
             }
             assert(p->state() == ice::candidate_pair::state_t::IN_PROGRESS);
-            auto fake_check = [](auto p, auto &done,
-                                 auto agent) -> ice::task<void> {
-                std::cout << "performing check on pair: " << p->to_string()
-                          << "\n";
-                net::steady_timer t{agent->context()};
-                if (rand() % 2) {
-                    t.expires_after(std::chrono::milliseconds(100));
-                    co_await t.async_wait(asio2exec::use_sender);
-                    p->set_state(ice::candidate_pair::state_t::SUCCEEDED);
-                } else {
-                    t.expires_after(std::chrono::seconds(10));
-                    co_await t.async_wait(asio2exec::use_sender);
-                    p->set_state(ice::candidate_pair::state_t::FAILED);
-                }
-                agent->check_complete(*p);
-                std::cout << "check finished: " << p << '\n';
-                done.set_value(true);
-            };
             scope.spawn(
                 stdexec::starts_on(asio2exec::scheduler{this->context()},
-                                   fake_check(p, done, this)));
+                                   this->check(*p) |
+                                    stdexec::then([&done] {
+                                        done.set_value(true);
+                                    })));
             ta.expires_after(std::chrono::milliseconds(50));
             if (auto ret = co_await (ta.async_wait(asio2exec::use_sender) |
                                      stdexec::stopped_as_optional());
@@ -503,10 +490,16 @@ agent_datagram_impl<Layer>::switch_role(bool ice_controlling) noexcept {
 template <class Layer>
 ice::task<void>
 agent_datagram_impl<Layer>::check(ice::candidate_pair &pair) noexcept {
+    if (pair.state() != ice::candidate_pair::state_t::WAITING) {
+        ICE_IN_DEBUG { std::cout << "This check finished or had been canceled\n"; }
+        co_return;
+    }
     pair.set_state(ice::candidate_pair::state_t::IN_PROGRESS);
     utils::scope_guard on_err([&]() noexcept {
-        if (pair.state() == ice::candidate_pair::state_t::IN_PROGRESS)
+        if (pair.state() == ice::candidate_pair::state_t::IN_PROGRESS) {
             pair.set_state(ice::candidate_pair::state_t::FAILED);
+            this->check_complete(pair);
+        }
         else {
             ICE_IN_DEBUG { std::cout << "Current check had been canceled\n"; }
         }
@@ -514,7 +507,7 @@ agent_datagram_impl<Layer>::check(ice::candidate_pair &pair) noexcept {
     bool nominate = this->_ice_controlling && !this->_remote_is_lite;
 
     stun::message::integrity subsequent_algo{stun::message::integrity::SHA1};
-    do {
+    for (int i = 0; ; ++i) {
         stun::message req;
         this->build_request(req, pair, nominate);
         if (i == 0) {
@@ -525,7 +518,7 @@ agent_datagram_impl<Layer>::check(ice::candidate_pair &pair) noexcept {
         }
         req.set_hmac_key(this->remote_password());
 
-        ICE_IN_DEBUG { std::cout << "Performing check on pair: " << pair.to_stirng(0) << '\n'; }
+        ICE_IN_DEBUG { std::cout << "Performing check on pair: " << pair.to_string(0) << '\n'; }
         stun::message resp;
         bool ret = co_await this->request(pair, req, resp);
         ICE_IN_DEBUG { std::cout << "Check " << (ret ? "success: " : "failed: ") << pair.to_string(0) << '\n'; }
@@ -545,11 +538,11 @@ agent_datagram_impl<Layer>::check(ice::candidate_pair &pair) noexcept {
                     this->switch_role(true);
                 else if (req.ice_controlling)
                     this->switch_role(false);
-                assert(!pair.in_triggered_queue())
+                assert(!pair.in_triggered_queue());
                 pair.set_state(ice::candidate_pair::state_t::WAITING);
                 this->_triggered_check_queue.push_back(pair);
                 // TODO: change tiebreaker value 
-                break;
+                continue;
             }
 
             co_return;
@@ -557,53 +550,84 @@ agent_datagram_impl<Layer>::check(ice::candidate_pair &pair) noexcept {
         
         // success
         assert(resp.xor_mapped_address);
-        assert(resp.priority);
-        if (std::ranges::none_of(this->_check_list, [&resp] (const auto& p) noexcept {
-            return p->local_candidate().endpoint == *resp.xor_mapped_address;
-        })) {
-            ICE_IN_DEBUG { std::cout << "Peer-Reflexive endpoint: " << resp.xor_mapped_address->to_stirng() << '\n'; }
+
+        this->_valid_list.push_back(construct_valid_pair(req, resp, pair));
+        pair.set_state(ice::candidate_pair::state_t::SUCCEEDED);
+        this->_valid_list.back()->set_state(ice::candidate_pair::state_t::SUCCEEDED);
+        for (auto& p: this->_check_list) {
+            if (p->state() == ice::candidate_pair::state_t::FROZEN &&
+                p->foundation() == pair.foundation())
+            {
+                p->set_state(ice::candidate_pair::state_t::WAITING);
+            }
         }
-
-        // construct valid pair
-        auto local_it = std::ranges::find_if(this->_local_candidate, [&resp] (const auto& p) noexcept {
-            return *resp.xor_mapped_address == p.endpoint;
-        });
-        if (local_it == this->_local_candidate.end()) {
-            // Peer-Reflexive Candidates
-            this->_local_candidate.emplace_back(ice::candidate{
-                .foundation = candidate_foundation(
-                    ice::candidate_type::prflx,
-                    pair.local_candidate().transport_type,
-                    pair.local_candidate().type == ice::candidate_type::host ?
-                        pair.local_candidate().endpoint.address() :
-                        pair.local_candidate().related.value().address(),
-                    pair.remote_candidate().endpoint.address()
-                ),
-                .component = pair.local_candidate().component,
-                .transport_type = pair.local_candidate().transport_type,
-                .priority = *resp.priority,
-                .endpoint = *resp.xor_mapped_address,
-                .type = ice::candidate_type::prflx,
-                .related = pair.local_candidate().endpoint,
-                .transport = pair.local_candidate().transport
-            });
-            local_it = this->_local_candidate.begin() + this->_local_candidate.size() - 1;
-            ICE_IN_DEBUG { std::cout << "Peer-Reflexive Candidate: " << local_it->to_stirng() << '\n'; }
-        }
-
-        auto valid_p = std::make_shared<ice::candidate_pair>(
-            ice::candidate{
-
-            },
-            ice::candidate{
-
-            },
-            this->_transactions
-        );
-    } while (false);
+        break;
+    }
 
     on_err.dismiss();
+    this->check_complete(pair);
     co_return;
+}
+
+template <class Layer>
+std::shared_ptr<ice::candidate_pair>
+agent_datagram_impl<Layer>::construct_valid_pair(
+    const stun::message& req,
+    const stun::message& resp,
+    ice::candidate_pair& pair
+) noexcept {
+    if (*resp.xor_mapped_address == pair.local_candidate().endpoint) {
+        // host local candidate
+        return pair.shared_from_this();
+    }
+    auto valid_it = std::ranges::find_if(this->_check_list, [&] (const auto& p) noexcept {
+        // TODO
+        return *resp.xor_mapped_address == p->local_candidate().endpoint &&
+                p->remote_candidate() == pair.remote_candidate();
+    });
+    if (valid_it != this->_check_list.end())
+        return *valid_it;
+    auto local_it = std::ranges::find_if(this->_local_candidates, [&](const auto& c) noexcept {
+        return *resp.xor_mapped_address == c.endpoint &&
+                c.component == pair.local_candidate().component &&
+                std::ranges::equal(c.transport_type, pair.local_candidate().transport_type,
+                                    [](char a, char b) noexcept {
+                                        return std::tolower(a) == std::tolower(b);
+                                    }) &&
+                std::ranges::equal(c.tcptype, pair.local_candidate().tcptype,
+                                    [](char a, char b) noexcept {
+                                        return std::tolower(a) == std::tolower(b);
+                                    });
+    });
+    if (local_it == this->_local_candidates.end()) {
+        // Peer-Reflexive Candidates
+        this->_local_candidates.emplace_back(ice::candidate{
+            .foundation = candidate_foundation(
+                ice::candidate_type::prflx,
+                pair.local_candidate().transport_type,
+                pair.local_candidate().type == ice::candidate_type::host ?
+                    pair.local_candidate().endpoint.address() :
+                    pair.local_candidate().related.value().address(),
+                pair.remote_candidate().endpoint.address()
+            ),
+            .component = pair.local_candidate().component,
+            .transport_type = pair.local_candidate().transport_type,
+            .priority = *req.priority,
+            .endpoint = *resp.xor_mapped_address,
+            .type = ice::candidate_type::prflx,
+            .related = pair.local_candidate().endpoint,
+            .transport = pair.local_candidate().transport
+        });
+        ICE_IN_DEBUG { std::cout << "Peer-Reflexive Candidate: " << local_it->to_string() << '\n'; }
+        local_it = this->_local_candidates.begin() + (this->_local_candidates.size() - 1);
+    }
+    auto valid_p = std::make_shared<ice::candidate_pair>(
+        *local_it,
+        pair.remote_candidate(),
+        this->_transactions
+    );
+    valid_p->set_priority(this->_ice_controlling);
+    return valid_p;
 }
 
 template <class Layer>
@@ -628,7 +652,7 @@ void agent_datagram_impl<Layer>::build_request(stun::message &req,
     req.username = std::move(tx_username);
     req.priority =
         ice::candidate_priority(pair.component(), candidate_type::prflx);
-    req.use_fingerprint = true;
+    req.use_fingerprint(true);
 
     if (this->_ice_controlling) {
         req.ice_controlling = this->_tie_breaker;
@@ -651,7 +675,7 @@ agent_datagram_impl<Layer>::request(ice::candidate_pair &pair,
         ICE_IN_DEBUG { std::cout << "Transaction already in progress\n"; }
         co_return false;
     }
-    stun::transaction trans(this->context(), req, this->_server, resp);
+    stun::transaction trans(this->context(), req, pair.remote_candidate().endpoint, resp);
     this->_transactions.insert(it, trans);
 
     bool ret = false;
@@ -686,7 +710,7 @@ agent_datagram_impl<Layer>::request(ice::candidate_pair &pair,
             continue;
         }
         if (resp.integrities.size() == 1) {
-            if (!std::range::contains(req.integrities, resp.integrities.front())) {
+            if (!std::ranges::contains(req.integrities, resp.integrities.front())) {
                 ICE_IN_DEBUG { std::cout << "Integrity algorithm mismatch\n"; }
                 continue;
             }
@@ -735,8 +759,7 @@ agent_datagram_impl<Layer>::request(ice::candidate_pair &pair,
                 break;
             }
         } else {
-            if (!resp.xor_mapped_address.has_value() ||
-                !resp.priority) {
+            if (!resp.xor_mapped_address.has_value()) {
                 ICE_IN_DEBUG { std::cout << "Invalid response\n"; }
                 break;
             }

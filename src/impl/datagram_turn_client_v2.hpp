@@ -56,7 +56,7 @@ struct datagram_client
                     const ice::endpoint &server, std::string username,
                     std::string password)
         : base_type(std::move(transport)),
-          _next_layer(base_type::template transport<next_layer_type>()),
+          _next_layer(base_type::transport<next_layer_type>()),
           _server(server), _username(std::move(username)),
           _password(std::move(password)) {}
 
@@ -145,6 +145,7 @@ struct datagram_client
 
     void add_receiver(datagram_receiver &receiver) noexcept {
         receivers().push_back(receiver);
+        receivers().sort();
     }
 
   private:

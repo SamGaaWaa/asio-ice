@@ -39,14 +39,16 @@ std::string candidate_foundation(candidate_type type,
     std::string key;
     std::string_view type_str = to_string(type);
     std::string addr_str = base_address.to_string();
-    key.reserve(type_str.size() + 2 + transport.size() + addr_str.size() + 16);
+    key.reserve(type_str.size() + 2 + transport.size() + addr_str.size() + 17);
     key += type_str;
     key += '|';
     key += transport;
     key += '|';
     key += addr_str;
-    if (type != ice::candidate_type::host)
-        key += server.value().to_stirng();
+    if (type != ice::candidate_type::host) {
+        key += '|';
+        key += server.value().to_string();
+    }
     return md5_hex(key);
 }
 

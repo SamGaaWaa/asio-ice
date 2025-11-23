@@ -287,6 +287,7 @@ struct io_buffer_pool {
 };
 
 struct io_buffer_ptr {
+    io_buffer_ptr() noexcept {}
     io_buffer_ptr(io_buffer_pool *pool,
                   std::size_t head_room = io_buffer::default_head_room(),
                   std::size_t tail_room = io_buffer::default_tail_room())

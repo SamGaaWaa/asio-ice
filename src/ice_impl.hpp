@@ -49,7 +49,68 @@ namespace net = asio;
 #include <algorithm>
 #include <ranges>
 
+#include <boost/intrusive/set.hpp>
+
 namespace ice::impl {
+
+enum struct check_list_state_t {
+    RUNNING,
+    COMPLETED,
+    FAILED
+};
+
+struct check_task_state_t:
+    boost::intrusive::set_base_hook<boost::intrusive::link_mode<boost::intrusive::auto_unlink>>,
+    std::enable_shared_from_this<check_task_state_t>
+{
+    enum state_t {
+        INIT, RUNNING, RETRYING_STOPPED, FINISHED
+    };
+
+    struct key_type {
+        using type = uintptr_t;
+        type operator()(const check_task_state_t &s) const noexcept {
+            return (type)&s.candidate_pair();
+        }
+    };
+
+    check_task_state_t(ice::candidate_pair& pair) noexcept:
+        _pair(pair.shared_from_this())
+    {}
+
+    check_task_state_t(const check_task_state_t&) = delete;
+    check_task_state_t(check_task_state_t&&) = delete;
+    check_task_state_t& operator=(const check_task_state_t&) = delete;
+    check_task_state_t& operator=(check_task_state_t&&) = delete;
+
+    /*
+        Cancellation means that the agent
+        will not retransmit the Binding requests associated with the
+        connectivity-check transaction, will not treat the lack of
+        response to be a failure, but will wait the duration of the
+        transaction timeout for a response.
+    */
+    void cancel() noexcept;
+
+    void stop() noexcept;
+
+    ice::candidate_pair& candidate_pair() noexcept {
+        return *_pair;
+    }
+
+    const ice::candidate_pair& candidate_pair() const noexcept {
+        return *_pair;
+    }
+private:
+    std::shared_ptr<ice::candidate_pair> _pair;
+    state_t _state{INIT};
+    ice::shared_promise<void> _stop;
+};
+
+using check_task_set_t = boost::intrusive::set<
+        check_task_state_t,
+        boost::intrusive::key_of_value<typename check_task_state_t::key_type>,
+        boost::intrusive::constant_time_size<false>>;
 
 template <class Layer>
 struct agent_datagram_impl
@@ -79,6 +140,14 @@ struct agent_datagram_impl
     const auto &remote_username() const noexcept { return _remote_username; }
     const auto &local_password() const noexcept { return _local_password; }
     const auto &remote_password() const noexcept { return _remote_password; }
+
+    auto check_list_state() const noexcept {
+        return _check_list_state;
+    }
+
+    void set_check_list_state(check_list_state_t s) noexcept {
+        _check_list_state = s;
+    }
 
     void clear() noexcept;
 
@@ -126,6 +195,11 @@ struct agent_datagram_impl
 
     void check_complete(const ice::candidate_pair &pair) noexcept;
 
+    std::shared_ptr<ice::candidate_pair> construct_valid_pair(
+        const stun::message& req,
+        const stun::message& resp,
+        ice::candidate_pair& pair
+    ) noexcept;
   private:
     using triggered_check_queue_type = boost::intrusive::list<
         candidate_pair,
@@ -149,8 +223,10 @@ struct agent_datagram_impl
     std::vector<ice::candidate> _local_candidates{};
     std::vector<ice::candidate> _remote_candidates{};
     check_list_type _check_list{};
+    check_list_state_t _check_list_state{check_list_state_t::RUNNING};
     valid_list_type _valid_list{};
     triggered_check_queue_type _triggered_check_queue{};
+    check_task_set_t _check_tasks{};
 };
 
 } // namespace ice::impl

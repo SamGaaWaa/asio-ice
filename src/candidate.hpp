@@ -42,7 +42,7 @@ struct candidate {
     std::optional<ice::endpoint> related;
     std::string tcptype;
     std::optional<uint32_t> generation;
-    ice::any_transport transport;
+    mutable ice::any_transport transport;
 };
 
 static_assert(std::is_copy_constructible_v<candidate>);

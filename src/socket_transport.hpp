@@ -69,6 +69,7 @@ template <class Socket> struct datagram_transport {
 
     void add_receiver(datagram_receiver &receiver) noexcept {
         _impl->receivers().push_back(receiver);
+        _impl->receivers().sort();
     }
 
   private:

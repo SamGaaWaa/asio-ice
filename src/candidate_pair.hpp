@@ -42,7 +42,9 @@ using __triggered_check_queue_base_hook = boost::intrusive::list_base_hook<
     boost::intrusive::link_mode<boost::intrusive::auto_unlink>>;
 
 struct candidate_pair final : datagram_receiver,
-                              __triggered_check_queue_base_hook {
+                              __triggered_check_queue_base_hook,
+                              std::enable_shared_from_this<ice::candidate_pair>
+{
 
     enum struct state_t {
         FROZEN = 0,

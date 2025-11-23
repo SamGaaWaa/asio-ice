@@ -43,6 +43,8 @@ struct datagram_receiver
 
     virtual ~datagram_receiver() { detach(); }
 
+    virtual uint64_t receiver_priority() const noexcept { return 0; }
+
     template <class Transport> auto &transport() noexcept {
         return *static_cast<Transport *>(_transport.get());
     }
@@ -59,6 +61,11 @@ struct datagram_receiver
             unlink();
             _transport.reset();
         }
+    }
+
+    friend auto operator<=>(const datagram_receiver &lhs,
+                              const datagram_receiver &rhs) noexcept {
+        return lhs.receiver_priority() <=> rhs.receiver_priority();
     }
 
   private:

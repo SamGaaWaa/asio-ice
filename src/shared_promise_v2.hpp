@@ -113,6 +113,9 @@ template <class... Args> struct shared_promise {
         op.set_stopped();
     }
 
+    bool empty() const noexcept {
+        return _operations.empty();
+    }
   private:
     struct future {
         using sender_concept = stdexec::sender_t;
@@ -314,6 +317,9 @@ template <> struct shared_promise<void> {
         op.set_stopped();
     }
 
+    bool empty() const noexcept {
+        return _operations.empty();
+    }
   private:
     struct future {
         using sender_concept = stdexec::sender_t;

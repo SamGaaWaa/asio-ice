@@ -79,6 +79,7 @@ file(GLOB ICE_SRC_FILES
     src/hash2.cpp
     src/candidate_pair.cpp
     src/boost_context/context.cpp
+    src/ssl/datagram_bio.cpp
 )
 add_library(asioice STATIC ${ICE_SRC_FILES})
 

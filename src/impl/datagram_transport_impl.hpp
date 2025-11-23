@@ -72,7 +72,6 @@ struct datagram_transport_impl
 
     auto &receivers() noexcept { return _receivers; }
     const auto &receivers() const noexcept { return _receivers; }
-
   private:
     ice::task<void> recv_loop(auto self);
 
