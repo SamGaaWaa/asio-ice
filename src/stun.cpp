@@ -1086,7 +1086,7 @@ int message::write_to(void *buf, size_t length) const noexcept {
         iter->length = binary::hton<uint16_t>(attr_size);
 
         value_error_code_t *ec =
-            reinterpret_cast<value_error_code_t *>(iter.data());
+            reinterpret_cast<value_error_code_t *>(iter->value());
         ec->reserved = 0;
         auto r = std::div(this->error_code->code, 100);
         ec->code_class = r.quot & 0x07;

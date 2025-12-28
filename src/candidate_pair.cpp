@@ -3,6 +3,20 @@
 
 namespace ice {
 
+void candidate_pair::set_state(state_t state) noexcept {
+    if (state == _state)
+        return;
+    _state = state;
+    // TODO: emit event
+}
+
+void candidate_pair::set_nominated(bool nominated) noexcept {
+    if (nominated == _nominated)
+        return;
+    _nominated = nominated;
+    // TODO: emit event
+}
+
 bool candidate_pair::datagram_received(io_buffer_ptr &buffer,
                                        const ice::endpoint &endpoint) {
     if (!buffer) [[unlikely]] // ignore empty buffers
@@ -10,31 +24,11 @@ bool candidate_pair::datagram_received(io_buffer_ptr &buffer,
     const uint8_t first_byte = *buffer->begin();
     if (first_byte <= 3) [[unlikely]] {
         // STUN
-        if (buffer->size() < ice::stun::HEADER_SIZE) {
-            // invalid STUN, ignore
-            return true;
-        }
-        auto cls =
-            ice::stun::message::get_class(buffer->data(), buffer->size());
-        if (cls == stun::class_t::STUN_CLASS_RESP_SUCCESS ||
-            cls == stun::class_t::STUN_CLASS_RESP_ERROR) {
-            dispatch_stun_response(this->_transactions, endpoint,
-                                   buffer->data(), buffer->size(),
-                                   this->_local_candidate.transport.data());
-            return true;
-        }
-        if (cls == stun::class_t::STUN_CLASS_REQUEST) {
-            if (this->_request_handler)
-                this->_request_handler(endpoint,
-                                       this->_local_candidate.endpoint,
-                                       std::move(buffer));
-            return true;
-        }
-        // indication, ignore
-        return true;
-    } else if (first_byte >= 64 && first_byte <= 79) [[unlikely]] {
+        return false;
+    }
+    if (first_byte >= 64 && first_byte <= 79) [[unlikely]] {
         // TURN channel, ignore
-        return true;
+        return false;
     }
     if (endpoint != this->remote_candidate().endpoint)
         return false;

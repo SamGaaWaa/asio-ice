@@ -46,7 +46,7 @@ void allocate_test(std::size_t epoch_count) {
     ice::candidate local_c;
     local_c.transport = client.impl().shared_from_this();
     auto cpair =
-        std::make_shared<ice::candidate_pair>(local_c, remote_c, transactions);
+        std::make_shared<ice::candidate_pair>(local_c, remote_c);
     queue_datagram_receiver data_queue(cpair, 16);
 
     auto allocate_coro = [&]() -> ice::task<void> {

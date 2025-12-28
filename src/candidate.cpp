@@ -1,6 +1,7 @@
 #include "candidate.hpp"
 #include "hash2.hpp"
 #include "json.hpp"
+#include "string_utils.hpp"
 
 #include <cstring>
 #include <iomanip>
@@ -93,20 +94,20 @@ std::string candidate::to_string(int indent) const {
     return j.dump(indent);
 }
 
-bool operator==(const candidate &lhs, const candidate &rhs) noexcept {
-    return lhs.foundation == rhs.foundation && lhs.component == rhs.component &&
-           std::ranges::equal(lhs.transport_type, rhs.transport_type,
-                              [](char a, char b) noexcept {
-                                  return std::tolower(a) == std::tolower(b);
-                              }) &&
-           lhs.priority == rhs.priority && lhs.endpoint == rhs.endpoint &&
-           lhs.type == rhs.type && lhs.related == rhs.related &&
-           std::ranges::equal(lhs.tcptype, rhs.tcptype,
-                              [](char a, char b) noexcept {
-                                  return std::tolower(a) == std::tolower(b);
-                              }) &&
-           lhs.generation == rhs.generation;
-}
+// bool operator==(const candidate &lhs, const candidate &rhs) noexcept {
+//     return lhs.foundation == rhs.foundation && lhs.component == rhs.component &&
+//            std::ranges::equal(lhs.transport_type, rhs.transport_type,
+//                               [](char a, char b) noexcept {
+//                                   return std::tolower(a) == std::tolower(b);
+//                               }) &&
+//            lhs.priority == rhs.priority && lhs.endpoint == rhs.endpoint &&
+//            lhs.type == rhs.type && lhs.related == rhs.related &&
+//            std::ranges::equal(lhs.tcptype, rhs.tcptype,
+//                               [](char a, char b) noexcept {
+//                                   return std::tolower(a) == std::tolower(b);
+//                               }) &&
+//            lhs.generation == rhs.generation;
+// }
 
 bool candidate::can_pair_with(const candidate &other) const noexcept {
     return this->type != ice::candidate_type::srflx &&
@@ -115,10 +116,7 @@ bool candidate::can_pair_with(const candidate &other) const noexcept {
              other.endpoint.address().is_v4()) ||
             (this->endpoint.address().is_v6() &&
              other.endpoint.address().is_v6())) &&
-           std::ranges::equal(this->transport_type, other.transport_type,
-                              [](char a, char b) noexcept {
-                                  return std::tolower(a) == std::tolower(b);
-                              });
+            utils::case_insensitive_equal(this->transport_type, other.transport_type);
 }
 
 } // namespace ice

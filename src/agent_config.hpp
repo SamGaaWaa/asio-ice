@@ -22,6 +22,8 @@ namespace net = asio;
 namespace ice {
 
 struct agent_config {
+    std::string username;
+    std::string password;
     bool ice_controlling = true;
     bool use_loopback = false;
     bool use_ipv4 = true;

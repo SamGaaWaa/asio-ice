@@ -14,6 +14,8 @@
 #include "on_scope_empty.hpp"
 #include "small_set.hpp"
 #include "stun_transaction.hpp"
+#include "string_utils.hpp"
+#include "hash2.hpp"
 
 #include <exec/async_scope.hpp>
 
@@ -45,6 +47,7 @@ namespace net = asio;
 #include <optional>
 #include <vector>
 #include <deque>
+#include <list>
 #include <memory>
 #include <algorithm>
 #include <ranges>
@@ -53,64 +56,19 @@ namespace net = asio;
 
 namespace ice::impl {
 
+enum struct agent_state_t: char {
+    INIT,
+    GATHERING,
+    CONNECTING,
+    CONNECTED,
+    CLOSED
+};
+
 enum struct check_list_state_t {
     RUNNING,
     COMPLETED,
     FAILED
 };
-
-struct check_task_state_t:
-    boost::intrusive::set_base_hook<boost::intrusive::link_mode<boost::intrusive::auto_unlink>>,
-    std::enable_shared_from_this<check_task_state_t>
-{
-    enum state_t {
-        INIT, RUNNING, RETRYING_STOPPED, FINISHED
-    };
-
-    struct key_type {
-        using type = uintptr_t;
-        type operator()(const check_task_state_t &s) const noexcept {
-            return (type)&s.candidate_pair();
-        }
-    };
-
-    check_task_state_t(ice::candidate_pair& pair) noexcept:
-        _pair(pair.shared_from_this())
-    {}
-
-    check_task_state_t(const check_task_state_t&) = delete;
-    check_task_state_t(check_task_state_t&&) = delete;
-    check_task_state_t& operator=(const check_task_state_t&) = delete;
-    check_task_state_t& operator=(check_task_state_t&&) = delete;
-
-    /*
-        Cancellation means that the agent
-        will not retransmit the Binding requests associated with the
-        connectivity-check transaction, will not treat the lack of
-        response to be a failure, but will wait the duration of the
-        transaction timeout for a response.
-    */
-    void cancel() noexcept;
-
-    void stop() noexcept;
-
-    ice::candidate_pair& candidate_pair() noexcept {
-        return *_pair;
-    }
-
-    const ice::candidate_pair& candidate_pair() const noexcept {
-        return *_pair;
-    }
-private:
-    std::shared_ptr<ice::candidate_pair> _pair;
-    state_t _state{INIT};
-    ice::shared_promise<void> _stop;
-};
-
-using check_task_set_t = boost::intrusive::set<
-        check_task_state_t,
-        boost::intrusive::key_of_value<typename check_task_state_t::key_type>,
-        boost::intrusive::constant_time_size<false>>;
 
 template <class Layer>
 struct agent_datagram_impl
@@ -122,7 +80,10 @@ struct agent_datagram_impl
 
     agent_datagram_impl(net::io_context &ctx, config_type config) noexcept
         : _ctx(ctx), _config(std::move(config)),
-          _ice_controlling(_config.ice_controlling) {}
+          _ice_controlling(_config.ice_controlling)
+    {
+        ice::hash::random_bytes(&_tie_breaker, sizeof(_tie_breaker));
+    }
 
     agent_datagram_impl(const agent_datagram_impl &) = delete;
     agent_datagram_impl &operator=(const agent_datagram_impl &) = delete;
@@ -130,40 +91,83 @@ struct agent_datagram_impl
     agent_datagram_impl &operator=(agent_datagram_impl &&) = delete;
 
     const auto &local_candidates() const noexcept { return _local_candidates; }
+    const auto &remote_candidates() const noexcept { return _remote_candidates; }
     const auto &context() const noexcept { return _ctx; }
     auto &context() noexcept { return _ctx; }
     const auto &config() const noexcept { return _config; }
 
     const auto &candidate_pairs() const noexcept { return _check_list; }
 
-    const auto &local_username() const noexcept { return _local_username; }
+    const auto &local_username() const noexcept { return _config.username; }
+    const auto &local_password() const noexcept { return _config.password; }
+
     const auto &remote_username() const noexcept { return _remote_username; }
-    const auto &local_password() const noexcept { return _local_password; }
+    void set_remote_username(std::string username) noexcept {
+        _remote_username = std::move(username);
+    }
     const auto &remote_password() const noexcept { return _remote_password; }
+    void set_remote_password(std::string password) noexcept {
+        _remote_password = std::move(password);
+    }
 
     auto check_list_state() const noexcept {
         return _check_list_state;
     }
 
-    void set_check_list_state(check_list_state_t s) noexcept {
-        _check_list_state = s;
-    }
-
-    void clear() noexcept;
-
-    void build_request(stun::message &req, ice::candidate_pair &pair,
-                       bool nominate) noexcept;
-
-    ice::task<bool> request(ice::candidate_pair &pair, const stun::message &req,
-                            stun::message &resp) noexcept;
-
-    ice::task<void> check(ice::candidate_pair &pair) noexcept;
-
-    void switch_role(bool ice_controlling) noexcept;
+    void close() noexcept;
 
     ice::task<void> gather_candidates(auto... self);
 
     ice::task<bool> add_remote_candidate(ice::candidate c, auto... self);
+
+    ice::task<bool> connect(auto... self) noexcept;
+  private:
+    struct stun_receiver: ice::datagram_receiver {
+        stun_receiver(const ice::any_transport& transport, agent_datagram_impl *agent) noexcept
+            : ice::datagram_receiver(),
+            _transport(transport),
+            _agent(agent) {
+            _transport.add_receiver(*this);
+        }
+        bool datagram_received(io_buffer_ptr &buffer, const ice::endpoint &endpoint) override;
+    private:
+        ice::any_transport _transport;
+        agent_datagram_impl *_agent;
+    };
+
+    struct check_task {
+        std::shared_ptr<ice::candidate_pair> pair;
+        std::shared_ptr<ice::candidate_pair> triggered_by{nullptr};
+        bool use_candidate{false};
+        uint64_t priority{0};
+    };
+
+    struct transaction_state:
+        boost::intrusive::set_base_hook<boost::intrusive::link_mode<boost::intrusive::auto_unlink>>
+    {
+        transaction_state(ice::candidate_pair& p, stun::transaction& t) noexcept:
+            pair{&p},
+            transaction{&t}
+        {}
+
+        struct key_type {
+            using type = ice::candidate_pair*;
+            type operator()(const transaction_state &s) const noexcept {
+                return s.pair;
+            }
+        };
+        ice::candidate_pair *pair;
+        stun::transaction *transaction;
+    };
+
+    using transaction_state_set = boost::intrusive::multiset<
+            transaction_state,
+            boost::intrusive::key_of_value<typename transaction_state::key_type>,
+            boost::intrusive::constant_time_size<false>>;
+
+    enum struct request_result: char {
+        succeed, failed, timeout
+    };
 
     ice::task<void> get_component_candidates(
         std::vector<ice::candidate> &component_candidates, uint8_t component,
@@ -187,24 +191,47 @@ struct agent_datagram_impl
     find_pair(const ice::any_transport &transport,
               const ice::candidate &remote_candidate) const noexcept;
 
-    ice::candidate_pair *pick_next_pair() noexcept;
+    check_task pick_next_pair() noexcept;
 
     void unfreeze_initial() noexcept;
 
-    ice::task<bool> connect(auto... self) noexcept;
+    ice::task<request_result> request(ice::candidate_pair &pair, const stun::message &req,
+                            stun::message &resp) noexcept;
 
-    void check_complete(const ice::candidate_pair &pair) noexcept;
+    void switch_role(bool ice_controlling) noexcept;
+
+    void set_check_list_state(check_list_state_t s) noexcept {
+        _check_list_state = s;
+    }
 
     std::shared_ptr<ice::candidate_pair> construct_valid_pair(
         const stun::message& req,
         const stun::message& resp,
-        ice::candidate_pair& pair
-    ) noexcept;
-  private:
-    using triggered_check_queue_type = boost::intrusive::list<
-        candidate_pair,
-        boost::intrusive::base_hook<__triggered_check_queue_base_hook>,
-        boost::intrusive::constant_time_size<false>>;
+        check_task& ct
+    );
+
+    void build_request(stun::message &req, ice::candidate_pair &pair) noexcept;
+
+    bool in_triggered_check_queue(const ice::candidate_pair& p) const noexcept;
+
+    ice::task<void> check(check_task ct);
+
+    bool verify_username(std::string_view name) const noexcept;
+
+    ice::task<void> do_handle_request(
+        auto self,
+        ice::any_transport transport,
+        ice::endpoint source,
+        ice::io_buffer_ptr buf);
+
+    template <class Transport>
+    auto send_stun(Transport& transport, const stun::message& msg, const ice::endpoint& ep);
+
+    void check_complete(ice::candidate_pair &pair) noexcept;
+
+    void request_handler(ice::any_transport& transport, const ice::endpoint &source, ice::io_buffer_ptr buf);
+
+    void create_stun_receiver(const ice::any_transport& transport) noexcept;
 
     using check_list_type = std::vector<std::shared_ptr<ice::candidate_pair>>;
 
@@ -212,12 +239,11 @@ struct agent_datagram_impl
 
     net::io_context &_ctx;
     stun::transaction_set _transactions{}; // use for connectivity checks
+    transaction_state_set _transaction_states{};
     config_type _config;
     bool _ice_controlling = true;
     bool _remote_is_lite = false;
-    std::string _local_username;
     std::string _remote_username;
-    std::string _local_password;
     std::string _remote_password;
     uint64_t _tie_breaker = 0;
     std::vector<ice::candidate> _local_candidates{};
@@ -225,8 +251,14 @@ struct agent_datagram_impl
     check_list_type _check_list{};
     check_list_state_t _check_list_state{check_list_state_t::RUNNING};
     valid_list_type _valid_list{};
-    triggered_check_queue_type _triggered_check_queue{};
-    check_task_set_t _check_tasks{};
+    std::deque<check_task> _triggered_check_queue{};
+    std::size_t _pending_check_count{0};
+    ice::shared_promise<void> _check_complete_notifier{};
+    ice::shared_promise<void> _request_handler_promise{};
+    std::size_t _outgoing_request_handler_count{0};
+    std::list<stun_receiver> _stun_receivers{};
+    agent_state_t _state{agent_state_t::INIT};
+    ice::shared_promise<void> _state_change_notifier{};
 };
 
 } // namespace ice::impl
@@ -305,6 +337,9 @@ inline ice::task<void> gather_task(ice::net::io_context &ctx) try {
                                   "14.29.112.241:20002"};
 
     agent_config config;
+    config.username = "user1";
+    config.password = "pass1";
+    config.ice_controlling = true;
     config.component_count = 2; // 1 for RTP, 1 for RTCP
     {
         net::ip::udp::resolver resolver(ctx);
@@ -326,14 +361,16 @@ inline ice::task<void> gather_task(ice::net::io_context &ctx) try {
         std::make_shared<impl::agent_datagram_impl<net::ip::udp::socket>>(
             ctx, config);
 
+    config.username = "user2";
+    config.password = "pass2";
     config.ice_controlling = false;
     auto agent2 =
         std::make_shared<impl::agent_datagram_impl<net::ip::udp::socket>>(
             ctx, config);
 
     utils::scope_guard on_exit([&]() noexcept {
-        agent1->clear();
-        agent2->clear();
+        agent1->close();
+        agent2->close();
     });
 
     net::steady_timer timer(ctx, std::chrono::seconds(5));
@@ -355,9 +392,14 @@ inline ice::task<void> gather_task(ice::net::io_context &ctx) try {
     for (const auto &c : agent2->local_candidates()) {
         co_await agent1->add_remote_candidate(c);
     }
+    agent1->set_remote_username(agent2->local_username());
+    agent1->set_remote_password(agent2->local_password());
+
     for (const auto &c : agent1->local_candidates()) {
         co_await agent2->add_remote_candidate(c);
     }
+    agent2->set_remote_username(agent1->local_username());
+    agent2->set_remote_password(agent1->local_password());
     std::cout << "Adding remote candidates done.\n\n";
 
     std::cout << "Agent1 candidate pairs:\n";

@@ -268,6 +268,8 @@ ice::task<void> datagram_client<NextLayer>::refresh_allocation_task(auto self) {
 
 template <class NextLayer>
 void datagram_client<NextLayer>::start_refresh_allocation_task() {
+    if (!this->is_running())
+        return;
     asio2exec::scheduler sched{this->context()};
     stdexec::start_detached(stdexec::starts_on(
         sched, utils::stop_when(
@@ -461,6 +463,8 @@ datagram_client<NextLayer>::permission_state::refresh_task(auto self) {
 
 template <class NextLayer>
 void datagram_client<NextLayer>::permission_state::start() {
+    if (!this->_client->is_running())
+        return;
     asio2exec::scheduler sched{this->client().context()};
     stdexec::start_detached(stdexec::starts_on(
         sched, utils::stop_when(this->refresh_task(this->shared_from_this()),
@@ -686,6 +690,8 @@ datagram_client<NextLayer>::channel_bind(net::ip::udp::endpoint peer,
 
 template <class NextLayer>
 void datagram_client<NextLayer>::channel_state::start() {
+    if (!this->_client->is_running())
+        return;
     asio2exec::scheduler sched{this->client().context()};
     stdexec::start_detached(stdexec::starts_on(
         sched, utils::stop_when(this->refresh_task(this->shared_from_this()),
