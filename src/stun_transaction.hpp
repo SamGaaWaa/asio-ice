@@ -57,12 +57,7 @@ struct transaction
 
     template <class Transport> auto run(Transport &transport) {
         return utils::stop_when(retry(transport), _stop_retry.get_future() | stdexec::continues_on(asio2exec::scheduler{_ctx})) |
-               stdexec::then([](std::optional<std::error_code> res) {
-                   if (!res)
-                       return std::make_error_code(
-                           std::errc::operation_canceled);
-                   return *res;
-               });
+                stdexec::then([](auto&&...) {});
     }
 
     state_t state() const noexcept { return _state; }
@@ -92,13 +87,14 @@ struct transaction
 
   private:
     template <class Transport>
-    ice::task<std::error_code> retry(Transport &transport) noexcept {
+    ice::task<void> retry(Transport &transport) noexcept try {
         if (_retring) {
             ICE_IN_DEBUG { std::cerr << "Already retring\n"; }
-            co_return std::make_error_code(std::errc::operation_in_progress);
+            co_return;
         }
         _retring = true;
         utils::scope_guard on_exit([this]() noexcept { _retring = false; });
+
         boost::container::small_vector<std::byte, 1024> buf;
         std::chrono::milliseconds retry_rto{500};
 
@@ -109,12 +105,13 @@ struct transaction
                 ICE_IN_DEBUG {
                     std::cerr << "USERNAME, NONCE or REALM too long\n";
                 }
-                co_return std::make_error_code(std::errc::invalid_argument);
+                set_state(state_t::ERROR);
+                co_return;
             }
             buf.resize(n);
         }
 
-        for (std::size_t i = 0; i < _max_retries; ++i) {
+        for (std::size_t i = 0; ; ++i) {
             auto [ec, _] = co_await transport.async_send_to(
                 net::const_buffer(buf.data(), buf.size()), server);
             if (ec) {
@@ -122,7 +119,8 @@ struct transaction
                     std::cerr << "STUN transaction failed: " << ec.message()
                               << '\n';
                 }
-                co_return ec;
+                set_state(state_t::ERROR);
+                co_return;
             }
             _timer.expires_after(retry_rto);
             retry_rto *= 2;
@@ -132,11 +130,14 @@ struct transaction
                     std::cerr << "STUN transaction failed: " << ec.message()
                               << '\n';
                 }
-                co_return ec;
+                set_state(state_t::ERROR);
+                co_return;
             }
         }
-
-        co_return {};
+        co_return;
+    } catch (...) {
+        set_state(state_t::ERROR);
+        throw;
     }
 
     net::io_context &_ctx;
@@ -199,7 +200,7 @@ struct basic_request_t {
         transport.add_receiver(receiver);
 
         bool ret = false;
-        utils::inplace_receiver<std::error_code> retry_receiver;
+        utils::inplace_receiver<void> retry_receiver;
         auto retry_op = retry_receiver.start(stdexec::starts_on(
             asio2exec::scheduler{transport.context()}, trans.run(transport)));
         stdexec::start(retry_op);

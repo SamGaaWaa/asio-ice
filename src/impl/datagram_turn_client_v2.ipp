@@ -16,7 +16,7 @@ ice::task<bool> datagram_client<NextLayer>::request(const stun::message &req,
     this->_transactions.insert(it, trans);
 
     bool ret = false;
-    utils::inplace_receiver<std::error_code> retry_receiver;
+    utils::inplace_receiver<void> retry_receiver;
     asio2exec::scheduler sched{this->context()};
     auto retry_op = retry_receiver.start(
         stdexec::starts_on(sched, trans.run(this->_next_layer)));

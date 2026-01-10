@@ -30,7 +30,7 @@ std::string random_string(std::size_t n) {
         return res;
     auto hex_size = (n % 2) ? (n + 1) : n;
     res.resize_and_overwrite(hex_size, [&](char *p, std::size_t) -> std::size_t {
-        unsigned char buf[64];
+        unsigned char buf[256];
         char *it = p;
         const char * const end = p + hex_size; 
         while (it < end) {

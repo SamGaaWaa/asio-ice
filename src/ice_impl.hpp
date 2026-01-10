@@ -121,6 +121,8 @@ struct agent_datagram_impl
     ice::task<bool> add_remote_candidate(ice::candidate c, auto... self);
 
     ice::task<bool> connect(auto... self) noexcept;
+
+    boost::container::small_vector<ice::candidate_pair*, 2> nominated_pairs();
   private:
     struct stun_receiver: ice::datagram_receiver {
         stun_receiver(const ice::any_transport& transport, agent_datagram_impl *agent) noexcept
@@ -140,6 +142,12 @@ struct agent_datagram_impl
         std::shared_ptr<ice::candidate_pair> triggered_by{nullptr};
         bool use_candidate{false};
         uint64_t priority{0};
+    };
+
+    struct valid_pair {
+        std::shared_ptr<ice::candidate_pair> pair;
+        std::shared_ptr<ice::candidate_pair> source;
+        bool nominated = false;
     };
 
     struct transaction_state:
@@ -166,7 +174,7 @@ struct agent_datagram_impl
             boost::intrusive::constant_time_size<false>>;
 
     enum struct request_result: char {
-        succeed, failed, timeout
+        succeed, failed, canceled
     };
 
     ice::task<void> get_component_candidates(
@@ -215,6 +223,7 @@ struct agent_datagram_impl
     bool in_triggered_check_queue(const ice::candidate_pair& p) const noexcept;
 
     ice::task<void> check(check_task ct);
+    ice::task<void> do_check(check_task ct);
 
     bool verify_username(std::string_view name) const noexcept;
 
@@ -233,9 +242,12 @@ struct agent_datagram_impl
 
     void create_stun_receiver(const ice::any_transport& transport) noexcept;
 
+    void set_nominated(ice::candidate_pair& pair) noexcept;
+    void default_nominate();
+
     using check_list_type = std::vector<std::shared_ptr<ice::candidate_pair>>;
 
-    using valid_list_type = std::vector<std::shared_ptr<ice::candidate_pair>>;
+    using valid_list_type = std::vector<valid_pair>;
 
     net::io_context &_ctx;
     stun::transaction_set _transactions{}; // use for connectivity checks
@@ -431,7 +443,25 @@ inline ice::task<void> gather_task(ice::net::io_context &ctx) try {
     }
 
     std::cout << "\nConnecting...\n";
-    bool connected = co_await agent1->connect();
+    std::tuple<std::tuple<bool>, std::tuple<bool>> connected = co_await stdexec::when_all(agent1->connect(), agent2->connect());
+    bool agent1_connected = std::get<0>(std::get<0>(connected));
+    bool agent2_connected = std::get<0>(std::get<1>(connected));
+    if (agent1_connected && agent2_connected) {
+        std::cout << "Connect success\n";
+        auto np1 = agent1->nominated_pairs();
+        auto np2 = agent2->nominated_pairs();
+        std::cout << "\nAgent1's nominated pairs:\n";
+        for (const auto& p: np1) {
+            std::cout << p->to_string() << '\n';
+        }
+        std::cout << "\nAgent2's nominated pairs:\n";
+        for (const auto& p: np2) {
+            std::cout << p->to_string() << '\n';
+        }
+    } else {
+        std::cout << "Agent1 connect " << (agent1_connected ? "success, " : "failed, ")
+                << "agent2 connect " << (agent2_connected ? "success\n" : "failed\n");
+    }
 } catch (const std::exception &e) {
     std::cerr << "Unhandled exception: " << e.what() << '\n';
     co_return;

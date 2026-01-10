@@ -10,12 +10,12 @@ void candidate_pair::set_state(state_t state) noexcept {
     // TODO: emit event
 }
 
-void candidate_pair::set_nominated(bool nominated) noexcept {
-    if (nominated == _nominated)
-        return;
-    _nominated = nominated;
-    // TODO: emit event
-}
+// void candidate_pair::set_nominated(bool nominated) noexcept {
+//     if (nominated == _nominated)
+//         return;
+//     _nominated = nominated;
+//     // TODO: emit event
+// }
 
 bool candidate_pair::datagram_received(io_buffer_ptr &buffer,
                                        const ice::endpoint &endpoint) {
@@ -100,8 +100,8 @@ std::string candidate_pair::to_string(int indent) const {
             return "";
         }
     }(this->_state);
-    res["nominated"] = this->_nominated;
-    res["remote_nominated"] = this->_remote_nominated;
+    // res["nominated"] = this->_nominated;
+    // res["remote_nominated"] = this->_remote_nominated;
     return res.dump(indent);
 }
 

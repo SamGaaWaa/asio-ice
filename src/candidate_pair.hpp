@@ -89,8 +89,8 @@ struct candidate_pair final : datagram_receiver,
     state_t state() const noexcept { return _state; }
     void set_state(state_t state) noexcept;
 
-    bool nominated() const noexcept { return _nominated; }
-    void set_nominated(bool nominated) noexcept;
+    // bool nominated() const noexcept { return _nominated; }
+    // void set_nominated(bool nominated) noexcept;
 
     const std::string &foundation() const noexcept {
         // TODO: What is candidate pair foundation?
@@ -131,8 +131,8 @@ struct candidate_pair final : datagram_receiver,
     ice::candidate _remote_candidate;
     std::string _foundation;
     uint64_t _priority{};
-    bool _nominated = false;
-    bool _remote_nominated = false;
+    // bool _nominated = false;
+    // bool _remote_nominated = false;
     state_t _state = state_t::FROZEN;
     receiver_list_t _receivers{};
 };

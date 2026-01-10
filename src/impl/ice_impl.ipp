@@ -423,14 +423,13 @@ void agent_datagram_impl<Layer>::check_complete(
             if (p->state() == ice::candidate_pair::state_t::FROZEN && p->foundation() == pair.foundation())
                 p->set_state(ice::candidate_pair::state_t::WAITING);
         }
+        this->default_nominate();
     } else if (pair.state() == ice::candidate_pair::state_t::FAILED) {
         //         If the request fails (Section 7.2.5.2), the agent MUST
         //    remove the candidate pair from the valid list, set the candidate pair
         //    state to Failed, and set the checklist state to Failed.
-        std::erase_if(this->_valid_list, [&](const auto& p) noexcept {
-            return p->local_candidate().endpoint == pair.local_candidate().endpoint &&
-                    p->remote_candidate().endpoint == pair.remote_candidate().endpoint &&
-                    utils::case_insensitive_equal(p->local_candidate().transport_type, pair.local_candidate().transport_type);
+        std::erase_if(this->_valid_list, [&](const auto& pp) noexcept {
+            return pp.source.get() == &pair;
         });
     }
 }
@@ -439,49 +438,53 @@ template <class Layer>
 ice::task<bool> agent_datagram_impl<Layer>::connect(auto... self) noexcept {
     this->unfreeze_initial();
 
+    this->_state = agent_state_t::CONNECTING;
+    this->_state_change_notifier.set_value();
+
     net::steady_timer ta{this->context()};
     exec::async_scope scope;
-    ice::shared_promise<bool> done;
-    while (true)
+    while (this->_state != agent_state_t::CLOSED &&
+            this->_state != agent_state_t::CONNECTED)
         try {
-            utils::scope_guard on_err([&]() noexcept { scope.request_stop(); });
             auto task = this->pick_next_pair();
-            if (!task.pair) {
-                if (std::ranges::any_of(
-                        this->_check_list, [](const auto &p) noexcept {
-                            return p->state() ==
-                                   ice::candidate_pair::state_t::IN_PROGRESS;
-                        })) {
-                    auto ret = co_await (done.get_future() |
-                                         stdexec::stopped_as_optional());
-                    if (!ret)
-                        break;
-                    on_err.dismiss();
-                    continue;
-                }
-                ICE_IN_DEBUG { std::cout << "No pairs to check, exiting\n"; }
-                on_err.dismiss();
-                break;
+            if (task.pair) {
+                if (_pending_check_count < this->_config.max_pending_check_count) {
+                    scope.spawn(
+                        stdexec::starts_on(
+                            stdexec::inline_scheduler{},
+                            this->check(std::move(task))
+                        )
+                    );
+                    ta.expires_after(std::chrono::milliseconds(1));
+                } else
+                    ta.expires_after(std::chrono::milliseconds(20));
+            } else if (std::ranges::all_of(this->_check_list, [&](const auto& pair) noexcept {
+                return pair->state() == candidate_pair::state_t::SUCCEEDED ||
+                        pair->state() == candidate_pair::state_t::FAILED;
+            })) {
+                // ICE_IN_DEBUG { std::cout << "No pairs to check, exiting\n"; }
+                // break;
+                // TODO: Optimize this
+                ta.expires_after(std::chrono::milliseconds(20));
+            } else {
+                ta.expires_after(std::chrono::milliseconds(1));
             }
-            scope.spawn(
-                stdexec::starts_on(asio2exec::scheduler{this->context()},
-                                   this->check(std::move(task)) |
-                                    stdexec::then([&done] {
-                                        done.set_value(true);
-                                    })));
-            ta.expires_after(std::chrono::milliseconds(50));
             if (auto ret = co_await (ta.async_wait(asio2exec::use_sender) |
                                      stdexec::stopped_as_optional());
-                !ret)
+                !ret || *ret)
                 break;
-            on_err.dismiss();
         } catch (const std::exception &e) {
             ICE_IN_DEBUG { std::cout << "Exception: " << e.what() << '\n'; }
             break;
         }
+    for (auto& trans: this->_transaction_states) {
+        trans.transaction->stop_retring();
+    }
+    scope.request_stop();
     ICE_IN_DEBUG { std::cout << "Waiting for all checks to finish\n"; }
     co_await utils::on_scope_empty(scope);
-    co_return false;
+    ICE_IN_DEBUG { std::cout << "connect: " << (this->_state == agent_state_t::CONNECTED ? "success\n" : "failed\n"); }
+    co_return this->_state == agent_state_t::CONNECTED;
 }
 
 template <class Layer>
@@ -498,6 +501,16 @@ agent_datagram_impl<Layer>::switch_role(bool ice_controlling) noexcept {
 template <class Layer>
 ice::task<void>
 agent_datagram_impl<Layer>::check(check_task ct) {
+    net::steady_timer timer{this->context(), this->_config.connectivity_check_timeout};
+    co_await utils::stop_when(
+        do_check(std::move(ct)),
+        timer.async_wait(asio2exec::use_sender)
+    );
+}
+
+template <class Layer>
+ice::task<void>
+agent_datagram_impl<Layer>::do_check(check_task ct) {
     assert(ct.pair);
     auto& pair = *ct.pair;
     ++this->_pending_check_count;
@@ -509,17 +522,6 @@ agent_datagram_impl<Layer>::check(check_task ct) {
     request_result ret = request_result::failed;
     pair.set_state(ice::candidate_pair::state_t::IN_PROGRESS);
     utils::scope_guard on_exit([&]() noexcept {
-        if (ret == request_result::timeout) {
-            if (pair.state() != ice::candidate_pair::state_t::SUCCEEDED &&
-                pair.state() != ice::candidate_pair::state_t::FAILED)
-            {
-                pair.set_state(ice::candidate_pair::state_t::FAILED);
-                this->check_complete(pair);
-            }
-            return;
-        }
-        if (pair.state() == ice::candidate_pair::state_t::FAILED)
-            return;
         pair.set_state(ice::candidate_pair::state_t::FAILED);
         this->check_complete(pair);
     });
@@ -541,8 +543,18 @@ agent_datagram_impl<Layer>::check(check_task ct) {
         ICE_IN_DEBUG { std::cout << "Performing check on pair: " << pair.to_string(0) << '\n'; }
         stun::message resp;
         ret = co_await this->request(pair, req, resp);
-        ICE_IN_DEBUG { std::cout << "Check " << (ret == request_result::succeed ? "success: " : (ret == request_result::timeout ? "timeout: " : "failed: ")) << pair.to_string(0) << '\n'; }
+        ICE_IN_DEBUG { std::cout << "Check " << (ret == request_result::succeed ? "success: " : (ret == request_result::canceled ? "canceled: " : "failed: ")) << pair.to_string(0) << '\n'; }
 
+        if (ret == request_result::canceled) {
+            on_exit.dismiss();
+            if (pair.state() == ice::candidate_pair::state_t::IN_PROGRESS &&
+                this->_transaction_states.count(&pair) == 0)
+            {
+                // The last check task
+                pair.set_state(ice::candidate_pair::state_t::WAITING);
+            }
+            co_return;
+        }
         if (ret != request_result::succeed) {
             co_return;
         }
@@ -569,20 +581,25 @@ agent_datagram_impl<Layer>::check(check_task ct) {
         assert(resp.xor_mapped_address);
 
         auto valid_p = construct_valid_pair(req, resp, ct);
-        if (auto it = std::ranges::find_if(this->_valid_list, [&](const auto& p)noexcept {
+        ice::candidate_pair *to_nominate = nullptr;
+        if (auto it = std::ranges::find_if(this->_valid_list, [&](const auto& pp)noexcept {
+            const auto& p = pp.pair;
             return p->local_candidate().endpoint == valid_p->local_candidate().endpoint &&
                     p->remote_candidate().endpoint == valid_p->remote_candidate().endpoint &&
                     utils::case_insensitive_equal(p->local_candidate().transport_type, valid_p->local_candidate().transport_type);
         }); it == this->_valid_list.end())
         {
             valid_p->set_state(ice::candidate_pair::state_t::SUCCEEDED);
-            this->_valid_list.push_back(std::move(valid_p));
+            to_nominate = valid_p.get();
+            this->_valid_list.emplace_back(std::move(valid_p), std::move(ct.pair));
+        } else {
+            to_nominate = it->pair.get();
         }
         pair.set_state(ice::candidate_pair::state_t::SUCCEEDED);
         if (this->_ice_controlling && req.use_candidate) {
-            pair.set_nominated(true);
-        } else if (!this->_ice_controlling && ct.use_candidate) {
-            pair.set_nominated(true);
+            this->set_nominated(*to_nominate);
+        } else if (!this->_ice_controlling && req.use_candidate) {
+            this->set_nominated(*to_nominate);
         }
         break;
     }
@@ -693,7 +710,7 @@ agent_datagram_impl<Layer>::request(ice::candidate_pair &pair,
     transaction_state trans_state{pair, trans};
     this->_transaction_states.insert(trans_state);
 
-    utils::inplace_receiver<std::error_code> retry_receiver;
+    utils::inplace_receiver<void> retry_receiver;
     auto retry_op = retry_receiver.start(stdexec::starts_on(
         asio2exec::scheduler{this->context()}, trans.run(pair.local_candidate().transport)));
     stdexec::start(retry_op);
@@ -703,7 +720,6 @@ agent_datagram_impl<Layer>::request(ice::candidate_pair &pair,
         auto new_state =
             co_await (trans.on_state_change() | stdexec::stopped_as_optional());
         if (!new_state.has_value()) {
-            ret = request_result::timeout;
             goto END;
         }
         if (trans.state() == stun::transaction::state_t::ERROR) {
@@ -784,6 +800,8 @@ agent_datagram_impl<Layer>::request(ice::candidate_pair &pair,
         break;
     }
 END:
+    if (ret == request_result::failed && !trans.is_retring())
+        ret = request_result::canceled;
     if (trans.is_linked())
         trans.unlink();
     trans.stop_retring();
@@ -806,8 +824,8 @@ agent_datagram_impl<Layer>::request_handler(
 {
     if (this->_state == agent_state_t::CLOSED)
         return;
-    if (this->_outgoing_request_handler_count > 64) {
-        ICE_IN_DEBUG{ std::cout << "outgoing_request_handler_count > 64, ignore\n"; }
+    if (this->_outgoing_request_handler_count > 256) {
+        ICE_IN_DEBUG{ std::cout << "outgoing_request_handler_count > 256, ignore\n"; }
         return;
     }
     stdexec::start_detached(
@@ -962,13 +980,24 @@ agent_datagram_impl<Layer>::do_handle_request(
                 p->remote_candidate().endpoint == remote->endpoint &&
                 utils::case_insensitive_equal(p->local_candidate().transport_type, local->transport_type);
     }); it != this->_check_list.end()) {
-        auto& valid_p = *it;
-        if (valid_p->state() == ice::candidate_pair::state_t::SUCCEEDED) {
-            if (use_candidate)
-                valid_p->set_nominated(true);
+        auto& pair = *it;
+        if (pair->state() == ice::candidate_pair::state_t::SUCCEEDED) {
+            // If the state of this pair is Succeeded, it means that the check
+            // previously sent by this pair produced a successful response and
+            // generated a valid pair (Section 7.2.5.3.2).  The agent sets the
+            // nominated flag value of the valid pair to true.
+            if (use_candidate) {
+                // nominated the valid pair generated by this pair
+                for (auto& pp: this->_valid_list) {
+                    if (pp.source.get() == pair.get()) {
+                        this->set_nominated(*pp.pair);
+                        break;
+                    }
+                }
+            }
             co_return;
         }
-        if (valid_p->state() == ice::candidate_pair::state_t::IN_PROGRESS) {
+        if (pair->state() == ice::candidate_pair::state_t::IN_PROGRESS) {
             //     If the state of that pair is In-Progress, the agent cancels the
             //  In-Progress transaction.  Cancellation means that the agent
             //  will not retransmit the Binding requests associated with the
@@ -982,21 +1011,23 @@ agent_datagram_impl<Layer>::do_handle_request(
             //  In-Progress pairs as soon as possible, without having to wait
             //  for retransmissions of the Binding requests associated with the
             //  original connectivity-check transaction.
-            auto in_progress_trans = this->_transaction_states.equal_range(valid_p.get());
+            auto in_progress_trans = this->_transaction_states.equal_range(pair.get());
             for (auto& trans: std::ranges::subrange{in_progress_trans.first, in_progress_trans.second}) {
                 trans.transaction->stop_retring();
             }
+            pair->set_state(ice::candidate_pair::state_t::WAITING);
             this->_triggered_check_queue.emplace_back(check_task{
-                .pair = valid_p,
-                .triggered_by = valid_p,
+                .pair = pair,
+                .triggered_by = pair,
                 .use_candidate = use_candidate
             });
             co_return;
         }
-        if (!in_triggered_check_queue(*valid_p)) {
+        if (!in_triggered_check_queue(*pair)) {
+            pair->set_state(ice::candidate_pair::state_t::WAITING);
             this->_triggered_check_queue.emplace_back(check_task{
-                .pair = valid_p,
-                .triggered_by = valid_p,
+                .pair = pair,
+                .triggered_by = pair,
                 .use_candidate = use_candidate
             });
         }
@@ -1006,6 +1037,7 @@ agent_datagram_impl<Layer>::do_handle_request(
     auto* p = this->_check_list.back().get();
     p->set_priority(this->_ice_controlling);
     this->sort_check_list();
+    p->set_state(ice::candidate_pair::state_t::WAITING);
     this->_triggered_check_queue.emplace_back(check_task{
         .pair = p->shared_from_this(),
         .triggered_by = p->shared_from_this(),
@@ -1075,6 +1107,116 @@ agent_datagram_impl<Layer>::stun_receiver::datagram_received(
     return dispatch_stun_response(this->_agent->_transactions, source,
                 buffer->data(), buffer->size(),
                 this->_transport.data());
+}
+
+template <class Layer>
+void
+agent_datagram_impl<Layer>::set_nominated(ice::candidate_pair& pair) noexcept
+{
+    if (this->_state == agent_state_t::CLOSED ||
+        this->_state == agent_state_t::CONNECTED)
+        return;
+    auto it = std::ranges::find_if(this->_valid_list, [&](const auto& pp) noexcept {
+        return pp.pair.get() == &pair;
+    });
+    assert(it != this->_valid_list.end() && "Only valid pairs can be nominated");
+    if (it->nominated)
+        return;
+
+    if (std::ranges::any_of(this->_valid_list, [&](const auto& pp) noexcept {
+        return pp.pair->component() == it->pair->component() &&
+                pp.nominated;
+    })) {
+        ICE_IN_DEBUG{ std::cerr << "Nominated multiple candidate pairs: " << pair.to_string() << '\n'; }
+        return;
+    }
+
+    it->nominated = true;
+    // Once a candidate pair for a component of a data stream has been
+    // nominated, and the state of the checklist associated with the data
+    // stream is Running, the ICE agent MUST remove all candidate pairs
+    // for the same component from the checklist and from the triggered-
+    // check queue.  If the state of a pair is In-Progress, the agent
+    // cancels the In-Progress transaction.  Cancellation means that the
+    // agent will not retransmit the Binding requests associated with the
+    // connectivity-check transaction, will not treat the lack of
+    // response to be a failure, but will wait the duration of the
+    // transaction timeout for a response.
+    std::erase_if(this->_check_list, [&](const auto& p) noexcept {
+        return p->component() == it->pair->component();
+    });
+    std::erase_if(this->_triggered_check_queue, [&](const auto& ct) noexcept {
+        return ct.pair->component() == it->pair->component();
+    });
+    auto in_progress_trans = this->_transaction_states.equal_range(it->pair.get());
+    for (auto& trans: std::ranges::subrange{in_progress_trans.first, in_progress_trans.second}) {
+        trans.transaction->stop_retring();
+    }
+
+    ICE_IN_DEBUG { std::cout << "New nominated pair: " << it->pair->to_string() << '\n'; }
+    for (uint8_t component = 1; component <= this->_config.component_count; ++component) {
+        if (component == it->pair->component())
+            continue;
+        if (std::ranges::none_of(this->_valid_list, [&](const auto& pp) noexcept {
+            return pp.pair->component() == component && pp.nominated;
+        }))
+            return;
+    }
+
+    ICE_IN_DEBUG { std::cout << "Agent connected\n"; }
+    this->_state = agent_state_t::CONNECTED;
+    _state_change_notifier.set_value();
+}
+
+template <class Layer>
+boost::container::small_vector<ice::candidate_pair*, 2>
+agent_datagram_impl<Layer>::nominated_pairs() {
+    boost::container::small_vector<ice::candidate_pair*, 2> res;
+    res.reserve(this->_config.component_count);
+    for (uint8_t component = 1; component <= this->_config.component_count; ++component) {
+        if (auto it = std::ranges::find_if(this->_valid_list, [&](const auto& pp) noexcept {
+            return pp.pair->component() == component && pp.nominated;
+        }); it != this->_valid_list.end()) {
+            res.push_back(it->pair.get());
+        }
+    }
+    return res;
+}
+
+template <class Layer>
+void
+agent_datagram_impl<Layer>::default_nominate() {
+    if (this->_state == agent_state_t::CLOSED ||
+        this->_state == agent_state_t::CONNECTED ||
+        !this->_ice_controlling)
+        return;
+    std::ranges::sort(this->_valid_list, [](const auto& a, const auto& b) noexcept {
+        return a.pair->priority() > b.pair->priority();
+    });
+    for (uint8_t component = 1; component <= this->_config.component_count; ++component) {
+        if (std::ranges::any_of(this->_valid_list, [&](const auto& pp) noexcept {
+            return pp.pair->component() == component && pp.nominated;
+        })) {
+            continue;
+        }
+        if (auto it = std::ranges::find_if(this->_valid_list, [&](const auto& pp) noexcept {
+            return pp.pair->component() == component;
+        }); it != this->_valid_list.end()) {
+            auto in_progress_trans = this->_transaction_states.equal_range(it->source.get());
+            for (auto& trans: std::ranges::subrange{in_progress_trans.first, in_progress_trans.second}) {
+                trans.transaction->stop_retring();
+            }
+            // std::erase_if(this->_triggered_check_queue, [&](const auto& ct) noexcept {
+            //     return ct.pair.get() == it->pair.get();
+            // });
+            it->source->set_state(ice::candidate_pair::state_t::WAITING);
+            this->_triggered_check_queue.emplace_back(check_task{
+                .pair = it->source,
+                .triggered_by = it->source,
+                .use_candidate = true
+            });
+        }
+    }
 }
 
 } // namespace ice::impl

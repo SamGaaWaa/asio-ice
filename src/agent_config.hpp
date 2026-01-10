@@ -18,6 +18,7 @@ namespace net = asio;
 #include <string>
 #include <vector>
 #include <optional>
+#include <chrono>
 
 namespace ice {
 
@@ -32,6 +33,9 @@ struct agent_config {
     std::vector<ice::endpoint> stun_servers;
     std::optional<ice::endpoint> turn_server;
     uint8_t component_count = 1;
+
+    std::size_t max_pending_check_count = 100;
+    std::chrono::milliseconds connectivity_check_timeout{5000}; 
 };
 
 } // namespace ice
