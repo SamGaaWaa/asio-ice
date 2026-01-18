@@ -16,13 +16,6 @@ template <class T> struct inplace_receiver {
     inplace_receiver(inplace_receiver &&) = delete;
     inplace_receiver &operator=(inplace_receiver &&) = delete;
 
-    ~inplace_receiver() {
-        if (_state == VALUE)
-            std::destroy_at(&_value);
-        else if (_state == ERROR)
-            std::destroy_at(&_error);
-    }
-
     template <stdexec::sender S> auto start(S &&s) {
         return stdexec::connect(std::forward<S>(s), receiver{this});
     }
@@ -74,21 +67,16 @@ template <class T> struct inplace_receiver {
                 this->set_stopped = &_set_stopped;
             }
             void start() & noexcept {
-                switch (_storage->_state) {
-                case STOPPED:
-                    _storage->_state = EMPTY;
+                switch (_storage->_var.index()) {
+                case 3:
                     return stdexec::set_stopped(std::move(_r));
-                case VALUE:
-                    _storage->_state = EMPTY;
+                case 1:
                     stdexec::set_value(std::move(_r),
-                                       std::move(_storage->_value));
-                    std::destroy_at(&_storage->_value);
+                                       std::move(std::get<1>(_storage->_var)));
                     return;
-                case ERROR:
-                    _storage->_state = EMPTY;
+                case 2:
                     stdexec::set_error(std::move(_r),
-                                       std::move(_storage->_error));
-                    std::destroy_at(&_storage->_error);
+                                       std::move(std::get<2>(_storage->_var)));
                     return;
                 default:
                     break;
@@ -130,22 +118,19 @@ template <class T> struct inplace_receiver {
             using stop_callback_t =
                 typename Token::template callback_type<forward_stop>;
             void start() & noexcept {
-                switch (_storage->_state) {
-                case STOPPED:
-                    _storage->_state = EMPTY;
+                switch (_storage->_var.index()) {
+                case 3:
                     return stdexec::set_stopped(std::move(_r));
-                case VALUE:
-                    _storage->_state = EMPTY;
+                case 1:
                     stdexec::set_value(std::move(_r),
-                                       std::move(_storage->_value));
-                    std::destroy_at(&_storage->_value);
+                                       std::move(std::get<1>(_storage->_var)));
                     return;
-                case ERROR:
-                    _storage->_state = EMPTY;
+                case 2:
                     stdexec::set_error(std::move(_r),
-                                       std::move(_storage->_error));
-                    std::destroy_at(&_storage->_error);
+                                       std::move(std::get<2>(_storage->_var)));
                     return;
+                default:
+                    break;
                 }
                 assert(_storage->_waiter == nullptr);
                 _storage->_waiter = this;
@@ -188,42 +173,35 @@ template <class T> struct inplace_receiver {
     };
 
     template <class T1> void set_value(T1 &&t) noexcept {
-        assert(_state == EMPTY);
+        assert(_var.index() == 0);
         if (_waiter) {
             op_base *op = std::exchange(_waiter, nullptr);
             return op->set_value(op, std::forward<T1>(t));
         }
-        _state = VALUE;
-        std::construct_at(&_value, std::forward<T1>(t));
+        _var.template emplace<1>(std::forward<T1>(t));
     }
 
     void set_error(std::exception_ptr e) noexcept {
-        assert(_state == EMPTY);
+        assert(_var.index() == 0);
         if (_waiter) {
             op_base *op = std::exchange(_waiter, nullptr);
             return op->set_error(op, std::move(e));
         }
-        _state = ERROR;
-        std::construct_at(&_error, std::move(e));
+        _var.template emplace<2>(std::move(e));
     }
 
     void set_stopped() noexcept {
-        assert(_state == EMPTY);
+        assert(_var.index() == 0);
         if (_waiter) {
             op_base *op = std::exchange(_waiter, nullptr);
             return op->set_stopped(op);
         }
-        _state = STOPPED;
+        _var.template emplace<3>();
     }
-
-    enum state_t { EMPTY, STOPPED, VALUE, ERROR };
+    struct stopped_tag{};
 
     stdexec::inplace_stop_source _source;
-    state_t _state{EMPTY};
-    union {
-        T _value;
-        std::exception_ptr _error;
-    };
+    std::variant<std::monostate, T, std::exception_ptr, stopped_tag> _var;
     op_base *_waiter{nullptr};
 };
 
@@ -295,7 +273,6 @@ template <> struct inplace_receiver<void> {
                     _storage->_state = EMPTY;
                     stdexec::set_error(std::move(_r),
                                        std::move(_storage->_error));
-                    std::destroy_at(&_storage->_error);
                     return;
                 default:
                     break;
@@ -348,7 +325,6 @@ template <> struct inplace_receiver<void> {
                     _storage->_state = EMPTY;
                     stdexec::set_error(std::move(_r),
                                        std::move(_storage->_error));
-                    std::destroy_at(&_storage->_error);
                     return;
                 }
                 assert(_storage->_waiter == nullptr);
