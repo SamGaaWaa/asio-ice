@@ -254,7 +254,6 @@ template <class Layer> void agent_datagram_impl<Layer>::close() noexcept {
     }
     this->_stun_receivers.clear();
     this->_request_handler_promise.set_stopped();
-    this->_state_change_notifier.set_stopped();
 }
 
 template <class Layer>
@@ -413,6 +412,7 @@ void agent_datagram_impl<Layer>::unfreeze_initial() noexcept {
         seen_foundations.insert(p->foundation());
         p->set_state(ice::candidate_pair::state_t::WAITING);
     }
+    this->_check_list_state = check_list_state_t::RUNNING;
 }
 
 template <class Layer>
@@ -425,7 +425,7 @@ void agent_datagram_impl<Layer>::check_complete(
         }
         this->default_nominate();
     } else if (pair.state() == ice::candidate_pair::state_t::FAILED) {
-        //         If the request fails (Section 7.2.5.2), the agent MUST
+        //    If the request fails (Section 7.2.5.2), the agent MUST
         //    remove the candidate pair from the valid list, set the candidate pair
         //    state to Failed, and set the checklist state to Failed.
         std::erase_if(this->_valid_list, [&](const auto& pp) noexcept {
@@ -439,7 +439,6 @@ ice::task<bool> agent_datagram_impl<Layer>::connect(auto... self) noexcept {
     this->unfreeze_initial();
 
     this->_state = agent_state_t::CONNECTING;
-    this->_state_change_notifier.set_value();
 
     net::steady_timer ta{this->context()};
     exec::async_scope scope;
@@ -455,9 +454,10 @@ ice::task<bool> agent_datagram_impl<Layer>::connect(auto... self) noexcept {
                             this->check(std::move(task))
                         )
                     );
-                    ta.expires_after(std::chrono::milliseconds(1));
-                } else
-                    ta.expires_after(std::chrono::milliseconds(20));
+                }
+                ta.expires_after(this->_config.connectivity_check_interval);
+                if (this->_state == agent_state_t::CONNECTED)
+                    break;
             } else if (std::ranges::all_of(this->_check_list, [&](const auto& pair) noexcept {
                 return pair->state() == candidate_pair::state_t::SUCCEEDED ||
                         pair->state() == candidate_pair::state_t::FAILED;
@@ -465,13 +465,16 @@ ice::task<bool> agent_datagram_impl<Layer>::connect(auto... self) noexcept {
                 // ICE_IN_DEBUG { std::cout << "No pairs to check, exiting\n"; }
                 // break;
                 // TODO: Optimize this
-                ta.expires_after(std::chrono::milliseconds(20));
+                break;
             } else {
-                ta.expires_after(std::chrono::milliseconds(1));
+                // ta.expires_after(std::chrono::milliseconds(1));
+                ta.expires_after(this->_config.connectivity_check_interval);
             }
-            if (auto ret = co_await (ta.async_wait(asio2exec::use_sender) |
-                                     stdexec::stopped_as_optional());
-                !ret || *ret)
+            auto wakeup = utils::stop_when(
+                ta.async_wait(asio2exec::use_sender),
+                this->_state.on_change()
+            );
+            if (auto ret = co_await std::move(wakeup); !ret || *ret)
                 break;
         } catch (const std::exception &e) {
             ICE_IN_DEBUG { std::cout << "Exception: " << e.what() << '\n'; }
@@ -936,7 +939,7 @@ agent_datagram_impl<Layer>::do_handle_request(
         this->_state == agent_state_t::GATHERING) {
         // early check
         do {
-            co_await (_state_change_notifier.get_future() | stdexec::continues_on(asio2exec::scheduler{this->context()}));
+            co_await (this->_state.on_change() | stdexec::continues_on(asio2exec::scheduler{this->context()}));
         } while (this->_state == agent_state_t::INIT ||
                 this->_state == agent_state_t::GATHERING);
         if (this->_state == agent_state_t::CLOSED)
@@ -1165,7 +1168,6 @@ agent_datagram_impl<Layer>::set_nominated(ice::candidate_pair& pair) noexcept
 
     ICE_IN_DEBUG { std::cout << "Agent connected\n"; }
     this->_state = agent_state_t::CONNECTED;
-    _state_change_notifier.set_value();
 }
 
 template <class Layer>

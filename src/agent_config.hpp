@@ -35,7 +35,8 @@ struct agent_config {
     uint8_t component_count = 1;
 
     std::size_t max_pending_check_count = 100;
-    std::chrono::milliseconds connectivity_check_timeout{5000}; 
+    std::chrono::milliseconds connectivity_check_timeout{5000};
+    std::chrono::milliseconds connectivity_check_interval{20};
 };
 
 } // namespace ice

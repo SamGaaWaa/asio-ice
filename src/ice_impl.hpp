@@ -16,6 +16,7 @@
 #include "stun_transaction.hpp"
 #include "string_utils.hpp"
 #include "hash2.hpp"
+#include "property.hpp"
 
 #include <exec/async_scope.hpp>
 
@@ -110,7 +111,7 @@ struct agent_datagram_impl
         _remote_password = std::move(password);
     }
 
-    auto check_list_state() const noexcept {
+    check_list_state_t check_list_state() const noexcept {
         return _check_list_state;
     }
 
@@ -261,7 +262,7 @@ struct agent_datagram_impl
     std::vector<ice::candidate> _local_candidates{};
     std::vector<ice::candidate> _remote_candidates{};
     check_list_type _check_list{};
-    check_list_state_t _check_list_state{check_list_state_t::RUNNING};
+    ice::utils::property<check_list_state_t> _check_list_state{check_list_state_t::RUNNING};
     valid_list_type _valid_list{};
     std::deque<check_task> _triggered_check_queue{};
     std::size_t _pending_check_count{0};
@@ -269,8 +270,7 @@ struct agent_datagram_impl
     ice::shared_promise<void> _request_handler_promise{};
     std::size_t _outgoing_request_handler_count{0};
     std::list<stun_receiver> _stun_receivers{};
-    agent_state_t _state{agent_state_t::INIT};
-    ice::shared_promise<void> _state_change_notifier{};
+    ice::utils::property<agent_state_t> _state{agent_state_t::INIT};
 };
 
 } // namespace ice::impl
