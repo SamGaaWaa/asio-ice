@@ -19,12 +19,7 @@ ice::task<void> agent_datagram_impl<Layer>::server_reflexive_candidate(
                             stdexec::stopped_as_optional());
     if (!result || !*result) {
         ICE_IN_DEBUG {
-            std::cerr << "server_reflexive_candidate: \n"
-                      << "local endpoint: "
-                      << transport.local_endpoint().to_string() << "\n"
-                      << "stun server: " << stun_server.address() << ':'
-                      << stun_server.port() << "\n\n";
-        }
+            std::cerr << "server_reflexive_candidate: error or timeout\n"; }
         co_return;
     }
     if (from != stun_server) {
@@ -40,7 +35,11 @@ ice::task<void> agent_datagram_impl<Layer>::server_reflexive_candidate(
         ep = *resp.mapped_address;
     else
         co_return;
-    srflx_candidates.emplace_back(ice::candidate{
+    if (auto it = std::ranges::find_if(srflx_candidates, [&](const auto& c) noexcept {
+        return c.endpoint == ep;
+    }); it != srflx_candidates.end())
+        co_return;
+    auto srflx = ice::candidate{
         .foundation =
             candidate_foundation(candidate_type::srflx, this->_config.transport,
                                  local_candidate.endpoint.address(),
@@ -52,8 +51,12 @@ ice::task<void> agent_datagram_impl<Layer>::server_reflexive_candidate(
         .endpoint = ep,
         .type = candidate_type::srflx,
         .related = local_candidate.endpoint,
-        .transport = std::move(transport)});
-} catch (std::exception &e) {
+        .transport = std::move(transport)};
+    if (this->_on_local_candidates)
+        co_await this->_on_local_candidates(&srflx, 1);
+    this->pair_local_candidate(local_candidate);
+    srflx_candidates.emplace_back(std::move(srflx));
+} catch (const std::exception &e) {
     ICE_IN_DEBUG {
         std::cerr << "server_reflexive_candidate: " << e.what() << "\n";
     }
@@ -187,15 +190,18 @@ ice::task<void> agent_datagram_impl<Layer>::get_component_candidates(
     }
     if (host_candidates.empty())
         co_return;
-
+    if (this->_on_local_candidates)
+        co_await this->_on_local_candidates(host_candidates.data(), host_candidates.size());
+    for (const auto& c: host_candidates)
+        this->pair_local_candidate(c);
+    std::ranges::copy(host_candidates, std::back_inserter(component_candidates));
     if (!this->_config.stun_servers.empty() && !this->_config.turn_server) {
         co_await this->server_reflexive_candidate(
             component_candidates, host_candidates, this->_config.stun_servers);
     }
 
     // TODO: Add TURN candidates
-    std::move(host_candidates.begin(), host_candidates.end(),
-              std::back_inserter(this->_local_candidates));
+
     // this->_local_candidates.insert(this->_local_candidates.end(),
     // host_candidates));
     co_return;
@@ -206,6 +212,9 @@ ice::task<void> agent_datagram_impl<Layer>::gather_candidates(auto... self) {
     if (this->_config.component_count == 0) {
         throw std::runtime_error("component_count must be greater than 0");
     }
+    utils::scope_guard on_exit([this]() noexcept {
+        this->_local_candidates_end = true;
+    });
     std::vector<net::ip::address> addresses =
         get_local_addresses(this->_config.use_ipv4, this->_config.use_ipv6);
 
@@ -222,7 +231,27 @@ ice::task<void> agent_datagram_impl<Layer>::gather_candidates(auto... self) {
         scope.spawn(get_component_candidates(this->_local_candidates, component,
                                              addresses));
     }
-    co_await utils::on_scope_empty(scope);
+    if (this->_on_local_candidates) {
+        co_await (utils::on_scope_empty(scope) |
+                    stdexec::let_value([this] {
+                        this->_local_candidates_end = true;
+                        return this->_on_local_candidates(nullptr, 0) |
+                                stdexec::then([] { return std::monostate{}; });
+                    }) |
+                    stdexec::let_stopped([this] {
+                        this->_local_candidates_end = true;
+                        return this->_on_local_candidates(nullptr, 0) |
+                                stdexec::then([] { return std::monostate{}; });
+                    }) |
+                    stdexec::let_error([this](auto) {
+                        this->_local_candidates_end = true;
+                        return this->_on_local_candidates(nullptr, 0) |
+                                stdexec::then([] { return std::monostate{}; });
+                    }) |
+                    stdexec::stopped_as_optional());
+    } else {
+        co_await utils::on_scope_empty(scope);
+    }
 }
 
 inline bool __validate_remote_candidate(const ice::candidate &c) noexcept {
@@ -234,6 +263,120 @@ inline bool __validate_remote_candidate(const ice::candidate &c) noexcept {
     default:
         return false;
     }
+}
+
+template <class Layer>
+void agent_datagram_impl<Layer>::pair_local_candidate(const ice::candidate& c) {
+    assert(c.type != ice::candidate_type::srflx && "Should not pair srflx candidates");
+    for (const auto& remote_c: this->_remote_candidates) {
+        if (!c.can_pair_with(remote_c))
+            continue;
+        auto priority = ice::candidate_pair::compute_priority(c, remote_c, this->_ice_controlling);
+        // The agent prunes each checklist.  This is done by removing a
+        // candidate pair if it is redundant with a higher-priority candidate
+        // pair in the same checklist.  Two candidate pairs are redundant if
+        // their local candidates have the same base and their remote candidates
+        // are identical.  The result is a sequence of ordered candidate pairs,
+        // called the "checklist" for that data stream.
+        auto it = std::ranges::find_if(this->_check_list, [&](const auto& p) noexcept {
+            return (p->state() == ice::candidate_pair::state_t::WAITING ||
+                    p->state() == ice::candidate_pair::state_t::FROZEN) &&
+                    p->local_candidate().endpoint == c.endpoint &&
+                    p->remote_candidate().endpoint == remote_c.endpoint &&
+                    utils::case_insensitive_equal(p->transport_type(), c.transport_type);
+        });
+        if (it != this->_check_list.end()) {
+            const auto& p = *it;
+            if (p->priority() < priority)
+                this->_check_list.erase(it);
+            else
+                continue;
+        }
+        auto pair = std::make_shared<ice::candidate_pair>(c, remote_c);
+        pair->set_priority(priority);
+        this->init_pair_state(*pair);
+        this->_check_list.emplace_back(std::move(pair));
+    }
+    if (this->_config.trickle_ice)
+        this->sort_check_list();
+}
+
+template <class Layer>
+void agent_datagram_impl<Layer>::pair_remote_candidate(const ice::candidate& c) {
+    for (const auto& local_c: this->_local_candidates) {
+        if (!local_c.can_pair_with(c))
+            continue;
+        auto priority = ice::candidate_pair::compute_priority(local_c, c, this->_ice_controlling);
+        // The agent prunes each checklist.  This is done by removing a
+        // candidate pair if it is redundant with a higher-priority candidate
+        // pair in the same checklist.  Two candidate pairs are redundant if
+        // their local candidates have the same base and their remote candidates
+        // are identical.  The result is a sequence of ordered candidate pairs,
+        // called the "checklist" for that data stream.
+        auto it = std::ranges::find_if(this->_check_list, [&](const auto& p) noexcept {
+            return (p->state() == ice::candidate_pair::state_t::WAITING ||
+                    p->state() == ice::candidate_pair::state_t::FROZEN) &&
+                    p->local_candidate().endpoint == local_c.endpoint &&
+                    p->remote_candidate().endpoint == c.endpoint &&
+                    utils::case_insensitive_equal(p->transport_type(), c.transport_type);
+        });
+        if (it != this->_check_list.end()) {
+            const auto& p = *it;
+            if (p->remote_candidate().type == ice::candidate_type::prflx) {
+                // If the agent finds a redundancy between two pairs and one of those pairs
+                // contains a newly received remote candidate whose type is peer-reflexive,
+                // the agent SHOULD discard the pair containing that candidate, set the priority
+                // of the existing pair to the priority of the discarded pair, and re-sort the
+                // checklist.
+                priority = p->priority();
+                this->_check_list.erase(it);
+            } else if (p->priority() < priority) {
+                this->_check_list.erase(it);
+            } else
+                continue;
+        }
+        auto pair = std::make_shared<ice::candidate_pair>(local_c, c);
+        pair->set_priority(priority);
+        this->init_pair_state(*pair);
+        this->_check_list.emplace_back(std::move(pair));
+    }
+    if (this->_config.trickle_ice)
+        this->sort_check_list();
+}
+
+template <class Layer>
+void
+agent_datagram_impl<Layer>::init_pair_state(ice::candidate_pair& pair) const noexcept
+{
+    if (!this->_config.trickle_ice)
+        return;
+    // TODO
+    auto lst = this->_check_list | std::views::filter([&](const auto& p) {
+        return p->foundation() == pair.foundation();
+    });
+    // Rule 1: If the newly formed pair has the lowest component ID and, if the
+    // component IDs are equal, the highest priority of any candidate pair for
+    // this foundation (i.e., if it is the topmost pair in the column), set the
+    // state to Waiting.
+    if (std::ranges::all_of(lst, [&](const auto& p) {
+        if (p->component() < pair.component())
+            return false;
+        if (p->component() > pair.component())
+            return true;
+        return p->priority() <= pair.priority();
+    })) {
+        pair.set_state(ice::candidate_pair::state_t::WAITING);
+        return;
+    }
+    // Rule 2: If there is at least one pair in the Succeeded state for this
+    // foundation, set the state to Waiting.
+    if (std::ranges::any_of(lst, [&](const auto& p) {
+        return p->state() == ice::candidate_pair::state_t::SUCCEEDED;
+    })) {
+        pair.set_state(ice::candidate_pair::state_t::WAITING);
+        return;
+    }
+    pair.set_state(ice::candidate_pair::state_t::FROZEN);
 }
 
 template <class Layer>
@@ -254,6 +397,9 @@ template <class Layer> void agent_datagram_impl<Layer>::close() noexcept {
     }
     this->_stun_receivers.clear();
     this->_request_handler_promise.set_stopped();
+
+    // TODO: Should hold a shared_ptr to clear the callback
+    this->_on_local_candidates.reset();
 }
 
 template <class Layer>
@@ -273,6 +419,10 @@ ice::candidate_pair *agent_datagram_impl<Layer>::find_pair(
 template <class Layer>
 ice::task<bool> agent_datagram_impl<Layer>::add_remote_candidate(
     ice::candidate remote_candidate, auto... self) {
+    if (this->_state == agent_state_t::CLOSED ||
+        this->_state == agent_state_t::CONNECTED ||
+        this->_remote_candidates_end)
+        co_return false;
     remote_candidate.transport.clear();
     remote_candidate.related.reset();
     if (auto it = std::ranges::find_if(this->_remote_candidates, [&](const auto& c) noexcept {
@@ -297,19 +447,8 @@ ice::task<bool> agent_datagram_impl<Layer>::add_remote_candidate(
         }
         co_return false;
     }
-
-    this->_remote_candidates.push_back(remote_candidate);
-
-    for (const auto &c : this->_local_candidates) {
-        if (c.can_pair_with(remote_candidate) &&
-            this->find_pair(c.transport, remote_candidate) == nullptr) {
-            auto c_pair = std::make_shared<ice::candidate_pair>(c, remote_candidate);
-            c_pair->set_priority(this->_ice_controlling);
-            this->_check_list.emplace_back(std::move(c_pair));
-        }
-    }
-
-    this->sort_check_list();
+    this->pair_remote_candidate(remote_candidate);
+    this->_remote_candidates.push_back(std::move(remote_candidate));
     co_return true;
 }
 
@@ -436,6 +575,15 @@ void agent_datagram_impl<Layer>::check_complete(
 
 template <class Layer>
 ice::task<bool> agent_datagram_impl<Layer>::connect(auto... self) noexcept {
+    if (this->_state == agent_state_t::CONNECTING ||
+        this->_state == agent_state_t::CLOSED ||
+        this->_state == agent_state_t::CONNECTED ||
+        this->_remote_username.empty() ||
+        this->_remote_password.empty())
+    {
+        co_return this->_state == agent_state_t::CONNECTED;
+    }
+    this->sort_check_list();
     this->unfreeze_initial();
 
     this->_state = agent_state_t::CONNECTING;
@@ -462,10 +610,21 @@ ice::task<bool> agent_datagram_impl<Layer>::connect(auto... self) noexcept {
                 return pair->state() == candidate_pair::state_t::SUCCEEDED ||
                         pair->state() == candidate_pair::state_t::FAILED;
             })) {
-                // ICE_IN_DEBUG { std::cout << "No pairs to check, exiting\n"; }
-                // break;
+                if (!this->_config.trickle_ice) {
+                    if (!this->all_components_have_valid_pair()) {
+                        this->_check_list_state = check_list_state_t::FAILED;
+                        break;
+                    }
+                    this->_check_list_state = check_list_state_t::COMPLETED;
+                } else if (this->_local_candidates_end && this->_remote_candidates_end) {
+                    if (!this->all_components_have_valid_pair()) {
+                        this->_check_list_state = check_list_state_t::FAILED;
+                        break;
+                    }
+                    this->_check_list_state = check_list_state_t::COMPLETED;
+                }
                 // TODO: Optimize this
-                break;
+                ta.expires_after(this->_config.connectivity_check_interval);
             } else {
                 // ta.expires_after(std::chrono::milliseconds(1));
                 ta.expires_after(this->_config.connectivity_check_interval);
@@ -600,9 +759,11 @@ agent_datagram_impl<Layer>::do_check(check_task ct) {
         }
         pair.set_state(ice::candidate_pair::state_t::SUCCEEDED);
         if (this->_ice_controlling && req.use_candidate) {
-            this->set_nominated(*to_nominate);
+            if (this->set_nominated(*to_nominate))
+                co_await this->generate_gathering_end_indication();
         } else if (!this->_ice_controlling && req.use_candidate) {
-            this->set_nominated(*to_nominate);
+            if (this->set_nominated(*to_nominate))
+                co_await this->generate_gathering_end_indication();
         }
         break;
     }
@@ -993,7 +1154,8 @@ agent_datagram_impl<Layer>::do_handle_request(
                 // nominated the valid pair generated by this pair
                 for (auto& pp: this->_valid_list) {
                     if (pp.source.get() == pair.get()) {
-                        this->set_nominated(*pp.pair);
+                        if (this->set_nominated(*pp.pair))
+                            co_await this->generate_gathering_end_indication();
                         break;
                     }
                 }
@@ -1113,25 +1275,25 @@ agent_datagram_impl<Layer>::stun_receiver::datagram_received(
 }
 
 template <class Layer>
-void
+bool
 agent_datagram_impl<Layer>::set_nominated(ice::candidate_pair& pair) noexcept
 {
     if (this->_state == agent_state_t::CLOSED ||
         this->_state == agent_state_t::CONNECTED)
-        return;
+        return false;
     auto it = std::ranges::find_if(this->_valid_list, [&](const auto& pp) noexcept {
         return pp.pair.get() == &pair;
     });
     assert(it != this->_valid_list.end() && "Only valid pairs can be nominated");
     if (it->nominated)
-        return;
+        return false;
 
     if (std::ranges::any_of(this->_valid_list, [&](const auto& pp) noexcept {
         return pp.pair->component() == it->pair->component() &&
                 pp.nominated;
     })) {
         ICE_IN_DEBUG{ std::cerr << "Nominated multiple candidate pairs: " << pair.to_string() << '\n'; }
-        return;
+        return false;
     }
 
     it->nominated = true;
@@ -1163,11 +1325,12 @@ agent_datagram_impl<Layer>::set_nominated(ice::candidate_pair& pair) noexcept
         if (std::ranges::none_of(this->_valid_list, [&](const auto& pp) noexcept {
             return pp.pair->component() == component && pp.nominated;
         }))
-            return;
+            return true;
     }
 
     ICE_IN_DEBUG { std::cout << "Agent connected\n"; }
     this->_state = agent_state_t::CONNECTED;
+    return true;
 }
 
 template <class Layer>
@@ -1219,6 +1382,51 @@ agent_datagram_impl<Layer>::default_nominate() {
             });
         }
     }
+}
+
+template <class Layer>
+bool
+agent_datagram_impl<Layer>::all_components_nominated() const noexcept
+{
+    if (this->_valid_list.size() < this->_config.component_count)
+        return false;
+    for (uint8_t component = 1; component <= this->_config.component_count; ++component) {
+        if (std::ranges::none_of(this->_valid_list, [&](const auto& pp) noexcept {
+            return pp.pair->component() == component && pp.nominated;
+        }))
+            return false;
+    }
+    return true;
+}
+
+template <class Layer>
+bool
+agent_datagram_impl<Layer>::all_components_have_valid_pair() const noexcept
+{
+    if (this->_valid_list.size() < this->_config.component_count)
+        return false;
+    for (uint8_t component = 1; component <= this->_config.component_count; ++component) {
+        if (std::ranges::none_of(this->_valid_list, [&](const auto& pp) noexcept {
+            return pp.pair->component() == component;
+        }))
+            return false;
+    }
+    return true;
+}
+
+template <class Layer>
+auto
+agent_datagram_impl<Layer>::generate_gathering_end_indication() noexcept
+{
+    bool old = this->_local_candidates_end;
+    this->_local_candidates_end = true;
+    return utils::if_else(
+        stdexec::just(!old && this->_on_local_candidates != nullptr),
+        [this] {
+            return this->_on_local_candidates(nullptr, 0);
+        },
+        [] { return stdexec::just(); }
+    );
 }
 
 } // namespace ice::impl

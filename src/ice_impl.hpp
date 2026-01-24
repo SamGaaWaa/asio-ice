@@ -12,13 +12,17 @@
 #include "stop_when.hpp"
 #include "scope_guard.hpp"
 #include "on_scope_empty.hpp"
+#include "if_else.hpp"
 #include "small_set.hpp"
 #include "stun_transaction.hpp"
 #include "string_utils.hpp"
 #include "hash2.hpp"
 #include "property.hpp"
+#include "async_function.hpp"
+#include "ignore.hpp"
 
 #include <exec/async_scope.hpp>
+#include <exec/finally.hpp>
 
 #if ASIOICE_USE_BOOST_ASIO > 0
 #define ASIO_TO_EXEC_USE_BOOST 1
@@ -111,19 +115,37 @@ struct agent_datagram_impl
         _remote_password = std::move(password);
     }
 
+    agent_state_t state() const noexcept { return _state; }
+    auto on_state_change() noexcept {
+        return _state.on_change() |
+            stdexec::continues_on(asio2exec::scheduler{_ctx});
+    }
+
     check_list_state_t check_list_state() const noexcept {
         return _check_list_state;
     }
 
     void close() noexcept;
 
+    bool all_components_nominated() const noexcept;
+    bool all_components_have_valid_pair() const noexcept;
+
     ice::task<void> gather_candidates(auto... self);
 
     ice::task<bool> add_remote_candidate(ice::candidate c, auto... self);
+    auto add_remote_candidate() noexcept {
+        this->_remote_candidates_end = true;
+        return stdexec::just(true);
+    }
 
     ice::task<bool> connect(auto... self) noexcept;
 
     boost::container::small_vector<ice::candidate_pair*, 2> nominated_pairs();
+
+    template <class Func>
+    void on_local_candidates(Func&& cb) {
+        _on_local_candidates = std::forward<Func>(cb);
+    }
   private:
     struct stun_receiver: ice::datagram_receiver {
         stun_receiver(const ice::any_transport& transport, agent_datagram_impl *agent) noexcept
@@ -194,6 +216,10 @@ struct agent_datagram_impl
         const std::vector<ice::candidate> &local_candidates,
         const std::vector<ice::endpoint> &stun_servers, auto... self) noexcept;
 
+    void pair_local_candidate(const ice::candidate& c);
+    void pair_remote_candidate(const ice::candidate& c);
+    void init_pair_state(ice::candidate_pair& pair) const noexcept;
+    auto generate_gathering_end_indication() noexcept;
     void sort_check_list() noexcept;
 
     ice::candidate_pair *
@@ -243,7 +269,7 @@ struct agent_datagram_impl
 
     void create_stun_receiver(const ice::any_transport& transport) noexcept;
 
-    void set_nominated(ice::candidate_pair& pair) noexcept;
+    bool set_nominated(ice::candidate_pair& pair) noexcept;
     void default_nominate();
 
     using check_list_type = std::vector<std::shared_ptr<ice::candidate_pair>>;
@@ -261,6 +287,8 @@ struct agent_datagram_impl
     uint64_t _tie_breaker = 0;
     std::vector<ice::candidate> _local_candidates{};
     std::vector<ice::candidate> _remote_candidates{};
+    bool _local_candidates_end = false;
+    bool _remote_candidates_end = false;
     check_list_type _check_list{};
     ice::utils::property<check_list_state_t> _check_list_state{check_list_state_t::RUNNING};
     valid_list_type _valid_list{};
@@ -271,6 +299,9 @@ struct agent_datagram_impl
     std::size_t _outgoing_request_handler_count{0};
     std::list<stun_receiver> _stun_receivers{};
     ice::utils::property<agent_state_t> _state{agent_state_t::INIT};
+
+    // callbacks
+    utils::async_function<void(const ice::candidate*, std::size_t)> _on_local_candidates{};
 };
 
 } // namespace ice::impl
@@ -354,6 +385,7 @@ inline ice::task<void> gather_task(ice::net::io_context &ctx) try {
     config.ice_controlling = true;
     config.component_count = 2; // 1 for RTP, 1 for RTCP
     {
+        std::cout << "Resolving STUN server\n";
         net::ip::udp::resolver resolver(ctx);
         net::steady_timer timer(ctx, std::chrono::seconds(3));
         exec::async_scope scope;
@@ -385,67 +417,86 @@ inline ice::task<void> gather_task(ice::net::io_context &ctx) try {
         agent2->close();
     });
 
-    net::steady_timer timer(ctx, std::chrono::seconds(5));
-    std::cout << "Gathering ...\n";
-    co_await utils::stop_when(stdexec::when_all(agent1->gather_candidates(),
-                                                agent2->gather_candidates()),
-                              timer.async_wait(asio2exec::use_sender));
-    std::cout << "Gathering done.\n\n";
+    // Trickle ICE
+    exec::async_scope scope;
+    asio2exec::scheduler sched{ctx};
+    net::steady_timer network_timer(ctx);
+    auto network_latency = std::chrono::milliseconds(60);
 
-    std::cout << "Agent1 local candidates:\n";
-    for (const auto &c : agent1->local_candidates())
-        std::cout << c.to_string() << '\n';
-    std::cout << "\nAgent2 local candidates:\n";
-    for (const auto &c : agent2->local_candidates())
-        std::cout << c.to_string() << '\n';
-    std::cout << '\n';
+    net::steady_timer timer1(ctx, std::chrono::seconds(5));
+    net::steady_timer timer2(ctx, std::chrono::seconds(5));
 
-    std::cout << "Adding remote candidates ...\n";
-    for (const auto &c : agent2->local_candidates()) {
-        co_await agent1->add_remote_candidate(c);
-    }
+    agent1->on_local_candidates([&agent2](const ice::candidate *c, std::size_t n)->ice::task<void> {
+        if (!c) {
+            std::cout << "Agent1 finish gathering\n";
+            co_await agent2->add_remote_candidate();
+            co_return;
+        }
+        net::steady_timer timer(agent2->context(), std::chrono::milliseconds(60));
+        for (std::size_t i = 0; i < n; ++i) {
+            std::cout << "Agent1's local candidates: " << c[i].to_string() << '\n';
+        }
+        std::cout << "Agent1 is sending local candidates to agent2\n";
+        // Simulate network latency
+        co_await timer.async_wait(asio2exec::use_sender);
+        for (std::size_t i = 0; i < n; ++i) {
+            co_await agent2->add_remote_candidate(c[i]);
+        }
+    });
+
+    agent2->on_local_candidates([&agent1](const ice::candidate *c, std::size_t n)->ice::task<void> {
+        if (!c) {
+            std::cout << "Agent2 finish gathering\n";
+            co_await agent1->add_remote_candidate();
+            co_return;
+        }
+        net::steady_timer timer(agent1->context(), std::chrono::milliseconds(60));
+        for (std::size_t i = 0; i < n; ++i) {
+            std::cout << "Agent2's local candidates: " << c[i].to_string() << '\n';
+        }
+        std::cout << "Agent2 is sending local candidates to agent1\n";
+        // Simulate network latency
+        co_await timer.async_wait(asio2exec::use_sender);
+        for (std::size_t i = 0; i < n; ++i) {
+            co_await agent1->add_remote_candidate(c[i]);
+        }
+    });
+
+    std::cout << "Agent1 is gathering...\n";
+    scope.spawn(stdexec::starts_on(sched, utils::stop_when(
+                                agent1->gather_candidates(),
+                              timer1.async_wait(asio2exec::use_sender))) | utils::ignore());
+
+    std::cout << "Agent1 create OFFER with empty candidate list\n";
+    std::cout << "Agent1 will response early checks\n";
+    // Simulate network latency
+    network_timer.expires_after(network_latency);
+    co_await network_timer.async_wait(asio2exec::use_sender);
+
+    agent2->set_remote_username(agent1->local_username());
+    agent2->set_remote_password(agent1->local_password());
+
+    std::cout << "Agent2 is gathering...\n";
+    scope.spawn(stdexec::starts_on(sched, utils::stop_when(
+                                agent2->gather_candidates(),
+                              timer2.async_wait(asio2exec::use_sender))) | utils::ignore());
+    std::cout << "Agent2 is connecting ...\n";
+    scope.spawn(stdexec::starts_on(sched, agent2->connect()) | utils::ignore());
+
+    std::cout << "Agent2 create ANSWER with empty candidate list\n";
+    // Simulate network latency
+    network_timer.expires_after(network_latency);
+    co_await network_timer.async_wait(asio2exec::use_sender);
     agent1->set_remote_username(agent2->local_username());
     agent1->set_remote_password(agent2->local_password());
 
-    for (const auto &c : agent1->local_candidates()) {
-        co_await agent2->add_remote_candidate(c);
-    }
-    agent2->set_remote_username(agent1->local_username());
-    agent2->set_remote_password(agent1->local_password());
-    std::cout << "Adding remote candidates done.\n\n";
+    std::cout << "Agent1 is connecting ...\n";
+    scope.spawn(stdexec::starts_on(sched, agent1->connect()) | utils::ignore());
 
-    std::cout << "Agent1 candidate pairs:\n";
-    for (const auto &p : agent1->candidate_pairs()) {
-        // std::cout << "type " << ice::to_string(p->local_candidate().type) <<
-        // " component: " << (int)p->local_candidate().component << '\n';
+    co_await ice::utils::on_scope_empty(scope);
 
-        if (p->local_candidate().type == candidate_type::srflx) {
-            std::cerr
-                << "Candidate pair's local candidate is a srflx candidate, but it should not be used.\n";
-            std::abort();
-        }
-        std::cout << "Type: " << ice::to_string(p->local_candidate().type)
-                  << " From " << p->local_candidate().endpoint.to_string()
-                  << " to " << p->remote_candidate().endpoint.to_string()
-                  << '\n';
-    }
-    std::cout << "\nAgent2 candidate pairs:\n";
-    for (const auto &p : agent2->candidate_pairs()) {
-        if (p->local_candidate().type == candidate_type::srflx) {
-            std::cerr
-                << "Candidate pair's local candidate is a srflx candidate, but it should not be used.\n";
-            std::abort();
-        }
-        std::cout << "Type: " << ice::to_string(p->local_candidate().type)
-                  << " From " << p->local_candidate().endpoint.to_string()
-                  << " to " << p->remote_candidate().endpoint.to_string()
-                  << '\n';
-    }
-
-    std::cout << "\nConnecting...\n";
-    std::tuple<std::tuple<bool>, std::tuple<bool>> connected = co_await stdexec::when_all(agent1->connect(), agent2->connect());
-    bool agent1_connected = std::get<0>(std::get<0>(connected));
-    bool agent2_connected = std::get<0>(std::get<1>(connected));
+    bool agent1_connected = agent1->state() == impl::agent_state_t::CONNECTED;
+    bool agent2_connected = agent2->state() == impl::agent_state_t::CONNECTED;
     if (agent1_connected && agent2_connected) {
         std::cout << "Connect success\n";
         auto np1 = agent1->nominated_pairs();

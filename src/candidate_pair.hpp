@@ -85,6 +85,8 @@ struct candidate_pair final : datagram_receiver,
 
     uint64_t priority() const noexcept { return _priority; }
     void set_priority(bool ice_controlling) noexcept;
+    void set_priority(uint64_t priority) noexcept { this->_priority = priority; }
+    static uint64_t compute_priority(const ice::candidate& local, const ice::candidate& remote, bool ice_controlling) noexcept;
 
     state_t state() const noexcept { return _state; }
     void set_state(state_t state) noexcept;
@@ -98,6 +100,7 @@ struct candidate_pair final : datagram_receiver,
     }
 
     auto component() const noexcept { return _local_candidate.component; }
+    const std::string& transport_type() const noexcept { return _local_candidate.transport_type; }
 
     // bool in_triggered_queue() const noexcept {
     //     return __triggered_check_queue_base_hook::is_linked();
