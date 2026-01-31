@@ -140,7 +140,9 @@ struct agent_datagram_impl
 
     ice::task<bool> connect(auto... self) noexcept;
 
-    boost::container::small_vector<ice::candidate_pair*, 2> nominated_pairs();
+    boost::container::small_vector<ice::candidate_pair*, 2> nominated_pairs() const;
+
+    ice::task<void> free_candidates();
 
     template <class Func>
     void on_local_candidates(Func&& cb) {
@@ -153,6 +155,9 @@ struct agent_datagram_impl
             _transport(transport),
             _agent(agent) {
             _transport.add_receiver(*this);
+        }
+        const auto& transport() const noexcept {
+            return _transport;
         }
         bool datagram_received(io_buffer_ptr &buffer, const ice::endpoint &endpoint) override;
     private:
@@ -513,6 +518,9 @@ inline ice::task<void> gather_task(ice::net::io_context &ctx) try {
         std::cout << "Agent1 connect " << (agent1_connected ? "success, " : "failed, ")
                 << "agent2 connect " << (agent2_connected ? "success\n" : "failed\n");
     }
+
+    co_await agent1->free_candidates();
+    co_await agent2->free_candidates();
 } catch (const std::exception &e) {
     std::cerr << "Unhandled exception: " << e.what() << '\n';
     co_return;

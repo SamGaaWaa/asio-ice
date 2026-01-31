@@ -581,6 +581,10 @@ ice::task<bool> agent_datagram_impl<Layer>::connect(auto... self) noexcept {
 
     this->_state = agent_state_t::CONNECTING;
 
+    utils::scope_guard on_exit([this]() noexcept {
+        for (auto& c: this->_local_candidates)
+            c.transport.clear_early_data();
+    });
     net::steady_timer ta{this->context()};
     exec::async_scope scope;
     while (this->_state != agent_state_t::CLOSED &&
@@ -608,16 +612,11 @@ ice::task<bool> agent_datagram_impl<Layer>::connect(auto... self) noexcept {
                         this->_check_list_state = check_list_state_t::FAILED;
                         break;
                     }
-                    this->_check_list_state = check_list_state_t::COMPLETED;
                 } else if (this->_local_candidates_end && this->_remote_candidates_end) {
                     if (!this->all_components_have_valid_pair()) {
                         this->_check_list_state = check_list_state_t::FAILED;
                         break;
                     }
-                    this->_check_list_state = check_list_state_t::COMPLETED;
-                }
-                if (this->_check_list_state == check_list_state_t::COMPLETED) {
-                    
                 }
                 // TODO: Optimize this
                 ta.expires_after(this->_config.connectivity_check_interval);
@@ -1092,6 +1091,9 @@ agent_datagram_impl<Layer>::do_handle_request(
     resp.xor_mapped_address = source;
     co_await this->send_stun(transport, resp, source);
 
+    if (this->_state == agent_state_t::CLOSED ||
+        this->_state == agent_state_t::CONNECTED)
+        co_return;
     if (this->_state == agent_state_t::INIT ||
         this->_state == agent_state_t::GATHERING) {
         // early check
@@ -1099,7 +1101,8 @@ agent_datagram_impl<Layer>::do_handle_request(
             co_await (this->_state.on_change() | stdexec::continues_on(asio2exec::scheduler{this->context()}));
         } while (this->_state == agent_state_t::INIT ||
                 this->_state == agent_state_t::GATHERING);
-        if (this->_state == agent_state_t::CLOSED)
+        if (this->_state == agent_state_t::CLOSED ||
+            this->_state == agent_state_t::CONNECTED)
             co_return;
     }
 
@@ -1323,7 +1326,10 @@ agent_datagram_impl<Layer>::set_nominated(ice::candidate_pair& pair) noexcept
         }))
             return true;
     }
+    this->_check_list_state = check_list_state_t::COMPLETED;
 
+    // Once the state of each checklist in the checklist set is Completed,
+    // the agent sets the state of the ICE session to Completed.
     ICE_IN_DEBUG { std::cout << "Agent connected\n"; }
     this->_state = agent_state_t::CONNECTED;
     return true;
@@ -1331,7 +1337,7 @@ agent_datagram_impl<Layer>::set_nominated(ice::candidate_pair& pair) noexcept
 
 template <class Layer>
 boost::container::small_vector<ice::candidate_pair*, 2>
-agent_datagram_impl<Layer>::nominated_pairs() {
+agent_datagram_impl<Layer>::nominated_pairs() const {
     boost::container::small_vector<ice::candidate_pair*, 2> res;
     res.reserve(this->_config.component_count);
     for (uint8_t component = 1; component <= this->_config.component_count; ++component) {
@@ -1426,6 +1432,57 @@ agent_datagram_impl<Layer>::generate_gathering_end_indication() noexcept
         },
         [] { return stdexec::just(); }
     );
+}
+
+template <class Layer>
+ice::task<void>
+agent_datagram_impl<Layer>::free_candidates() {
+    if (this->_state != agent_state_t::CONNECTED)
+        co_return;
+    co_await stdexec::continues_on(asio2exec::scheduler{this->context()});
+    const auto now = std::chrono::steady_clock::now();
+    const auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(now - this->_state.update_time());
+    // Once a checklist has reached the Completed state, the agent SHOULD
+    // wait an additional three seconds, and then it can cease responding to
+    // checks or generating triggered checks on all local candidates other
+    // than the ones that became selected candidates.  Once all ICE sessions
+    // have ceased using a given local candidate (a candidate may be used by
+    // multiple ICE sessions, e.g., in forking scenarios), the agent can
+    // free that candidate.  The three-second delay handles cases when
+    // aggressive nomination is used, and the selected pairs can quickly
+    // change after ICE has completed.
+    if (duration.count() < 3000) {
+        net::steady_timer timer{this->context()};
+        timer.expires_after(std::chrono::milliseconds(3000 - duration.count()));
+        co_await timer.async_wait(asio2exec::use_sender);
+    }
+    auto nominated_pairs = this->nominated_pairs();
+    auto transport_in_use = [&](const auto& transport) noexcept {
+        return std::ranges::any_of(nominated_pairs, [&](ice::candidate_pair* pair) noexcept {
+            return pair->local_candidate().transport == transport;
+        });
+    };
+    // Stop handling requests and responses
+    std::erase_if(this->_stun_receivers, [&](const auto& receiver) noexcept {
+        return !transport_in_use(receiver.transport());
+    });
+    this->_local_candidates.clear();
+    this->_remote_candidates.clear();
+    this->_check_list.clear();
+    std::erase_if(this->_valid_list, [&](const auto& pair) noexcept {
+        return !pair.nominated;
+    });
+    for (auto& p: this->_valid_list) {
+        p.source.reset();
+    }
+    this->_triggered_check_queue.clear();
+
+    this->_local_candidates.shrink_to_fit();
+    this->_remote_candidates.shrink_to_fit();
+    this->_check_list.shrink_to_fit();
+    this->_valid_list.shrink_to_fit();
+    this->_triggered_check_queue.shrink_to_fit();
+    ICE_IN_DEBUG{ std::cout << "Candidates freed\n"; }
 }
 
 } // namespace ice::impl
