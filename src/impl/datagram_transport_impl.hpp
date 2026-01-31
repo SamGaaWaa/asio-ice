@@ -20,6 +20,7 @@ namespace net = asio;
 #include "shared_promise_v2.hpp"
 #include "stop_when.hpp"
 #include "task.hpp"
+#include "early_data_cache.hpp"
 
 #include <memory>
 
@@ -35,7 +36,9 @@ struct datagram_transport_impl
 
     datagram_transport_impl(net::io_context &ctx, Socket &&sock) noexcept
         : _ctx(ctx), _sock(std::move(sock)),
-          _local_endpoint(_sock.local_endpoint()) {}
+          _local_endpoint(_sock.local_endpoint()),
+          _early_data(16 * 1024)
+        {}
 
     template <class... Args>
     datagram_transport_impl(net::io_context &ctx, Args &&...args)
@@ -70,8 +73,12 @@ struct datagram_transport_impl
         return _sock.async_send_to(buffers, destination, asio2exec::use_sender);
     }
 
+    void add_receiver(datagram_receiver &receiver) noexcept;
+
     auto &receivers() noexcept { return _receivers; }
     const auto &receivers() const noexcept { return _receivers; }
+
+    void clear_early_data() noexcept;
   private:
     ice::task<void> recv_loop(auto self);
 
@@ -79,6 +86,8 @@ struct datagram_transport_impl
     Socket _sock;
     endpoint_type _local_endpoint;
     io_buffer_pool _pool{};
+    early_data_cache _early_data;
+    bool _stop_cache_early_data{false};
     receiver_list_t _receivers{};
     std::size_t _max_buffer_size{4096};
     bool _running{false};

@@ -231,27 +231,20 @@ ice::task<void> agent_datagram_impl<Layer>::gather_candidates(auto... self) {
         scope.spawn(get_component_candidates(this->_local_candidates, component,
                                              addresses));
     }
-    if (this->_on_local_candidates) {
         co_await (utils::on_scope_empty(scope) |
                     stdexec::let_value([this] {
-                        this->_local_candidates_end = true;
-                        return this->_on_local_candidates(nullptr, 0) |
+                        return this->generate_gathering_end_indication() |
                                 stdexec::then([] { return std::monostate{}; });
                     }) |
                     stdexec::let_stopped([this] {
-                        this->_local_candidates_end = true;
-                        return this->_on_local_candidates(nullptr, 0) |
+                        return this->generate_gathering_end_indication() |
                                 stdexec::then([] { return std::monostate{}; });
                     }) |
                     stdexec::let_error([this](auto) {
-                        this->_local_candidates_end = true;
-                        return this->_on_local_candidates(nullptr, 0) |
+                        return this->generate_gathering_end_indication() |
                                 stdexec::then([] { return std::monostate{}; });
                     }) |
                     stdexec::stopped_as_optional());
-    } else {
-        co_await utils::on_scope_empty(scope);
-    }
 }
 
 inline bool __validate_remote_candidate(const ice::candidate &c) noexcept {
@@ -622,6 +615,9 @@ ice::task<bool> agent_datagram_impl<Layer>::connect(auto... self) noexcept {
                         break;
                     }
                     this->_check_list_state = check_list_state_t::COMPLETED;
+                }
+                if (this->_check_list_state == check_list_state_t::COMPLETED) {
+                    
                 }
                 // TODO: Optimize this
                 ta.expires_after(this->_config.connectivity_check_interval);
@@ -1423,7 +1419,10 @@ agent_datagram_impl<Layer>::generate_gathering_end_indication() noexcept
     return utils::if_else(
         stdexec::just(!old && this->_on_local_candidates != nullptr),
         [this] {
-            return this->_on_local_candidates(nullptr, 0);
+            return stdexec::just(std::move(this->_on_local_candidates)) |
+                    stdexec::let_value([](auto& cb) {
+                        return cb(nullptr, 0);
+                    });
         },
         [] { return stdexec::just(); }
     );

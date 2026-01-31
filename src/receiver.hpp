@@ -43,8 +43,6 @@ struct datagram_receiver
 
     virtual ~datagram_receiver() { detach(); }
 
-    virtual uint64_t receiver_priority() const noexcept { return 0; }
-
     template <class Transport> auto &transport() noexcept {
         return *static_cast<Transport *>(_transport.get());
     }
@@ -61,11 +59,6 @@ struct datagram_receiver
             unlink();
             _transport.reset();
         }
-    }
-
-    friend auto operator<=>(const datagram_receiver &lhs,
-                              const datagram_receiver &rhs) noexcept {
-        return lhs.receiver_priority() <=> rhs.receiver_priority();
     }
 
   private:
@@ -98,8 +91,14 @@ struct queue_datagram_receiver : public datagram_receiver {
 };
 
 template <class ReceiverList>
-inline bool dispatch_receivers(ReceiverList &receivers, io_buffer_ptr &buffer,
+inline bool dispatch_receivers(ReceiverList &receivers, io_buffer_ptr &buffer1,
                                const ice::endpoint &endpoint) {
+    if (receivers.empty())
+        return false;
+    auto buffer{std::move(buffer1)};
+    utils::scope_guard on_err([&]() noexcept {
+        buffer1 = std::move(buffer);
+    });
     ReceiverList receivers1;
     receivers.swap(receivers1);
     utils::scope_guard on_exit([&]() noexcept {
@@ -116,8 +115,10 @@ inline bool dispatch_receivers(ReceiverList &receivers, io_buffer_ptr &buffer,
         auto &r = receivers1.front();
         receivers1.pop_front();
         tmp.push_back(r);
-        if (r.datagram_received(buffer, endpoint))
+        if (r.datagram_received(buffer, endpoint)) {
+            on_err.dismiss();
             return true;
+        }
     }
     return false;
 }

@@ -51,6 +51,8 @@ struct interface {
 
     virtual void add_receiver(ice::datagram_receiver &receiver) = 0;
 
+    virtual void clear_early_data() noexcept = 0;
+
     virtual ice::endpoint local_endpoint() const = 0;
 
     virtual bool equal_to(const interface &other) const noexcept = 0;
@@ -136,6 +138,12 @@ template <class Transport> struct transport_impl final : public interface {
 
     void add_receiver(ice::datagram_receiver &receiver) override {
         _transport->add_receiver(receiver);
+    }
+
+    void clear_early_data() noexcept override {
+        if constexpr (requires { _transport->clear_early_data(); }) {
+            _transport->clear_early_data();
+        }
     }
 
     ice::endpoint local_endpoint() const override {
@@ -261,6 +269,10 @@ struct any_transport {
 
     void add_receiver(ice::datagram_receiver &receiver) {
         get_interface()->add_receiver(receiver);
+    }
+
+    void clear_early_data() noexcept {
+        get_interface()->clear_early_data();
     }
 
     bool equal_to(const any_transport &other) const noexcept {

@@ -25,10 +25,27 @@ ice::task<void> datagram_transport_impl<Socket>::recv_loop(auto self) {
             co_return;
         }
         if (n == 0)
-            continue;
+            co_return;
         buf->commit_back(n);
-        dispatch_receivers(this->receivers(), buf, ep);
+        if (!dispatch_receivers(this->receivers(), buf, ep) &&
+            !this->_stop_cache_early_data)
+        {
+            this->_early_data.put(buf, ep);
+        }
     }
+}
+
+template <class Socket>
+void datagram_transport_impl<Socket>::clear_early_data() noexcept {
+    this->_stop_cache_early_data = true;
+    this->_early_data.clear();
+}
+
+template <class Socket>
+void
+datagram_transport_impl<Socket>::add_receiver(datagram_receiver &receiver) noexcept {
+    this->_early_data.dispatch_receiver(receiver);
+    this->receivers().push_back(receiver);
 }
 
 } // namespace ice::impl

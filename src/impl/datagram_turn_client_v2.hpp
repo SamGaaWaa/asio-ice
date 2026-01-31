@@ -145,7 +145,6 @@ struct datagram_client
 
     void add_receiver(datagram_receiver &receiver) noexcept {
         receivers().push_back(receiver);
-        receivers().sort();
     }
 
   private:

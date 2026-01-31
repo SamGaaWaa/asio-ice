@@ -5,3 +5,4 @@ gcc-build
 turn.log
 wireshark
 *.log
+aioice_test

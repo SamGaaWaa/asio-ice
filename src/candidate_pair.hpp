@@ -75,8 +75,6 @@ struct candidate_pair final : datagram_receiver,
         _receivers.push_back(receiver);
     }
 
-    uint64_t receiver_priority() const noexcept override { return 1; }
-
     bool datagram_received(io_buffer_ptr &buffer,
                            const ice::endpoint &endpoint) override;
 

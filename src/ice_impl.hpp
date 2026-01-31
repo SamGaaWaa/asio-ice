@@ -376,7 +376,7 @@ inline void get_local_addresses_test(uint64_t n) {
 inline ice::task<void> gather_task(ice::net::io_context &ctx) try {
     using namespace ice;
 
-    const char *stun_servers[] = {"stun.l.google.com:19302",
+    const char *stun_servers[] = {/*"stun.l.google.com:19302",*/
                                   "14.29.112.241:20002"};
 
     agent_config config;
