@@ -4,7 +4,8 @@ template <class Layer>
 ice::task<void> agent_datagram_impl<Layer>::server_reflexive_candidate(
     std::vector<ice::candidate> &srflx_candidates,
     const ice::candidate &local_candidate, stun::transaction_set &transactions,
-    const ice::endpoint &stun_server, auto... self) noexcept try {
+    const ice::endpoint &stun_server) noexcept try
+{
     auto transport = local_candidate.transport;
 
     stun::message req;
@@ -67,7 +68,8 @@ template <class Layer>
 ice::task<void> agent_datagram_impl<Layer>::server_reflexive_candidate(
     std::vector<ice::candidate> &srflx_candidates,
     const std::vector<ice::candidate> &local_candidates,
-    const std::vector<ice::endpoint> &stun_servers, auto... self) noexcept try {
+    const std::vector<ice::endpoint>& stun_servers) noexcept try
+{
     using Self = agent_datagram_impl<Layer>;
     if (stun_servers.empty()) {
         ICE_IN_DEBUG { std::cerr << "no STUN servers\n"; }
@@ -120,6 +122,8 @@ ice::task<void> agent_datagram_impl<Layer>::get_component_candidates(
 
     std::vector<ice::candidate> host_candidates;
     host_candidates.reserve(addresses.size());
+
+    exec::async_scope scope;
     for (const auto &address : addresses) {
         if ((!this->_config.use_ipv4 && address.is_v4()) ||
             (!this->_config.use_ipv6 && address.is_v6()) ||
@@ -174,7 +178,6 @@ ice::task<void> agent_datagram_impl<Layer>::get_component_candidates(
                       << transport->local_endpoint().port() << '\n';
         }
 
-        auto *raw_transport = transport.get();
         host_candidates.emplace_back(ice::candidate{
             .foundation = candidate_foundation(
                 candidate_type::host, this->_config.transport, address),
@@ -184,33 +187,104 @@ ice::task<void> agent_datagram_impl<Layer>::get_component_candidates(
             .endpoint =
                 ice::endpoint{address, transport->local_endpoint().port()},
             .type = candidate_type::host,
-            .transport = std::move(transport)});
+            .transport = transport});
         create_stun_receiver(host_candidates.back().transport);
-        raw_transport->start();
+        transport->start();
+
+        // create TURN clients
+        for (const auto& t: this->_config.turn_servers) {
+            scope.spawn(create_relayed_candidate(
+                component_candidates,
+                std::make_shared<typename Self::turn_client_type>(transport, t.address, t.username, t.password),
+                transport,
+                component));
+        }
     }
     if (host_candidates.empty())
         co_return;
-    if (this->_on_local_candidates)
+    if (this->_config.transport_policy == ice::transport_policy::ALL &&
+        this->_on_local_candidates)
         co_await this->_on_local_candidates(host_candidates.data(), host_candidates.size());
-    for (const auto& c: host_candidates)
-        this->pair_local_candidate(c);
-    std::ranges::copy(host_candidates, std::back_inserter(component_candidates));
-    if (!this->_config.stun_servers.empty() && !this->_config.turn_server) {
-        co_await this->server_reflexive_candidate(
-            component_candidates, host_candidates, this->_config.stun_servers);
+    if (this->_config.transport_policy == ice::transport_policy::ALL) {
+        for (const auto& c: host_candidates)
+            this->pair_local_candidate(c);
+        std::ranges::copy(host_candidates, std::back_inserter(component_candidates));
     }
-
-    // TODO: Add TURN candidates
-
-    // this->_local_candidates.insert(this->_local_candidates.end(),
-    // host_candidates));
+    if (this->_config.transport_policy == ice::transport_policy::ALL &&
+        !this->_config.stun_servers.empty() &&
+        this->_config.turn_servers.empty()) {
+        co_await this->server_reflexive_candidate(component_candidates, host_candidates, this->_config.stun_servers);
+    }
+    if (!this->_config.turn_servers.empty()) {
+        co_await utils::on_scope_empty(scope);
+    }
     co_return;
 }
 
 template <class Layer>
-ice::task<void> agent_datagram_impl<Layer>::gather_candidates(auto... self) {
+ice::task<void>
+agent_datagram_impl<Layer>::create_relayed_candidate(std::vector<ice::candidate> &component_candidates,
+                            std::shared_ptr<typename agent_datagram_impl<Layer>::turn_client_type> client,
+                            typename agent_datagram_impl<Layer>::raw_transport_ptr host_transport,
+                            uint8_t component) noexcept
+{
+    auto ret = co_await client->create_allocation(std::chrono::seconds(60 * 5));
+    if (!ret) {
+        ICE_IN_DEBUG { std::cerr << "Create allocation for \"" << client->local_endpoint().to_string() << "\" failed\n"; }
+        co_return;
+    }
+    const ice::endpoint& relayed = *ret;
+    boost::container::small_vector<ice::candidate, 2> tmp;
+
+    if (this->_config.transport_policy == ice::transport_policy::ALL &&
+        client->reflex_address())
+    {
+        tmp.emplace_back(ice::candidate{
+            .foundation =
+                candidate_foundation(candidate_type::srflx, this->_config.transport,
+                                    client->local_endpoint().address(),
+                                    client->remote_endpoint().address()),
+            .component = component,
+            .transport_type = this->_config.transport,
+            .priority = candidate_priority(component, candidate_type::srflx),
+            .endpoint = *client->reflex_address(),
+            .type = candidate_type::srflx,
+            .related = client->local_endpoint(),
+            .transport = ice::any_transport{std::move(host_transport)}
+        });
+    }
+    ice::any_transport turn_transport{client};
+    create_stun_receiver(turn_transport);
+    tmp.emplace_back(ice::candidate{
+        .foundation =
+            candidate_foundation(candidate_type::relayed, this->_config.transport,
+                                relayed.address(),
+                                client->remote_endpoint().address()),
+        .component = component,
+        .transport_type = this->_config.transport,
+        .priority = candidate_priority(component, candidate_type::relayed),
+        .endpoint = relayed,
+        .type = candidate_type::relayed,
+        .transport = std::move(turn_transport)
+    });
+    if (this->_on_local_candidates)
+        co_await this->_on_local_candidates(tmp.data(), tmp.size());
+    for (const auto& c: tmp)
+        this->pair_local_candidate(c);
+    std::move(tmp.begin(), tmp.end(), std::back_inserter(component_candidates));
+    co_return;
+}
+
+template <class Layer>
+ice::task<void>
+agent_datagram_impl<Layer>::gather_candidates(auto... self) {
     if (this->_config.component_count == 0) {
         throw std::runtime_error("component_count must be greater than 0");
+    }
+    if (this->_config.transport_policy == ice::transport_policy::RELAY &&
+        this->_config.turn_servers.empty())
+    {
+        throw std::runtime_error{"No TURN servers"};
     }
     utils::scope_guard on_exit([this]() noexcept {
         this->_local_candidates_end = true;
@@ -440,6 +514,7 @@ ice::task<bool> agent_datagram_impl<Layer>::add_remote_candidate(
         }
         co_return false;
     }
+
     this->pair_remote_candidate(remote_candidate);
     this->_remote_candidates.push_back(std::move(remote_candidate));
     co_return true;
@@ -572,8 +647,20 @@ ice::task<bool> agent_datagram_impl<Layer>::connect(auto... self) noexcept {
         this->_state == agent_state_t::CLOSED ||
         this->_state == agent_state_t::CONNECTED ||
         this->_remote_username.empty() ||
-        this->_remote_password.empty())
+        this->_remote_password.empty() ||
+        (!this->_config.trickle_ice && (!this->_local_candidates_end || !this->_remote_candidates_end)
+    ))
     {
+        ICE_IN_DEBUG {
+            std::cout << R"(
+                this->_state == agent_state_t::CONNECTING ||
+                this->_state == agent_state_t::CLOSED ||
+                this->_state == agent_state_t::CONNECTED ||
+                this->_remote_username.empty() ||
+                this->_remote_password.empty() ||
+                (!this->_config.trickle_ice && (!this->_local_candidates_end || !this->_remote_candidates_end)
+            )";
+        }
         co_return this->_state == agent_state_t::CONNECTED;
     }
     this->sort_check_list();
@@ -696,6 +783,20 @@ agent_datagram_impl<Layer>::do_check(check_task ct) {
             req.integrities.push_back(subsequent_algo);
         }
         req.set_hmac_key(this->remote_password());
+
+        // Create permission
+        if (pair.local_candidate().type == ice::candidate_type::relayed) {
+            auto client = pair.local_candidate().transport.template get<typename agent_datagram_impl<Layer>::turn_client_type>();
+            assert(client);
+            if (!client->has_permission(pair.remote_candidate().endpoint.address())) {
+                ICE_IN_DEBUG { std::cout << "Creating permission for: " << pair.remote_candidate().endpoint.address().to_string() << '\n'; }
+                bool ok = co_await client->create_permission(pair.remote_candidate().endpoint.address());
+                if (!ok) {
+                    ICE_IN_DEBUG { std::cout << "Failed to create permission for: " << pair.remote_candidate().endpoint.address().to_string() << '\n'; }
+                    co_return;
+                }
+            }
+        }
 
         ICE_IN_DEBUG { std::cout << "Performing check on pair: " << pair.to_string(0) << '\n'; }
         stun::message resp;

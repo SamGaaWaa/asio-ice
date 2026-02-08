@@ -20,6 +20,7 @@
 #include "property.hpp"
 #include "async_function.hpp"
 #include "ignore.hpp"
+#include "turn_client.hpp"
 
 #include <exec/async_scope.hpp>
 #include <exec/finally.hpp>
@@ -82,6 +83,7 @@ struct agent_datagram_impl
     using raw_transport = datagram_transport<Layer>;
     using raw_transport_ptr = std::shared_ptr<raw_transport>;
     using config_type = agent_config;
+    using turn_client_type = ice::turn::client<raw_transport, true>;
 
     agent_datagram_impl(net::io_context &ctx, config_type config) noexcept
         : _ctx(ctx), _config(std::move(config)),
@@ -213,13 +215,18 @@ struct agent_datagram_impl
     server_reflexive_candidate(std::vector<ice::candidate> &srflx_candidates,
                                const ice::candidate &local_candidate,
                                stun::transaction_set &transactions,
-                               const ice::endpoint &stun_server,
-                               auto... self) noexcept;
+                               const ice::endpoint &stun_server) noexcept;
 
     ice::task<void> server_reflexive_candidate(
         std::vector<ice::candidate> &srflx_candidates,
         const std::vector<ice::candidate> &local_candidates,
-        const std::vector<ice::endpoint> &stun_servers, auto... self) noexcept;
+        const std::vector<ice::endpoint>& stun_servers) noexcept;
+
+    ice::task<void>
+    create_relayed_candidate(std::vector<ice::candidate> &component_candidates,
+                                std::shared_ptr<turn_client_type> client,
+                                raw_transport_ptr host_transport,
+                               uint8_t component) noexcept;
 
     void pair_local_candidate(const ice::candidate& c);
     void pair_remote_candidate(const ice::candidate& c);
@@ -294,6 +301,7 @@ struct agent_datagram_impl
     std::vector<ice::candidate> _remote_candidates{};
     bool _local_candidates_end = false;
     bool _remote_candidates_end = false;
+    // std::vector<turn_client_type> _turn_clients;
     check_list_type _check_list{};
     ice::utils::property<check_list_state_t> _check_list_state{check_list_state_t::RUNNING};
     valid_list_type _valid_list{};
@@ -384,38 +392,38 @@ inline ice::task<void> gather_task(ice::net::io_context &ctx) try {
     const char *stun_servers[] = {/*"stun.l.google.com:19302",*/
                                   "14.29.112.241:20002"};
 
-    agent_config config;
-    config.username = "user1";
-    config.password = "pass1";
-    config.ice_controlling = true;
-    config.component_count = 2; // 1 for RTP, 1 for RTCP
-    {
-        std::cout << "Resolving STUN server\n";
-        net::ip::udp::resolver resolver(ctx);
-        net::steady_timer timer(ctx, std::chrono::seconds(3));
-        exec::async_scope scope;
-        for (const auto &stun_server : stun_servers) {
-            scope.spawn(
-                resolve_server(resolver, stun_server, config.stun_servers));
-        }
-        co_await utils::stop_when(utils::on_scope_empty(scope),
-                                  timer.async_wait(asio2exec::use_sender));
-    }
-    if (config.stun_servers.empty()) {
-        std::cerr << "Failed to resolve STUN server\n";
-        co_return;
-    }
+    agent_config config1 = {
+        .username = "user1",
+        .password = "pass1",
+        .ice_controlling = true,
+        .turn_servers = {
+            {
+                {net::ip::make_address("127.0.0.1"), 13478},
+                "samgaawaa",
+                "1234"
+            }
+        },
+        .component_count = 2,
+        .transport_policy = ice::transport_policy::RELAY
+    };
 
     auto agent1 =
         std::make_shared<impl::agent_datagram_impl<net::ip::udp::socket>>(
-            ctx, config);
+            ctx, config1);
 
-    config.username = "user2";
-    config.password = "pass2";
-    config.ice_controlling = false;
+    agent_config config2 = {
+        .username = "user2",
+        .password = "pass2",
+        .ice_controlling = false,
+        .stun_servers = {
+            {net::ip::make_address("14.29.112.241"), 20002},
+        },
+        .component_count = 2,
+        .transport_policy = ice::transport_policy::ALL
+    };
     auto agent2 =
         std::make_shared<impl::agent_datagram_impl<net::ip::udp::socket>>(
-            ctx, config);
+            ctx, config2);
 
     utils::scope_guard on_exit([&]() noexcept {
         agent1->close();

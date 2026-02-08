@@ -89,6 +89,13 @@ struct datagram_client
     const std::string &username() const noexcept { return _username; }
     const std::string &password() const noexcept { return _password; }
 
+    const auto& permissions() const noexcept { return _permissions; }
+    const auto& channel_to_peer() const noexcept { return _channel_to_peer; }
+    const auto& peer_to_channel() const noexcept { return _peer_to_channel; }
+
+    const std::optional<ice::endpoint>& relayed_address() const noexcept { return _relayed_address; }
+    const std::optional<ice::endpoint>& reflex_address() const noexcept { return _reflex_address; }
+
     ice::task<bool> request(const stun::message &msg, ice::endpoint &from,
                             stun::message &resp, std::size_t retries,
                             auto... self) noexcept;

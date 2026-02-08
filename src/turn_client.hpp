@@ -53,16 +53,19 @@ template <class NextLayer> class client<NextLayer, true> {
     const auto &impl() const noexcept { return *_impl; }
     auto &impl() noexcept { return *_impl; }
 
-    const auto &local_endpoint() const noexcept {
+    ice::endpoint local_endpoint() const noexcept {
         return _impl->local_endpoint();
     }
 
-    const auto &remote_endpoint() const noexcept {
+    ice::endpoint remote_endpoint() const noexcept {
         return _impl->remote_endpoint();
     }
 
     const std::string &username() const noexcept { return _impl->username(); }
     const std::string &password() const noexcept { return _impl->password(); }
+
+    const std::optional<ice::endpoint>& relayed_address() const noexcept { return _impl->relayed_address(); }
+    const std::optional<ice::endpoint>& reflex_address() const noexcept { return _impl->reflex_address(); }
 
     ice::task<bool> request(const stun::message &msg, ice::endpoint &from,
                             stun::message &resp, std::size_t retries,
@@ -93,6 +96,10 @@ template <class NextLayer> class client<NextLayer, true> {
 
     ice::task<bool> refresh(auto time_to_expiry, auto... self) {
         return _impl->refresh(time_to_expiry, std::move(self)...);
+    }
+
+    bool has_permission(const net::ip::address ip) const noexcept {
+        return _impl->permissions().find(ip) != _impl->permissions().end();
     }
 
     ice::task<bool> create_permission(net::ip::address peer, auto... self) {
