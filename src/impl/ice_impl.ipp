@@ -277,7 +277,10 @@ agent_datagram_impl<Layer>::create_relayed_candidate(std::vector<ice::candidate>
 
 template <class Layer>
 ice::task<void>
-agent_datagram_impl<Layer>::gather_candidates(auto... self) {
+agent_datagram_impl<Layer>::do_gather_candidates(auto... self) {
+    if (this->_state == agent_state_t::CLOSED ||
+        this->_state == agent_state_t::CONNECTED)
+        co_return;
     if (this->_config.component_count == 0) {
         throw std::runtime_error("component_count must be greater than 0");
     }
@@ -456,6 +459,7 @@ void agent_datagram_impl<Layer>::sort_check_list() noexcept {
 
 template <class Layer> void agent_datagram_impl<Layer>::close() noexcept {
     this->_state = agent_state_t::CLOSED;
+    this->_scope.request_stop();
     this->_triggered_check_queue.clear();
     this->_valid_list.clear();
     this->_check_list.clear();
@@ -514,7 +518,7 @@ ice::task<bool> agent_datagram_impl<Layer>::add_remote_candidate(
         }
         co_return false;
     }
-
+    this->create_turn_permission(remote_candidate.endpoint.address());
     this->pair_remote_candidate(remote_candidate);
     this->_remote_candidates.push_back(std::move(remote_candidate));
     co_return true;
@@ -671,6 +675,7 @@ ice::task<bool> agent_datagram_impl<Layer>::connect(auto... self) noexcept {
     utils::scope_guard on_exit([this]() noexcept {
         for (auto& c: this->_local_candidates)
             c.transport.clear_early_data();
+        this->_scope.request_stop();
     });
     net::steady_timer ta{this->context()};
     exec::async_scope scope;
@@ -1563,6 +1568,33 @@ agent_datagram_impl<Layer>::free_candidates() {
             return pair->local_candidate().transport == transport;
         });
     };
+
+    boost::container::flat_multimap<typename agent_datagram_impl<Layer>::turn_client_type*, net::ip::address> in_use_permissions;
+    for (auto pair: nominated_pairs) {
+        if (pair->local_candidate().type != ice::candidate_type::relayed)
+            continue;
+        auto client = pair->local_candidate().transport.template get<typename agent_datagram_impl<Layer>::turn_client_type>();
+        assert(client);
+        in_use_permissions.emplace(client, pair->remote_candidate().endpoint.address());
+    }
+    for (auto pair: nominated_pairs) {
+        if (pair->local_candidate().type != ice::candidate_type::relayed)
+            continue;
+        auto client = pair->local_candidate().transport.template get<typename agent_datagram_impl<Layer>::turn_client_type>();
+        assert(client);
+        auto rng = in_use_permissions.equal_range(client);
+        auto permissions_in_use = [&](const net::ip::address& ip) noexcept {
+            return std::ranges::any_of(std::ranges::subrange{rng.first, rng.second}, [&](const auto& kv) {
+                return kv.second == ip;
+            });
+        };
+        for (const auto& remote_c: this->_remote_candidates) {
+            auto remote_ip = remote_c.endpoint.address();
+            if (!permissions_in_use(remote_ip))
+                client->delete_permission(remote_ip);
+        }
+    } 
+
     // Stop handling requests and responses
     std::erase_if(this->_stun_receivers, [&](const auto& receiver) noexcept {
         return !transport_in_use(receiver.transport());
@@ -1584,6 +1616,24 @@ agent_datagram_impl<Layer>::free_candidates() {
     this->_valid_list.shrink_to_fit();
     this->_triggered_check_queue.shrink_to_fit();
     ICE_IN_DEBUG{ std::cout << "Candidates freed\n"; }
+}
+
+template <class Layer>
+void
+agent_datagram_impl<Layer>::create_turn_permission(const net::ip::address& ip)
+{
+    if (this->_state == agent_state_t::CLOSED)
+        return;
+    for (const auto& local_c: this->_local_candidates) {
+        if (local_c.type != ice::candidate_type::relayed)
+            continue;
+        auto client = local_c.transport.template get<typename agent_datagram_impl<Layer>::turn_client_type>();
+        assert(client);
+        if (!client->has_permission(ip)) {
+            ICE_IN_DEBUG { std::cout << "Creating permission for: " << ip.to_string() << '\n'; }
+            this->_scope.spawn(client->create_permission(ip, this->shared_from_this()) | utils::ignore());
+        }
+    }
 }
 
 } // namespace ice::impl

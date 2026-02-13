@@ -1,7 +1,10 @@
 #pragma once
 
+#include <exec/repeat_effect_until.hpp>
+
 #include <boost/intrusive/list.hpp>
 #include <boost/intrusive/set.hpp>
+#include <boost/container/flat_set.hpp>
 
 #include "config.hpp"
 #include "async_queue.hpp"
@@ -13,6 +16,7 @@
 #include "task.hpp"
 #include "stun_transaction.hpp"
 #include "inplace_receiver.hpp"
+#include "small_set.hpp"
 
 #if ASIOICE_USE_BOOST_ASIO > 0
 #define ASIO_TO_EXEC_USE_BOOST 1
@@ -350,6 +354,8 @@ struct datagram_client
     receiver_list_t _receivers;
     ice::shared_promise<void> _stop_refresh_allocation_task{};
     permission_set_type _permissions{};
+    boost::container::flat_set<net::ip::address> _creating_permissions{};
+    ice::shared_promise<void> _new_permissions_created{};
     channel_to_peer_type _channel_to_peer{};
     peer_to_channel_type _peer_to_channel{};
     channel_to_peer_type _expired_channel{};

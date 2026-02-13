@@ -364,6 +364,7 @@ void datagram_client<NextLayer>::do_delete_allocation() {
         perm.unlink();
         perm.stop();
     }
+    this->_new_permissions_created.set_stopped();
     assert(this->_channel_to_peer.empty());
     assert(this->_peer_to_channel.empty());
     while (!this->_expired_channel.empty()) {
@@ -444,7 +445,15 @@ datagram_client<NextLayer>::permission_state::refresh_task(auto self) {
         auto ec = co_await timer.async_wait(asio2exec::use_sender);
         if (ec)
             break;
-        if (co_await this->client().create_permission(this->ip())) {
+
+        stun::message req, resp;
+        req.cls = stun::class_t::STUN_CLASS_REQUEST;
+        req.method = stun::method_t::STUN_METHOD_CREATE_PERMISSION;
+        req.use_fingerprint(true);
+        req.fill_random_transaction_id();
+        req.xor_peer_address.emplace_back(this->ip(), 0);
+
+        if (co_await this->client().request_with_retry(req, resp, 7)) {
             ICE_IN_DEBUG {
                 std::cout
                     << "permission_state::refresh_task: refreshed permission \""
@@ -474,8 +483,8 @@ void datagram_client<NextLayer>::permission_state::start() {
 
 template <class NextLayer>
 ice::task<bool>
-datagram_client<NextLayer>::create_permission(std::ranges::view auto peers,
-                                              auto... self) {
+datagram_client<NextLayer>::create_permission(std::ranges::view auto peers, auto... self)
+{
     if (!this->is_running() || peers.empty() || !this->_relayed_address)
         co_return false;
     if (this->_relayed_address->address().is_v4() &&
@@ -491,8 +500,39 @@ datagram_client<NextLayer>::create_permission(std::ranges::view auto peers,
     req.cls = stun::class_t::STUN_CLASS_REQUEST;
     req.method = stun::method_t::STUN_METHOD_CREATE_PERMISSION;
     req.use_fingerprint(true);
-    for (const auto &peer : peers)
-        req.xor_peer_address.emplace_back(peer, 0);
+
+    ice::small_set<net::ip::address> creating;
+    for (const auto &peer : peers) {
+        if (this->_permissions.find(peer) != this->_permissions.end())
+            continue;
+        auto it = this->_creating_permissions.find(peer);
+        if (it == this->_creating_permissions.end())
+            req.xor_peer_address.emplace_back(peer, 0);
+        else
+            creating.insert(peer);
+    }
+
+    auto wait_finish = stdexec::just() |
+                        stdexec::let_value([&] {
+                            return this->_new_permissions_created.get_future() |
+                                    stdexec::continues_on(asio2exec::scheduler{this->context()});
+                        }) |
+                        stdexec::then([&] {
+                            return std::ranges::all_of(creating, [&](const auto& ip) {
+                                return this->_creating_permissions.find(ip) == this->_creating_permissions.end();
+                            });
+                        }) |
+                        exec::repeat_effect_until() |
+                        stdexec::then([&] {
+                            return std::ranges::all_of(creating, [&](const auto& ip) {
+                                return this->_permissions.find(ip) != this->_permissions.end();
+                            });
+                        });
+    if (req.xor_peer_address.empty()) {
+        if (creating.empty())
+            co_return true;
+        co_return co_await std::move(wait_finish);
+    }
     std::ranges::sort(req.xor_peer_address,
                       [](const auto &a, const auto &b) noexcept {
                           return a.address() < b.address();
@@ -504,26 +544,43 @@ datagram_client<NextLayer>::create_permission(std::ranges::view auto peers,
             });
         req.xor_peer_address.erase(first, last);
     }
+    utils::scope_guard clear_creating([&]()noexcept {
+        for (const auto& addr: req.xor_peer_address)
+            this->_creating_permissions.erase(addr.address());
+        this->_new_permissions_created.set_value();
+    });
+    for (const auto& addr: req.xor_peer_address)
+        this->_creating_permissions.insert(addr.address());
     req.fill_random_transaction_id();
 
     stun::message resp;
-    bool success = co_await this->request_with_retry(req, resp, 7);
+    bool success = false;
+    if (creating.empty())
+        success = co_await this->request_with_retry(req, resp, 7);
+    else {
+        std::tuple<std::tuple<bool>, std::tuple<bool>>
+        result = co_await stdexec::when_all(
+            std::move(wait_finish),
+            this->request_with_retry(req, resp, 7)
+        );
+        success = std::get<0>(std::get<0>(result)) && std::get<0>(std::get<1>(result));
+    }
     if (!success) {
         ICE_IN_DEBUG { std::cout << "Create or refresh permissions failed\n"; }
         co_return false;
     }
     ICE_IN_DEBUG { std::cout << "Create or refresh permissions success\n"; }
+    if (!this->_is_running)
+        co_return true;
     for (const auto &peer : req.xor_peer_address) {
-        auto it = this->_permissions.lower_bound(peer.address());
-        if (it != this->_permissions.end() && it->ip() == peer.address()) {
-            // TODO: update lifetime
-            continue;
+        ICE_IN_DEBUG {
+            assert(this->_permissions.find(peer.address()) == this->_permissions.end());
         }
         auto state =
             std::make_shared<datagram_client<NextLayer>::permission_state>(
                 this->shared_from_this(), peer.address());
         state->start();
-        this->_permissions.insert_before(it, *state);
+        this->_permissions.insert(*state);
     }
     co_return true;
 }
@@ -535,7 +592,7 @@ void datagram_client<NextLayer>::delete_permission(
         return;
     ICE_IN_DEBUG { std::cout << "Delete permission of \"" << peer << "\"\n"; }
     auto it = this->_permissions.find(peer);
-    if (it == this->_ip_to_channel.end())
+    if (it == this->_permissions.end())
         return;
     it->unlink();
     it->stop();
@@ -655,6 +712,8 @@ datagram_client<NextLayer>::channel_bind(net::ip::udp::endpoint peer,
         std::cout << "Bind or refresh channel success: {" << peer.address()
                   << ":" << peer.port() << ", " << channel << "}\n";
     }
+    if (!this->is_running())
+        co_return true;
     auto ch = this->_channel_to_peer.find(channel);
     if (ch == this->_channel_to_peer.end()) {
         auto c = std::make_shared<datagram_client<NextLayer>::channel_state>(

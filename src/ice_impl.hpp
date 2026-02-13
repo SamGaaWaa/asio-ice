@@ -59,6 +59,7 @@ namespace net = asio;
 #include <ranges>
 
 #include <boost/intrusive/set.hpp>
+#include <boost/container/flat_map.hpp>
 
 namespace ice::impl {
 
@@ -132,7 +133,9 @@ struct agent_datagram_impl
     bool all_components_nominated() const noexcept;
     bool all_components_have_valid_pair() const noexcept;
 
-    ice::task<void> gather_candidates(auto... self);
+    auto gather_candidates(auto... self) {
+        return this->_scope.spawn_future(this->do_gather_candidates(this->shared_from_this(), std::move(self)...));
+    }
 
     ice::task<bool> add_remote_candidate(ice::candidate c, auto... self);
     auto add_remote_candidate() noexcept {
@@ -207,6 +210,8 @@ struct agent_datagram_impl
         succeed, failed, canceled
     };
 
+    ice::task<void> do_gather_candidates(auto... self);
+
     ice::task<void> get_component_candidates(
         std::vector<ice::candidate> &component_candidates, uint8_t component,
         const std::vector<net::ip::address> &addresses, auto... self);
@@ -280,6 +285,7 @@ struct agent_datagram_impl
     void request_handler(ice::any_transport& transport, const ice::endpoint &source, ice::io_buffer_ptr buf);
 
     void create_stun_receiver(const ice::any_transport& transport) noexcept;
+    void create_turn_permission(const net::ip::address& ip);
 
     bool set_nominated(ice::candidate_pair& pair) noexcept;
     void default_nominate();
@@ -289,6 +295,7 @@ struct agent_datagram_impl
     using valid_list_type = std::vector<valid_pair>;
 
     net::io_context &_ctx;
+    exec::async_scope _scope; // use for some detached work
     stun::transaction_set _transactions{}; // use for connectivity checks
     transaction_state_set _transaction_states{};
     config_type _config;
