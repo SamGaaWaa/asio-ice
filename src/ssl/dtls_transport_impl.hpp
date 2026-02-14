@@ -26,6 +26,7 @@ namespace net = asio;
 #include "async_mutex.hpp"
 #include "impl/buffer_wrapper.hpp"
 #include "ssl/datagram_bio.hpp"
+#include "detached_with_data.hpp"
 
 #include <memory>
 #include <deque>
@@ -146,7 +147,7 @@ private:
     perform(Op op, auto ...self);
 
     void handle_timeout();
-    ice::task<void> timeout_handler(auto self);
+    ice::task<void> timeout_handler();
 
     using receiver_list_t =
         boost::intrusive::list<datagram_receiver,

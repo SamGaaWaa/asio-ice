@@ -458,8 +458,10 @@ void agent_datagram_impl<Layer>::sort_check_list() noexcept {
 }
 
 template <class Layer> void agent_datagram_impl<Layer>::close() noexcept {
+    if (this->_state == agent_state_t::CLOSED)
+        return;
     this->_state = agent_state_t::CLOSED;
-    this->_scope.request_stop();
+    this->_promise.set_stopped();
     this->_triggered_check_queue.clear();
     this->_valid_list.clear();
     this->_check_list.clear();
@@ -675,7 +677,7 @@ ice::task<bool> agent_datagram_impl<Layer>::connect(auto... self) noexcept {
     utils::scope_guard on_exit([this]() noexcept {
         for (auto& c: this->_local_candidates)
             c.transport.clear_early_data();
-        this->_scope.request_stop();
+        this->_promise.set_stopped();
     });
     net::steady_timer ta{this->context()};
     exec::async_scope scope;
@@ -733,6 +735,18 @@ ice::task<bool> agent_datagram_impl<Layer>::connect(auto... self) noexcept {
     ICE_IN_DEBUG { std::cout << "Waiting for all checks to finish\n"; }
     co_await utils::on_scope_empty(scope);
     ICE_IN_DEBUG { std::cout << "connect: " << (this->_state == agent_state_t::CONNECTED ? "success\n" : "failed\n"); }
+    if (this->_state == agent_state_t::CONNECTED) {
+        utils::detached_with_data(
+            utils::stop_when(
+                stdexec::starts_on(
+                    asio2exec::scheduler{this->context()},
+                    this->free_candidates()
+                ),
+                this->_state.on_change()
+            ),
+            this->shared_from_this()
+        );
+    }
     co_return this->_state == agent_state_t::CONNECTED;
 }
 
@@ -1093,15 +1107,15 @@ agent_datagram_impl<Layer>::request_handler(
         ICE_IN_DEBUG{ std::cout << "outgoing_request_handler_count > 256, ignore\n"; }
         return;
     }
-    stdexec::start_detached(
+    utils::detached_with_data(
         utils::stop_when(
             this->do_handle_request(
-                this->shared_from_this(),
                 transport,
                 source,
                 std::move(buf)),
             this->_request_handler_promise.get_future()
-        )
+        ),
+        this->shared_from_this()
     );
 }
 
@@ -1126,7 +1140,6 @@ agent_datagram_impl<Layer>::verify_username(std::string_view name) const noexcep
 template <class Layer>
 ice::task<void>
 agent_datagram_impl<Layer>::do_handle_request(
-    auto self,
     ice::any_transport transport,
     ice::endpoint source,
     ice::io_buffer_ptr buf)
@@ -1545,7 +1558,6 @@ ice::task<void>
 agent_datagram_impl<Layer>::free_candidates() {
     if (this->_state != agent_state_t::CONNECTED)
         co_return;
-    co_await stdexec::continues_on(asio2exec::scheduler{this->context()});
     const auto now = std::chrono::steady_clock::now();
     const auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(now - this->_state.update_time());
     // Once a checklist has reached the Completed state, the agent SHOULD
@@ -1631,7 +1643,12 @@ agent_datagram_impl<Layer>::create_turn_permission(const net::ip::address& ip)
         assert(client);
         if (!client->has_permission(ip)) {
             ICE_IN_DEBUG { std::cout << "Creating permission for: " << ip.to_string() << '\n'; }
-            this->_scope.spawn(client->create_permission(ip, this->shared_from_this()) | utils::ignore());
+            utils::detached_with_data(
+                utils::stop_when(
+                    client->create_permission(ip),
+                    this->_promise.get_future()
+                ),
+                this->shared_from_this());
         }
     }
 }

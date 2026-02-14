@@ -16,6 +16,7 @@
 #include "config.hpp"
 #include "dtls_transport.hpp"
 #include "socket_transport.hpp"
+#include "detached_with_data.hpp"
 
 #if ASIOICE_USE_BOOST_ASIO > 0
 #include <boost/asio/steady_timer.hpp>

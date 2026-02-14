@@ -21,6 +21,7 @@
 #include "async_function.hpp"
 #include "ignore.hpp"
 #include "turn_client.hpp"
+#include "detached_with_data.hpp"
 
 #include <exec/async_scope.hpp>
 #include <exec/finally.hpp>
@@ -134,7 +135,10 @@ struct agent_datagram_impl
     bool all_components_have_valid_pair() const noexcept;
 
     auto gather_candidates(auto... self) {
-        return this->_scope.spawn_future(this->do_gather_candidates(this->shared_from_this(), std::move(self)...));
+        return utils::stop_when(
+            this->do_gather_candidates(this->shared_from_this(), std::move(self)...),
+            this->_promise.get_future()
+        );
     }
 
     ice::task<bool> add_remote_candidate(ice::candidate c, auto... self);
@@ -146,8 +150,6 @@ struct agent_datagram_impl
     ice::task<bool> connect(auto... self) noexcept;
 
     boost::container::small_vector<ice::candidate_pair*, 2> nominated_pairs() const;
-
-    ice::task<void> free_candidates();
 
     template <class Func>
     void on_local_candidates(Func&& cb) {
@@ -272,7 +274,6 @@ struct agent_datagram_impl
     bool verify_username(std::string_view name) const noexcept;
 
     ice::task<void> do_handle_request(
-        auto self,
         ice::any_transport transport,
         ice::endpoint source,
         ice::io_buffer_ptr buf);
@@ -290,12 +291,14 @@ struct agent_datagram_impl
     bool set_nominated(ice::candidate_pair& pair) noexcept;
     void default_nominate();
 
+    ice::task<void> free_candidates();
+
     using check_list_type = std::vector<std::shared_ptr<ice::candidate_pair>>;
 
     using valid_list_type = std::vector<valid_pair>;
 
     net::io_context &_ctx;
-    exec::async_scope _scope; // use for some detached work
+    ice::shared_promise<void> _promise{}; // use for some detached work
     stun::transaction_set _transactions{}; // use for connectivity checks
     transaction_state_set _transaction_states{};
     config_type _config;
@@ -533,9 +536,6 @@ inline ice::task<void> gather_task(ice::net::io_context &ctx) try {
         std::cout << "Agent1 connect " << (agent1_connected ? "success, " : "failed, ")
                 << "agent2 connect " << (agent2_connected ? "success\n" : "failed\n");
     }
-
-    co_await agent1->free_candidates();
-    co_await agent2->free_candidates();
 } catch (const std::exception &e) {
     std::cerr << "Unhandled exception: " << e.what() << '\n';
     co_return;

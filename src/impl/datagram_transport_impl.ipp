@@ -4,15 +4,15 @@ template <class Socket> void datagram_transport_impl<Socket>::start() {
     if (this->_running)
         return;
     asio2exec::scheduler sched{this->context()};
-    stdexec::start_detached(stdexec::starts_on(
-        sched, utils::stop_when(this->recv_loop(this->shared_from_this()),
+    utils::detached_with_data(stdexec::starts_on(
+        sched, utils::stop_when(this->recv_loop(),
                                 this->_stop.get_future() |
-                                    stdexec::continues_on(sched))));
+                                    stdexec::continues_on(sched))), this->shared_from_this());
     this->_running = true;
 }
 
 template <class Socket>
-ice::task<void> datagram_transport_impl<Socket>::recv_loop(auto self) {
+ice::task<void> datagram_transport_impl<Socket>::recv_loop() {
     utils::scope_guard on_exit([this]() noexcept { this->_running = false; });
     while (true) {
         io_buffer_ptr buf(&this->_pool, 64, this->max_buffer_size());

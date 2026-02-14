@@ -21,6 +21,7 @@ namespace net = asio;
 #include "stop_when.hpp"
 #include "task.hpp"
 #include "early_data_cache.hpp"
+#include "detached_with_data.hpp"
 
 #include <memory>
 
@@ -80,7 +81,7 @@ struct datagram_transport_impl
 
     void clear_early_data() noexcept;
   private:
-    ice::task<void> recv_loop(auto self);
+    ice::task<void> recv_loop();
 
     net::io_context &_ctx;
     Socket _sock;

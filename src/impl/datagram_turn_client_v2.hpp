@@ -17,6 +17,7 @@
 #include "stun_transaction.hpp"
 #include "inplace_receiver.hpp"
 #include "small_set.hpp"
+#include "detached_with_data.hpp"
 
 #if ASIOICE_USE_BOOST_ASIO > 0
 #define ASIO_TO_EXEC_USE_BOOST 1
@@ -163,7 +164,7 @@ struct datagram_client
     ice::task<bool> request_with_retry(stun::message &req, stun::message &resp,
                                        std::size_t retries);
 
-    ice::task<void> refresh_allocation_task(auto self);
+    ice::task<void> refresh_allocation_task();
     void start_refresh_allocation_task();
 
     struct permission_state;
@@ -254,7 +255,7 @@ struct datagram_client
       private:
         enum struct state_t : char { normal, expired, stopped };
 
-        ice::task<void> refresh_task(auto self);
+        ice::task<void> refresh_task();
 
         std::shared_ptr<datagram_client<NextLayer>> _client;
         std::shared_ptr<permission_state> _permission{nullptr};
@@ -320,7 +321,7 @@ struct datagram_client
         };
 
       private:
-        ice::task<void> refresh_task(auto self);
+        ice::task<void> refresh_task();
 
         std::shared_ptr<datagram_client<NextLayer>> _client;
         net::ip::address _ip;

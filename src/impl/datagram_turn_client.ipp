@@ -164,7 +164,7 @@ template <class NextLayer>
 void datagram_client<NextLayer>::start_refresh_allocation_task() {
     this->_stop_refresh_allocation_task.set_value(); // Cancel previous task
     asio2exec::scheduler sched{this->context()};
-    stdexec::start_detached(stdexec::starts_on(
+    utils::detached_with_data(stdexec::starts_on(
         sched, utils::stop_when(
                    this->refresh_allocation_task(this->shared_from_this()),
                    this->_stop_refresh_allocation_task.get_future() |
@@ -270,7 +270,7 @@ ice::task<void> datagram_client<NextLayer>::delete_allocation(auto... self) {
 template <class NextLayer>
 void datagram_client<NextLayer>::permission_state::start() {
     asio2exec::scheduler sched{this->_client->context()};
-    stdexec::start_detached(stdexec::starts_on(
+    utils::detached_with_data(stdexec::starts_on(
         sched, utils::stop_when(
                    this->refresh_permission_task(this->shared_from_this()),
                    this->_stop.get_future() | stdexec::continues_on(sched))));
@@ -541,7 +541,7 @@ void datagram_client<NextLayer>::start_expire_channel_number_task() {
     if (this->_expired_number.size() != 1 || !this->_is_running)
         return;
     asio2exec::scheduler sched{this->context()};
-    stdexec::start_detached(stdexec::starts_on(
+    utils::detached_with_data(stdexec::starts_on(
         sched, utils::stop_when(
                    this->expire_channel_number_task(this->shared_from_this()),
                    this->_stop_expire_number_task.get_future())));

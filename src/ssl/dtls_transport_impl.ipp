@@ -231,14 +231,14 @@ void dtls_impl<NextLayer>::handle_timeout() {
         return;
     (void)tv;
     asio2exec::scheduler sched{this->context()};
-    stdexec::start_detached(utils::stop_when(
-                                this->timeout_handler(this->shared_from_this()),
-                                this->_timeout_handler_promise.get_future()));
+    utils::detached_with_data(utils::stop_when(
+                                this->timeout_handler(),
+                                this->_timeout_handler_promise.get_future()), this->shared_from_this());
 }
 
 template <class NextLayer>
 ice::task<void>
-dtls_impl<NextLayer>::timeout_handler(auto self)
+dtls_impl<NextLayer>::timeout_handler()
 {
     if (this->_handing_timeout || this->_closed)
         co_return;

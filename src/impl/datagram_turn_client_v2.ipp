@@ -242,7 +242,7 @@ ice::task<bool> datagram_client<NextLayer>::request_with_retry(
 }
 
 template <class NextLayer>
-ice::task<void> datagram_client<NextLayer>::refresh_allocation_task(auto self) {
+ice::task<void> datagram_client<NextLayer>::refresh_allocation_task() {
     if (!this->is_running())
         co_return;
     utils::scope_guard on_exit(
@@ -271,11 +271,11 @@ void datagram_client<NextLayer>::start_refresh_allocation_task() {
     if (!this->is_running())
         return;
     asio2exec::scheduler sched{this->context()};
-    stdexec::start_detached(stdexec::starts_on(
+    utils::detached_with_data(stdexec::starts_on(
         sched, utils::stop_when(
-                   this->refresh_allocation_task(this->shared_from_this()),
+                   this->refresh_allocation_task(),
                    this->_stop_refresh_allocation_task.get_future() |
-                       stdexec::continues_on(sched))));
+                       stdexec::continues_on(sched))), this->shared_from_this());
 }
 
 template <class NextLayer>
@@ -428,7 +428,7 @@ uint16_t datagram_client<NextLayer>::generate_channel_number() const {
 
 template <class NextLayer>
 ice::task<void>
-datagram_client<NextLayer>::permission_state::refresh_task(auto self) {
+datagram_client<NextLayer>::permission_state::refresh_task() {
     utils::scope_guard on_exit([this]() noexcept {
         ICE_IN_DEBUG { std::cout << "permission_state::refresh_task exit\n"; }
         if (this->is_linked())
@@ -475,10 +475,10 @@ void datagram_client<NextLayer>::permission_state::start() {
     if (!this->_client->is_running())
         return;
     asio2exec::scheduler sched{this->client().context()};
-    stdexec::start_detached(stdexec::starts_on(
-        sched, utils::stop_when(this->refresh_task(this->shared_from_this()),
+    utils::detached_with_data(stdexec::starts_on(
+        sched, utils::stop_when(this->refresh_task(),
                                 this->_stop.get_future() |
-                                    stdexec::continues_on(sched))));
+                                    stdexec::continues_on(sched))), this->shared_from_this());
 }
 
 template <class NextLayer>
@@ -752,15 +752,15 @@ void datagram_client<NextLayer>::channel_state::start() {
     if (!this->_client->is_running())
         return;
     asio2exec::scheduler sched{this->client().context()};
-    stdexec::start_detached(stdexec::starts_on(
-        sched, utils::stop_when(this->refresh_task(this->shared_from_this()),
+    utils::detached_with_data(stdexec::starts_on(
+        sched, utils::stop_when(this->refresh_task(),
                                 this->_stop.get_future() |
-                                    stdexec::continues_on(sched))));
+                                    stdexec::continues_on(sched))), this->shared_from_this());
 }
 
 template <class NextLayer>
 ice::task<void>
-datagram_client<NextLayer>::channel_state::refresh_task(auto self) {
+datagram_client<NextLayer>::channel_state::refresh_task() {
     utils::scope_guard on_error([this]() noexcept {
         ICE_IN_DEBUG {
             std::cout << "refresh_task stopped, channel: " << this->channel()
