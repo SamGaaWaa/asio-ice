@@ -16,7 +16,7 @@
 #include "small_set.hpp"
 #include "stun_transaction.hpp"
 #include "string_utils.hpp"
-#include "hash2.hpp"
+#include "hash.hpp"
 #include "property.hpp"
 #include "async_function.hpp"
 #include "ignore.hpp"
@@ -414,7 +414,7 @@ inline ice::task<void> gather_task(ice::net::io_context &ctx) try {
             }
         },
         .component_count = 2,
-        .transport_policy = ice::transport_policy::RELAY
+        .transport_policy = ice::transport_policy::ALL
     };
 
     auto agent1 =

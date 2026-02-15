@@ -20,7 +20,7 @@ namespace net = asio;
 #include "asio2exec.hpp"
 #include "receiver.hpp"
 #include "scope_guard.hpp"
-#include "shared_promise_v2.hpp"
+#include "shared_promise.hpp"
 #include "stop_when.hpp"
 #include "task.hpp"
 #include "async_mutex.hpp"

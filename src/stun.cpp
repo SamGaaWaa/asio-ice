@@ -1,7 +1,7 @@
 #include "stun.hpp"
 #include "base64.hpp"
 #include "binary.hpp"
-#include "hash2.hpp"
+#include "hash.hpp"
 #include "scope_guard.hpp"
 
 #include "json.hpp"
@@ -438,9 +438,12 @@ static int parse_address(const void *data, std::size_t buf_size,
     uint8_t pad = 0;
     uint8_t protocol = 0;
     uint16_t port = 0;
-    std::error_code ec;
-    if (binary::unpack<"!BBH">(data, buf_size, ec, pad, protocol, port);
-        ec || pad != 0)
+    if (buf_size < 4)
+        return -1;
+    pad = binary::read_big<uint8_t>(data);
+    protocol = binary::read_big<uint8_t>((const char*)data + 1);
+    port = binary::read_big<uint16_t>((const char*)data + 2);
+    if (pad != 0)
         return -1;
     const uint8_t *iter = reinterpret_cast<const uint8_t *>(data) + 4;
     const uint8_t *const end =

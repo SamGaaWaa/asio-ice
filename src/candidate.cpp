@@ -1,5 +1,5 @@
 #include "candidate.hpp"
-#include "hash2.hpp"
+#include "hash.hpp"
 #include "json.hpp"
 #include "string_utils.hpp"
 

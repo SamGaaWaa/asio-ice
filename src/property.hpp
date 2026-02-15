@@ -1,7 +1,7 @@
 #pragma once
 
 #include "config.hpp"
-#include "shared_promise_v2.hpp"
+#include "shared_promise.hpp"
 
 #include <chrono>
 

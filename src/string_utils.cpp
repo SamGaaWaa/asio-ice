@@ -1,5 +1,5 @@
 #include "string_utils.hpp"
-#include "hash2.hpp"
+#include "hash.hpp"
 
 namespace ice::utils {
 

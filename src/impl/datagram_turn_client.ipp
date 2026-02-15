@@ -1,9 +1,110 @@
 namespace ice::turn::impl {
 
 template <class NextLayer>
+ice::task<bool> datagram_client<NextLayer>::request(const stun::message &req,
+                                                    ice::endpoint &from,
+                                                    stun::message &resp,
+                                                    std::size_t retries,
+                                                    auto... self) noexcept {
+    auto it = this->_transactions.lower_bound(req.transaction_id);
+    if (it != this->_transactions.end() &&
+        it->request.transaction_id == req.transaction_id) {
+        ICE_IN_DEBUG { std::cout << "Transaction already in progress\n"; }
+        co_return false;
+    }
+    stun::transaction trans(this->context(), req, this->_server, resp);
+    this->_transactions.insert(it, trans);
+
+    bool ret = false;
+    utils::inplace_receiver<void> retry_receiver;
+    asio2exec::scheduler sched{this->context()};
+    auto retry_op = retry_receiver.start(
+        stdexec::starts_on(sched, trans.run(this->_next_layer)));
+    stdexec::start(retry_op);
+
+    while (true) {
+        ret = false;
+        auto new_state =
+            co_await (trans.on_state_change() | stdexec::continues_on(sched) |
+                      stdexec::stopped_as_optional());
+        if (!new_state.has_value()) {
+            goto END;
+        }
+        if (trans.state() == stun::transaction::state_t::ERROR) {
+            goto END;
+        }
+        assert(trans.state() == stun::transaction::state_t::DONE);
+        assert(resp.transaction_id == req.transaction_id);
+        assert(resp.is_response());
+        if (resp.cls == stun::class_t::STUN_CLASS_RESP_ERROR) {
+            // If the error response contains unknown comprehension-required
+            // attributes, or if the error response does not contain an
+            // ERROR-CODE attribute, then the transaction is simply considered
+            // to have failed.
+            if (!resp.error_code.has_value()) {
+                goto END;
+            }
+            if (resp.error_code->code == 401 || resp.error_code->code == 438) {
+                ret = true;
+                goto END;
+            }
+            // If the response is an error response with an error code of 400
+            // (Bad Request) and does not contain either the MESSAGE-INTEGRITY
+            // or MESSAGE-INTEGRITY-SHA256 attribute, then the response MUST be
+            // discarded, as if it were never received.  This means that
+            // retransmits, if applicable, will continue.
+            if (resp.error_code->code == 400 && resp.integrities.empty()) {
+                continue;
+            }
+        }
+        // For all other responses, if the NONCE attribute starts with the
+        // "nonce cookie" with the STUN Security Feature "Password algorithms"
+        // bit set to 1 but PASSWORD-ALGORITHMS is not present, the response
+        // MUST be ignored.
+        if (resp.nonce.starts_with(stun::STUN_NONCE_COOKIE) &&
+            (resp.security_features() & 0x01) && resp.pwd_algorithms.empty()) {
+            continue;
+        }
+        // The client looks for the MESSAGE-INTEGRITY or MESSAGE-INTEGRITY-
+        // SHA256 attribute in the response (either success or failure).  If
+        // present, the client computes the message integrity over the response
+        // as defined in Sections 14.5 or 14.6, using the same password it
+        // utilized for the request.  If the resulting value matches the
+        // contents of the MESSAGE-INTEGRITY or MESSAGE-INTEGRITY-SHA256
+        // attribute, the response is considered authenticated.  If the value
+        // does not match, or if both MESSAGE-INTEGRITY and MESSAGE-INTEGRITY-
+        // SHA256 are absent, the processing depends on the request being sent
+        // over a reliable or an unreliable transport.
+        if (resp.integrities.empty() ||
+            std::any_of(resp.integrities.begin(), resp.integrities.end(),
+                        [&req, &resp](const auto i) {
+                            return !i.verify(req.hmac_key(), resp);
+                        })) {
+            // If the request was sent over an unreliable transport, the
+            // response MUST be discarded, as if it had never been received.
+            // This means that retransmits, if applicable, will continue.  If
+            // all the responses received are discarded, then instead of
+            // signaling a timeout after ending the transaction, the layer MUST
+            // signal that the integrity protection was violated.
+            ICE_IN_DEBUG { std::cout << "Integrity check failed\n"; }
+            continue;
+        }
+        ret = true;
+        break;
+    }
+END:
+    from = trans.response_source;
+    if (trans.is_linked())
+        trans.unlink();
+    trans.stop_retring();
+    co_await retry_receiver.wait();
+    co_return ret;
+}
+
+template <class NextLayer>
 ice::task<bool> datagram_client<NextLayer>::request_with_retry(
     stun::message &req, stun::message &resp, std::size_t retries) {
-    typename datagram_client<NextLayer>::endpoint_type resp_from;
+    ice::endpoint resp_source;
     if (!this->_nonce.empty()) {
         // Once a request/response transaction has completed, the client will
         // have been presented a realm and nonce by the server and selected a
@@ -27,8 +128,8 @@ ice::task<bool> datagram_client<NextLayer>::request_with_retry(
         req.integrities.emplace_back(this->_integrity);
         req.set_hmac_key(this->_hmac_key);
     }
-    bool success = co_await this->request(req, resp_from, resp, retries);
-    if (!success || resp_from != this->remote_endpoint())
+    bool success = co_await this->request(req, resp_source, resp, retries);
+    if (!success || resp_source != this->remote_endpoint())
         co_return false;
     if (resp.cls != stun::class_t::STUN_CLASS_RESP_ERROR &&
         resp.cls != stun::class_t::STUN_CLASS_RESP_SUCCESS)
@@ -110,8 +211,8 @@ ice::task<bool> datagram_client<NextLayer>::request_with_retry(
         req.use_fingerprint(true);
 
         // Send the second request
-        success = co_await this->request(req, resp_from, resp, retries);
-        if (!success || resp_from != this->remote_endpoint() ||
+        success = co_await this->request(req, resp_source, resp, retries);
+        if (!success || resp_source != this->remote_endpoint() ||
             resp.cls != stun::class_t::STUN_CLASS_RESP_SUCCESS ||
             resp.method != req.method || resp.integrities.empty()) {
             ICE_IN_DEBUG { std::cerr << "The second request failed\n"; }
@@ -128,8 +229,9 @@ ice::task<bool> datagram_client<NextLayer>::request_with_retry(
     // Stale NONCE
     ICE_IN_DEBUG { std::cout << "Stale nonce, retrying...\n"; }
     req.nonce = std::move(resp.nonce);
-    success = co_await this->request(req, resp_from, resp, retries);
-    if (!success || resp_from != this->remote_endpoint() ||
+    req.fill_random_transaction_id();
+    success = co_await this->request(req, resp_source, resp, retries);
+    if (!success || resp_source != this->remote_endpoint() ||
         resp.cls != stun::class_t::STUN_CLASS_RESP_SUCCESS ||
         resp.method != req.method || resp.integrities.empty()) {
         ICE_IN_DEBUG { std::cerr << "The second request failed\n"; }
@@ -140,7 +242,48 @@ ice::task<bool> datagram_client<NextLayer>::request_with_retry(
 }
 
 template <class NextLayer>
-ice::task<void> datagram_client<NextLayer>::refresh_allocation_task(auto self) {
+void datagram_client<NextLayer>::stop() noexcept {
+    if (!_is_running)
+        return;
+    _is_running = false;
+
+    // Send delete request without waiting response
+    if (this->_relayed_address) {
+        ICE_IN_DEBUG { std::cout << "Send delete allocation request\n"; }
+        stun::message req;
+        req.method = stun::method_t::STUN_METHOD_REFRESH;
+        req.fill_random_transaction_id();
+        req.lifetime = 0;
+        req.use_fingerprint(true);
+        req.nonce = this->_nonce;
+        req.realm = this->_realm;
+        if (this->_userhash)
+            req.userhash = this->_userhash;
+        else
+            req.username = this->username();
+        req.pwd_algorithm = this->_used_pwd_algo;
+        req.integrities.emplace_back(this->_integrity);
+        req.set_hmac_key(this->_hmac_key);
+
+        auto buf = std::make_unique<std::byte[]>(1024);
+        if (auto n = req.write_to(&buf[0], 1024); n > 0) {
+            net::const_buffer data{&buf[0], (std::size_t)n};
+            utils::detached_with_data(
+                this->next_layer().async_send_to(data, this->_server, asio2exec::use_sender),
+                this->shared_from_this(),
+                std::move(buf)
+            );
+        }
+    }
+    do_delete_allocation();
+}
+
+template <class NextLayer>
+ice::task<void> datagram_client<NextLayer>::refresh_allocation_task() {
+    if (!this->is_running())
+        co_return;
+    utils::scope_guard on_exit(
+        [this]() noexcept { this->do_delete_allocation(); });
     net::steady_timer timer(this->context());
     while (this->_lifetime > 0) {
         auto expire = std::chrono::seconds(this->_lifetime * 5 / 6);
@@ -162,20 +305,24 @@ ice::task<void> datagram_client<NextLayer>::refresh_allocation_task(auto self) {
 
 template <class NextLayer>
 void datagram_client<NextLayer>::start_refresh_allocation_task() {
-    this->_stop_refresh_allocation_task.set_value(); // Cancel previous task
+    if (!this->is_running())
+        return;
     asio2exec::scheduler sched{this->context()};
     utils::detached_with_data(stdexec::starts_on(
         sched, utils::stop_when(
-                   this->refresh_allocation_task(this->shared_from_this()),
+                   this->refresh_allocation_task(),
                    this->_stop_refresh_allocation_task.get_future() |
-                       stdexec::continues_on(sched))));
+                       stdexec::continues_on(sched))), this->shared_from_this());
 }
 
 template <class NextLayer>
-ice::task<std::optional<net::ip::udp::endpoint>>
+ice::task<std::optional<ice::endpoint>>
 datagram_client<NextLayer>::create_allocation(auto lifetime, auto... self) {
+    if (!this->is_running())
+        co_return std::nullopt;
     if (this->_relayed_address) {
         ICE_IN_DEBUG { std::cout << "WARN: Already allocated\n"; }
+        co_return std::nullopt;
     }
     stun::message req;
 
@@ -200,13 +347,14 @@ datagram_client<NextLayer>::create_allocation(auto lifetime, auto... self) {
     this->_relayed_address = resp.xor_relayed_address;
     this->_reflex_address = resp.xor_mapped_address;
     start_refresh_allocation_task();
-    co_return net::ip::udp::endpoint{this->_relayed_address->address,
-                                     this->_relayed_address->port};
+    co_return this->_relayed_address;
 }
 
 template <class NextLayer>
 ice::task<bool> datagram_client<NextLayer>::refresh(auto time_to_expiry,
                                                     auto... self) {
+    if (!this->is_running())
+        co_return false;
     ICE_IN_DEBUG { std::cout << "Refreshing\n"; }
     stun::message req;
     req.cls = stun::class_t::STUN_CLASS_REQUEST;
@@ -248,18 +396,32 @@ void datagram_client<NextLayer>::do_delete_allocation() {
     this->_integrity = stun::message::integrity::SHA1;
     this->_relayed_address.reset();
     this->_reflex_address.reset();
-    this->clear_permissions();
+    while (!this->_permissions.empty()) {
+        auto &perm = *this->_permissions.begin();
+        perm.unlink();
+        perm.stop();
+    }
+    this->_new_permissions_created.set_stopped();
+    assert(this->_channel_to_peer.empty());
+    assert(this->_peer_to_channel.empty());
+    while (!this->_expired_channel.empty()) {
+        auto &ch = *this->_expired_channel.begin();
+        ch.stop();
+    }
 }
 
 template <class NextLayer>
 ice::task<void> datagram_client<NextLayer>::delete_allocation(auto... self) {
+    if (!this->_relayed_address)
+        co_return;
     stun::message req;
     req.method = stun::method_t::STUN_METHOD_REFRESH;
     req.fill_random_transaction_id();
     req.lifetime = 0;
     req.use_fingerprint(true);
 
-    utils::scope_guard g([this]() noexcept { this->do_delete_allocation(); });
+    utils::scope_guard on_exit(
+        [this]() noexcept { this->do_delete_allocation(); });
     stun::message resp;
     bool success = co_await this->request_with_retry(req, resp, 7);
     if (!success)
@@ -268,290 +430,99 @@ ice::task<void> datagram_client<NextLayer>::delete_allocation(auto... self) {
 }
 
 template <class NextLayer>
-void datagram_client<NextLayer>::permission_state::start() {
-    asio2exec::scheduler sched{this->_client->context()};
-    utils::detached_with_data(stdexec::starts_on(
-        sched, utils::stop_when(
-                   this->refresh_permission_task(this->shared_from_this()),
-                   this->_stop.get_future() | stdexec::continues_on(sched))));
-}
-
-template <class NextLayer>
-datagram_client<NextLayer>::permission_state::~permission_state() {
-    if (!this->_client)
-        return;
-    auto &c = *this->_client;
-    c._ip_to_channel.erase(this->ip());
-    this->remove_all_channels();
-}
-
-template <class NextLayer>
-std::optional<uint16_t>
-datagram_client<NextLayer>::permission_state::find_channel_by_port(
-    uint16_t port) const noexcept {
-    auto it = this->_port_to_channel.find(port);
-    if (it == this->_port_to_channel.end())
-        return std::nullopt;
-    return it->second;
-}
-
-template <class NextLayer>
-std::optional<uint16_t>
-datagram_client<NextLayer>::permission_state::find_port_by_channel(
-    uint16_t channel) const noexcept {
-    auto it = this->_channel_to_port.find(channel);
-    if (it == this->_channel_to_port.end())
-        return std::nullopt;
-    return it->second;
-}
-
-template <class NextLayer>
-bool datagram_client<NextLayer>::permission_state::add_channel(
-    uint16_t port, uint16_t channel) noexcept {
-    auto [it, success] = this->_port_to_channel.insert({port, channel});
-    if (!success)
-        return false;
-    this->_channel_to_port.insert({channel, port});
-    this->_client->_channel_to_ip[channel] = this;
-    auto now = std::chrono::steady_clock::now();
-    this->add_to_refresh_queue(channel, now + std::chrono::seconds(60 * 9));
-    return true;
-}
-
-template <class NextLayer>
-bool datagram_client<NextLayer>::permission_state::remove_channel(
-    uint16_t channel) noexcept {
-    auto it = this->_channel_to_port.find(channel);
-    if (it == this->_channel_to_port.end())
-        return false;
-    this->_client->_channel_to_ip.erase(channel);
-    this->_client->mark_channel_number_expired(std::views::single(it->second));
-    this->_port_to_channel.erase(it->second);
-    this->_channel_to_port.erase(it);
-    this->remove_from_refresh_queue(channel);
-    return true;
-}
-
-template <class NextLayer>
-void datagram_client<
-    NextLayer>::permission_state::remove_all_channels() noexcept {
-    if (this->_channel_to_port.empty())
-        return;
-    auto &c = *this->_client;
-    for (const auto [channel, _] : this->_channel_to_port) {
-        c._channel_to_ip.erase(channel);
-    }
-    c.mark_channel_number_expired(std::views::keys(this->_channel_to_port));
-    this->_port_to_channel.clear();
-    this->_channel_to_port.clear();
-    this->_refresh_queue.clear();
-}
-
-template <class NextLayer>
-auto datagram_client<NextLayer>::permission_state::all_channels()
-    const noexcept {
-    return std::views::keys(this->_channel_to_port);
-}
-
-template <class NextLayer>
-auto datagram_client<NextLayer>::permission_state::all_ports() const noexcept {
-    return std::views::keys(this->_port_to_channel);
-}
-
-template <class NextLayer>
-void datagram_client<NextLayer>::permission_state::add_to_refresh_queue(
-    uint16_t channel, std::chrono::steady_clock::time_point refresh_time) {
-    this->_refresh_queue.emplace_back(channel, refresh_time);
-    std::ranges::push_heap(
-        this->_refresh_queue,
-        [](const auto &a, const auto &b) { return a.second > b.second; });
-}
-
-template <class NextLayer>
-std::pair<uint16_t, std::chrono::steady_clock::time_point>
-datagram_client<NextLayer>::permission_state::next_refresh_channel() noexcept {
-    auto res = this->_refresh_queue.front();
-    std::ranges::pop_heap(
-        this->_refresh_queue,
-        [](const auto &a, const auto &b) { return a.second > b.second; });
-    this->_refresh_queue.pop_back();
-    return res;
-}
-
-template <class NextLayer>
-void datagram_client<NextLayer>::permission_state::remove_from_refresh_queue(
-    uint16_t channel) noexcept {
-    auto it =
-        std::ranges::find_if(this->_refresh_queue, [channel](const auto &a) {
-            return a.first == channel;
-        });
-    if (it == this->_refresh_queue.end())
-        return;
-    this->_refresh_queue.erase(it);
-    std::ranges::make_heap(
-        this->_refresh_queue,
-        [](const auto &a, const auto &b) { return a.second > b.second; });
-}
-
-template <class NextLayer>
-ice::task<void>
-datagram_client<NextLayer>::permission_state::refresh_permission_task(
-    auto self) {
-    net::steady_timer timer{self->_client->context()};
-    while (true) {
-        auto now = std::chrono::steady_clock::now();
-        if (this->_refresh_queue.empty() ||
-            (this->_refresh_queue.front().second > now &&
-             this->_refresh_queue.front().second - now >
-                 std::chrono::seconds(60 * 4))) {
-            timer.expires_at(now + std::chrono::seconds(60 * 4));
-            auto ret = co_await (timer.async_wait(asio2exec::use_sender) |
-                                 stdexec::stopped_as_optional());
-            if (!ret) {
-                ICE_IN_DEBUG { std::cout << "Refresh task cancelled\n"; }
-                co_return;
-            }
-            if (!co_await this->_client->create_permission(this->ip())) {
-                ICE_IN_DEBUG { std::cout << "Failed to refresh permission\n"; }
-                co_return;
-            }
-            continue;
-        }
-        auto next = this->next_refresh_channel();
-        net::ip::udp::endpoint peer(
-            this->ip(), this->find_port_by_channel(next.first).value());
-        if (next.second <= now) {
-            utils::scope_guard guard([&]() noexcept {
-                this->add_to_refresh_queue(next.first,
-                                           now + std::chrono::seconds(60 * 9));
-            });
-            bool success =
-                co_await this->_client->channel_bind(peer, next.first);
-            if (!success) {
-                ICE_IN_DEBUG { std::cerr << "Refresh channel failed\n"; }
-                this->remove_channel(next.first);
-                continue;
-            }
-            ICE_IN_DEBUG {
-                std::cout << "Refresh channel " << next.first << " success\n";
-            }
-            continue;
-        }
-        timer.expires_at(next.second);
-        auto ret = co_await (timer.async_wait(asio2exec::use_sender) |
-                             stdexec::stopped_as_optional());
-        if (!ret) {
-            ICE_IN_DEBUG { std::cout << "Refresh task cancelled\n"; }
-            co_return;
-        }
-        utils::scope_guard guard([&]() noexcept {
-            this->add_to_refresh_queue(
-                next.first, next.second + std::chrono::seconds(60 * 9));
-        });
-        bool success = co_await this->_client->channel_bind(peer, next.first);
-        if (!success) {
-            ICE_IN_DEBUG { std::cerr << "Refresh channel failed\n"; }
-            this->remove_channel(next.first);
-            continue;
-        }
-        ICE_IN_DEBUG {
-            std::cout << "Refresh channel " << next.first << " success\n";
-        }
-    }
-}
-
-template <class NextLayer>
-void datagram_client<NextLayer>::clear_permissions() noexcept {
-    for (const auto &[_, permission] : this->_ip_to_channel) {
-        permission->stop();
-    }
-}
-
-template <class NextLayer>
 uint16_t datagram_client<NextLayer>::generate_channel_number() const {
-    auto ch = std::max(this->_channel_to_ip.empty()
+    auto ch = std::max(this->_channel_to_peer.empty()
                            ? 0x3fff
-                           : this->_channel_to_ip.rbegin()->first,
-                       this->_expired_number.empty()
+                           : this->_channel_to_peer.rbegin()->channel(),
+                       this->_expired_channel.empty()
                            ? 0
-                           : std::ranges::max_element(
-                                 this->_expired_number,
-                                 [](const auto &a, const auto &b) noexcept {
-                                     return a.channel_number < b.channel_number;
-                                 })
-                                 ->channel_number) +
-              1;
+                           : this->_expired_channel.rbegin()->channel());
+    ++ch;
     if (ch < 0x5000)
         return ch;
-    std::vector<uint16_t> used;
-    used.resize(this->_channel_to_ip.size() + this->_expired_number.size());
-    std::ranges::copy(this->_channel_to_ip | std::views::keys, used.begin());
-    std::ranges::transform(
-        this->_expired_number, used.begin() + this->_channel_to_ip.size(),
-        [](const auto &a) noexcept { return a.channel_number; });
-    std::ranges::sort(used);
     uint16_t i = 0x4000;
-    for (auto &ch : used) {
-        if (ch != i)
+    auto it1 = this->_channel_to_peer.begin();
+    auto it2 = this->_expired_channel.begin();
+    for (; it1 != this->_channel_to_peer.end() ||
+           it2 != this->_expired_channel.end();) {
+        uint16_t x = 0;
+        if (it1 == this->_channel_to_peer.end())
+            x = (it2++)->channel();
+        else if (it2 == this->_expired_channel.end())
+            x = (it1++)->channel();
+        else {
+            if (it1->channel() < it2->channel())
+                x = (it1++)->channel();
+            else
+                x = (it2++)->channel();
+        }
+        if (x != i++)
             return i;
-        ++i;
     }
+
     throw std::runtime_error("no available channel number");
 }
 
 template <class NextLayer>
-void datagram_client<NextLayer>::mark_channel_number_expired(
-    std::ranges::view auto channel_numbers) {
-    if (channel_numbers.empty() || !this->_is_running)
-        return;
-    auto now = std::chrono::steady_clock::now();
-    for (auto x : channel_numbers) {
-        this->_expired_number.emplace_back(x,
-                                           now + std::chrono::seconds(60 * 5));
-    }
-    this->start_expire_channel_number_task();
-}
-
-template <class NextLayer>
 ice::task<void>
-datagram_client<NextLayer>::expire_channel_number_task(auto self) {
-    net::steady_timer timer{this->context()};
-    while (true) {
-        auto now = std::chrono::steady_clock::now();
-        auto it = std::lower_bound(this->_expired_number.begin(),
-                                   this->_expired_number.end(),
-                                   expired_channel_number{0, now});
-        if (it == this->_expired_number.end()) {
-            this->_expired_number.clear();
-            co_return;
-        } else if (it->expiry_time == now) {
-            this->_expired_number.erase(this->_expired_number.begin(), it + 1);
-        } else {
-            this->_expired_number.erase(this->_expired_number.begin(), it);
+datagram_client<NextLayer>::permission_state::refresh_task() {
+    utils::scope_guard on_exit([this]() noexcept {
+        ICE_IN_DEBUG { std::cout << "permission_state::refresh_task exit\n"; }
+        if (this->is_linked())
+            this->unlink();
+        while (!this->channels().empty()) {
+            auto &channel = this->channels().front();
+            this->channels().pop_front();
+            channel.expire();
         }
-        if (this->_expired_number.empty())
-            co_return;
-        timer.expires_at(this->_expired_number.front().expiry_time);
-        co_await timer.async_wait(asio2exec::use_sender);
+    });
+    net::steady_timer timer(this->client().context());
+    while (true) {
+        timer.expires_after(std::chrono::seconds(60 * 4));
+        auto ec = co_await timer.async_wait(asio2exec::use_sender);
+        if (ec)
+            break;
+
+        stun::message req, resp;
+        req.cls = stun::class_t::STUN_CLASS_REQUEST;
+        req.method = stun::method_t::STUN_METHOD_CREATE_PERMISSION;
+        req.use_fingerprint(true);
+        req.fill_random_transaction_id();
+        req.xor_peer_address.emplace_back(this->ip(), 0);
+
+        if (co_await this->client().request_with_retry(req, resp, 7)) {
+            ICE_IN_DEBUG {
+                std::cout
+                    << "permission_state::refresh_task: refreshed permission \""
+                    << this->ip() << "\"\n";
+            }
+        } else {
+            ICE_IN_DEBUG {
+                std::cout << "permission_state::refresh_task: failed to "
+                             "refresh permission \""
+                          << this->ip() << "\"\n";
+            }
+            break;
+        }
     }
 }
 
 template <class NextLayer>
-void datagram_client<NextLayer>::start_expire_channel_number_task() {
-    if (this->_expired_number.size() != 1 || !this->_is_running)
+void datagram_client<NextLayer>::permission_state::start() {
+    if (!this->_client->is_running())
         return;
-    asio2exec::scheduler sched{this->context()};
+    asio2exec::scheduler sched{this->client().context()};
     utils::detached_with_data(stdexec::starts_on(
-        sched, utils::stop_when(
-                   this->expire_channel_number_task(this->shared_from_this()),
-                   this->_stop_expire_number_task.get_future())));
+        sched, utils::stop_when(this->refresh_task(),
+                                this->_stop.get_future() |
+                                    stdexec::continues_on(sched))), this->shared_from_this());
 }
 
 template <class NextLayer>
 ice::task<bool>
-datagram_client<NextLayer>::create_permission(std::ranges::view auto peers,
-                                              auto... self) {
-    if (!this->_is_running || peers.empty() || !this->_relayed_address)
+datagram_client<NextLayer>::create_permission(std::ranges::view auto peers, auto... self)
+{
+    if (!this->is_running() || peers.empty() || !this->_relayed_address)
         co_return false;
     if (this->_relayed_address->address().is_v4() &&
         std::ranges::any_of(
@@ -561,13 +532,44 @@ datagram_client<NextLayer>::create_permission(std::ranges::view auto peers,
         std::ranges::any_of(
             peers, [](const auto &peer) noexcept { return !peer.is_v6(); }))
         co_return false;
-    ICE_IN_DEBUG { std::cout << "Create permissions\n"; }
+    ICE_IN_DEBUG { std::cout << "Creating or refreshing permissions\n"; }
     stun::message req;
     req.cls = stun::class_t::STUN_CLASS_REQUEST;
     req.method = stun::method_t::STUN_METHOD_CREATE_PERMISSION;
     req.use_fingerprint(true);
-    for (const auto &peer : peers)
-        req.xor_peer_address.emplace_back(peer, 0);
+
+    ice::small_set<net::ip::address> creating;
+    for (const auto &peer : peers) {
+        if (this->_permissions.find(peer) != this->_permissions.end())
+            continue;
+        auto it = this->_creating_permissions.find(peer);
+        if (it == this->_creating_permissions.end())
+            req.xor_peer_address.emplace_back(peer, 0);
+        else
+            creating.insert(peer);
+    }
+
+    auto wait_finish = stdexec::just() |
+                        stdexec::let_value([&] {
+                            return this->_new_permissions_created.get_future() |
+                                    stdexec::continues_on(asio2exec::scheduler{this->context()});
+                        }) |
+                        stdexec::then([&] {
+                            return std::ranges::all_of(creating, [&](const auto& ip) {
+                                return this->_creating_permissions.find(ip) == this->_creating_permissions.end();
+                            });
+                        }) |
+                        exec::repeat_effect_until() |
+                        stdexec::then([&] {
+                            return std::ranges::all_of(creating, [&](const auto& ip) {
+                                return this->_permissions.find(ip) != this->_permissions.end();
+                            });
+                        });
+    if (req.xor_peer_address.empty()) {
+        if (creating.empty())
+            co_return true;
+        co_return co_await std::move(wait_finish);
+    }
     std::ranges::sort(req.xor_peer_address,
                       [](const auto &a, const auto &b) noexcept {
                           return a.address() < b.address();
@@ -579,21 +581,43 @@ datagram_client<NextLayer>::create_permission(std::ranges::view auto peers,
             });
         req.xor_peer_address.erase(first, last);
     }
+    utils::scope_guard clear_creating([&]()noexcept {
+        for (const auto& addr: req.xor_peer_address)
+            this->_creating_permissions.erase(addr.address());
+        this->_new_permissions_created.set_value();
+    });
+    for (const auto& addr: req.xor_peer_address)
+        this->_creating_permissions.insert(addr.address());
     req.fill_random_transaction_id();
 
     stun::message resp;
-    bool success = co_await this->request_with_retry(req, resp, 7);
+    bool success = false;
+    if (creating.empty())
+        success = co_await this->request_with_retry(req, resp, 7);
+    else {
+        std::tuple<std::tuple<bool>, std::tuple<bool>>
+        result = co_await stdexec::when_all(
+            std::move(wait_finish),
+            this->request_with_retry(req, resp, 7)
+        );
+        success = std::get<0>(std::get<0>(result)) && std::get<0>(std::get<1>(result));
+    }
     if (!success) {
         ICE_IN_DEBUG { std::cout << "Create or refresh permissions failed\n"; }
         co_return false;
     }
     ICE_IN_DEBUG { std::cout << "Create or refresh permissions success\n"; }
+    if (!this->_is_running)
+        co_return true;
     for (const auto &peer : req.xor_peer_address) {
-        if (this->_ip_to_channel.contains(peer.address))
-            continue;
-        std::make_shared<datagram_client<NextLayer>::permission_state>(
-            peer.address, *this)
-            ->start();
+        ICE_IN_DEBUG {
+            assert(this->_permissions.find(peer.address()) == this->_permissions.end());
+        }
+        auto state =
+            std::make_shared<datagram_client<NextLayer>::permission_state>(
+                this->shared_from_this(), peer.address());
+        state->start();
+        this->_permissions.insert(*state);
     }
     co_return true;
 }
@@ -601,38 +625,41 @@ datagram_client<NextLayer>::create_permission(std::ranges::view auto peers,
 template <class NextLayer>
 void datagram_client<NextLayer>::delete_permission(
     const net::ip::address &peer) {
-    ICE_IN_DEBUG { std::cout << "Delete permissions\n"; }
-    auto it = this->_ip_to_channel.find(peer);
-    if (it == this->_ip_to_channel.end())
+    if (!this->is_running())
         return;
-    it->second->stop();
+    ICE_IN_DEBUG { std::cout << "Delete permission of \"" << peer << "\"\n"; }
+    auto it = this->_permissions.find(peer);
+    if (it == this->_permissions.end())
+        return;
+    it->unlink();
+    it->stop();
 }
 
 template <class NextLayer>
-template <class ConstBufferSequence>
 ice::task<std::tuple<std::error_code, std::size_t>>
 datagram_client<NextLayer>::async_send_to(
-    const ConstBufferSequence &buffers,
-    const typename datagram_client<NextLayer>::endpoint_type &destination,
-    auto... self) {
-    auto it = this->_ip_to_channel.find(destination.address());
-    if (it == this->_ip_to_channel.end()) {
+    typename datagram_client<NextLayer>::buffer_sequence_type buffers,
+    net::ip::udp::endpoint destination, auto... self) {
+    if (!this->is_running())
+        co_return std::make_tuple(
+            std::make_error_code(std::errc::operation_canceled), 0);
+    auto it = this->_peer_to_channel.find(destination);
+    if (it != this->_peer_to_channel.end()) {
+        ICE_IN_DEBUG { std::cout << "Sending channel data\n"; }
+        co_return co_await this->send_channel_data(std::move(buffers),
+                                                   it->channel());
+    }
+    auto permission = this->_permissions.find(destination.address());
+    if (permission == this->_permissions.end()) {
         ICE_IN_DEBUG {
-            std::cout << "No permissions to send to " << destination.address()
-                      << "\n";
+            std::cout << "No permission of " << destination.address() << "\n";
         }
         co_return std::make_tuple(std::make_error_code(std::errc::bad_address),
                                   0);
     }
-    auto *p = it->second;
-    auto channel = p->find_channel_by_port(destination.port());
-    if (channel.has_value()) {
-        ICE_IN_DEBUG { std::cout << "Send channel data\n"; }
-        co_return co_await this->send_channel_data(buffers, *channel);
-    }
     // send indication
-    ICE_IN_DEBUG { std::cout << "Send indication\n"; }
-    std::size_t data_size = net::buffer_size(buffers);
+    ICE_IN_DEBUG { std::cout << "Sending indication\n"; }
+    std::size_t data_size = net::buffer_size(buffers.buffers());
 
     stun::message msg;
     msg.cls = stun::class_t::STUN_CLASS_INDICATION;
@@ -646,48 +673,34 @@ datagram_client<NextLayer>::async_send_to(
     int n = msg.write_to(buf, sizeof(buf));
     assert(n <= sizeof(buf) && "Write turn send indication failed");
 
-    auto buffer_first = net::buffer_sequence_begin(buffers);
-    auto buffer_last = net::buffer_sequence_end(buffers);
-    std::size_t buffer_count = std::distance(buffer_first, buffer_last);
-
-    boost::container::small_vector<net::const_buffer, 128> indication_buffers;
-    indication_buffers.resize(buffer_count + 1);
-    indication_buffers.front() = net::const_buffer(buf, n);
-    std::transform(buffer_first, buffer_last, indication_buffers.begin() + 1,
-                   [](const auto &b) noexcept { return net::const_buffer(b); });
-
+    buffers.buffers().insert(buffers.buffers().begin(),
+                             net::const_buffer(buf, n));
     char pad[4] = {0};
     if (data_size % 4 != 0) {
-        indication_buffers.emplace_back(pad, 4 - data_size % 4);
+        buffers.buffers().emplace_back(pad, 4 - data_size % 4);
     }
     co_return co_await this->next_layer().async_send_to(
-        indication_buffers, this->remote_endpoint(), asio2exec::use_sender);
+        buffers.buffers(), this->_server, asio2exec::use_sender);
 }
 
 template <class NextLayer>
-template <class ConstBufferSequence>
 auto datagram_client<NextLayer>::send_channel_data(
-    const ConstBufferSequence &buffers, uint16_t channel, auto... self) {
-    auto data_size = net::buffer_size(buffers);
-    auto buffer_first = net::buffer_sequence_begin(buffers);
-    auto buffer_last = net::buffer_sequence_end(buffers);
-    std::size_t buffer_count = std::distance(buffer_first, buffer_last);
-    boost::container::small_vector<net::const_buffer, 128> channel_buffers(
-        buffer_count + 1);
-    std::transform(buffer_first, buffer_last, channel_buffers.begin() + 1,
-                   [](const auto &b) noexcept { return net::const_buffer(b); });
-    return stdexec::just(std::move(channel_buffers), std::array<char, 4>{},
+    typename datagram_client<NextLayer>::buffer_sequence_type buffers,
+    uint16_t channel, auto... self) {
+    auto data_size = net::buffer_size(buffers.buffers());
+    return stdexec::just(std::move(buffers), std::array<char, 4>{},
                          std::move(self)...) |
            stdexec::let_value(
-               [channel, data_size, this](auto &buffers, auto &header,
+               [this, channel, data_size](auto &buffers, auto &header,
                                           const auto &...self) noexcept {
                    binary::write_big<uint16_t>(header.data(), channel);
                    binary::write_big<uint16_t>(header.data() + 2,
                                                (uint16_t)data_size);
-                   buffers.front() =
-                       net::const_buffer(header.data(), header.size());
+                   buffers.buffers().insert(
+                       buffers.buffers().begin(),
+                       net::const_buffer(header.data(), header.size()));
                    return this->next_layer().async_send_to(
-                       buffers, this->remote_endpoint(), asio2exec::use_sender);
+                       buffers.buffers(), this->_server, asio2exec::use_sender);
                });
 }
 
@@ -695,12 +708,16 @@ template <class NextLayer>
 ice::task<bool>
 datagram_client<NextLayer>::channel_bind(net::ip::udp::endpoint peer,
                                          uint16_t channel, auto... self) {
+    if (!this->is_running())
+        co_return false;
     if (!this->_relayed_address) {
         ICE_IN_DEBUG { std::cout << "Haven't allocate.\n"; }
         co_return false;
     }
-    if ((this->_relayed_address->address().is_v4() && !peer.address().is_v4()) ||
-        (this->_relayed_address->address().is_v6() && !peer.address().is_v6())) {
+    if ((this->_relayed_address->address().is_v4() &&
+         !peer.address().is_v4()) ||
+        (this->_relayed_address->address().is_v6() &&
+         !peer.address().is_v6())) {
         ICE_IN_DEBUG {
             std::cout << "Peer address is not the same type as the relayed "
                          "address.\n";
@@ -708,7 +725,7 @@ datagram_client<NextLayer>::channel_bind(net::ip::udp::endpoint peer,
         co_return false;
     }
     ICE_IN_DEBUG {
-        std::cout << "Bind or refresh channel: {" << peer.address() << ":"
+        std::cout << "Binding or refreshing channel: {" << peer.address() << ":"
                   << peer.port() << ", " << channel << "}\n";
     }
     stun::message req;
@@ -732,139 +749,197 @@ datagram_client<NextLayer>::channel_bind(net::ip::udp::endpoint peer,
         std::cout << "Bind or refresh channel success: {" << peer.address()
                   << ":" << peer.port() << ", " << channel << "}\n";
     }
-    auto it = this->_ip_to_channel.find(peer.address());
-    if (it == this->_ip_to_channel.end()) {
+    if (!this->is_running())
+        co_return true;
+    auto ch = this->_channel_to_peer.find(channel);
+    if (ch == this->_channel_to_peer.end()) {
+        auto c = std::make_shared<datagram_client<NextLayer>::channel_state>(
+            this->shared_from_this(), channel, peer);
+        c->start();
+        this->_channel_to_peer.insert(*c);
+        this->_peer_to_channel.insert(*c);
+        ch = this->_channel_to_peer.iterator_to(*c);
+    } else {
+        // TODO: update lifetime
+        co_return true;
+    }
+    utils::scope_guard on_error([&]() noexcept {
+        auto &c = *ch;
+        this->_channel_to_peer.erase(ch);
+        this->_peer_to_channel.erase(this->_peer_to_channel.iterator_to(c));
+        c.stop();
+    });
+    auto permission = this->_permissions.find(peer.address());
+    if (permission == this->_permissions.end()) {
         auto p = std::make_shared<datagram_client<NextLayer>::permission_state>(
-            peer.address(), *this);
-        p->add_channel(peer.port(), channel);
+            this->shared_from_this(), peer.address());
         p->start();
-    } else
-        it->second->add_channel(peer.port(), channel);
+        this->_permissions.insert(*p);
+        permission = this->_permissions.iterator_to(*p);
+    }
+    permission->channels().push_back(*ch);
+    ch->set_permission(permission->shared_from_this());
+    on_error.dismiss();
+    // TODO: Update state
     co_return true;
 }
 
 template <class NextLayer>
-ice::task<std::expected<ice::message, std::error_code>>
-datagram_client<NextLayer>::read(
-    typename datagram_client<NextLayer>::endpoint_type &from, auto... self) {
-    if (!this->is_running())
-        co_return std::unexpected(
-            std::make_error_code(std::errc::invalid_argument));
-    auto &turn_q = this->_pool.get_pool(message_type::turn_channel);
-    auto &stun_q = this->_pool.get_pool(message_type::stun);
-    while (this->is_running()) {
-        while (!turn_q.empty()) {
-            auto it = std::ranges::find_if(
-                turn_q, [this](const message_pool::value_type &v) noexcept {
-                    const auto &msg = v.first;
-                    const auto &ep = v.second;
-                    assert(msg.type() == message_type::turn_channel);
-                    return ep == this->remote_endpoint();
-                });
-            if (it == turn_q.end())
-                break;
-            auto [msg, ep] = std::move(*it);
-            turn_q.erase(it);
-
-            uint16_t channel_number = binary::read_big<uint16_t>(msg.data());
-            uint16_t len = binary::read_big<uint16_t>((char *)msg.data() + 2);
-            auto ip_it = this->_channel_to_ip.find(channel_number);
-            if (ip_it == this->_channel_to_ip.end()) {
-                // drop
-                continue;
-            }
-
-            auto *permission = ip_it->second;
-            from = typename datagram_client<NextLayer>::endpoint_type(
-                permission->ip(),
-                *permission->find_port_by_channel(channel_number));
-            msg += 4;
-            co_return std::move(msg);
-        }
-        while (!stun_q.empty()) {
-            auto it = std::ranges::find_if(
-                stun_q, [this](const message_pool::value_type &v) noexcept {
-                    const auto &msg = v.first;
-                    const auto &ep = v.second;
-                    assert(msg.type() == message_type::stun);
-                    auto cls = stun::message::get_class(msg.data(), msg.size());
-                    auto method =
-                        stun::message::get_method(msg.data(), msg.size());
-                    return ep == this->remote_endpoint() &&
-                           ((cls == stun::class_t::STUN_CLASS_INDICATION &&
-                             method == stun::method_t::STUN_METHOD_DATA) ||
-                            cls == stun::class_t::STUN_CLASS_RESP_SUCCESS ||
-                            cls == stun::class_t::STUN_CLASS_RESP_ERROR);
-                });
-            if (it == stun_q.end())
-                break;
-            auto [msg, ep] = std::move(*it);
-            stun_q.erase(it);
-
-            if (stun::message::is_response(msg.data(), msg.size())) {
-                // handle response
-                if (!this->dispatch(msg.data(), msg.size())) {
-                    auto &other_q = this->_pool.get_pool(message_type::unknown);
-                    msg.type() = message_type::unknown;
-                    other_q.push_back(std::pair{std::move(msg), ep});
-                    continue;
-                }
-                continue;
-            }
-
-            stun::message indication;
-            if (!indication.parse(msg.data(), msg.size()) ||
-                indication.xor_peer_address.size() != 1 ||
-                !indication.has_turn_data()) {
-                // may be application data
-                auto &other_q = this->_pool.get_pool(message_type::unknown);
-                msg.type() = message_type::unknown;
-                other_q.push_back(std::pair{std::move(msg), ep});
-                continue;
-            }
-            from = typename datagram_client<NextLayer>::endpoint_type(
-                indication.xor_peer_address.front().address,
-                indication.xor_peer_address.front().port);
-            msg = net::const_buffer{indication.turn_data(),
-                                    indication.turn_data_size()};
-            co_return std::move(msg);
-        }
-        co_await exec::when_any(this->_pool.wait(message_type::stun),
-                                this->_pool.wait(message_type::turn_channel),
-                                this->_stop_read_task.get_future());
-    }
-    co_return std::unexpected(
-        std::make_error_code(std::errc::operation_canceled));
+void datagram_client<NextLayer>::channel_state::start() {
+    if (!this->_client->is_running())
+        return;
+    asio2exec::scheduler sched{this->client().context()};
+    utils::detached_with_data(stdexec::starts_on(
+        sched, utils::stop_when(this->refresh_task(),
+                                this->_stop.get_future() |
+                                    stdexec::continues_on(sched))), this->shared_from_this());
 }
 
 template <class NextLayer>
-template <class MutableBufferSequence>
-auto datagram_client<NextLayer>::async_receive_from(
-    const MutableBufferSequence &buffers,
-    typename datagram_client<NextLayer>::endpoint_type &from, auto... self) {
-    auto buffer_first = net::buffer_sequence_begin(buffers);
-    auto buffer_last = net::buffer_sequence_end(buffers);
-    std::size_t buffer_count = std::distance(buffer_first, buffer_last);
-    boost::container::small_vector<net::mutable_buffer, 128> result_buffers(
-        buffer_count);
-    std::transform(
-        buffer_first, buffer_last, result_buffers.begin(),
-        [](const auto &b) noexcept { return net::mutable_buffer(b); });
-    return stdexec::just(std::move(result_buffers), std::move(self)...) |
-           stdexec::let_value(
-               [&from, this](auto &buffers, const auto &...self) {
-                   return this->read(from) |
-                          stdexec::then(
-                              [&](std::expected<ice::message, std::error_code>
-                                      msg) noexcept
-                              -> std::tuple<std::error_code, std::size_t> {
-                                  if (!msg)
-                                      return std::make_tuple(msg.error(), 0);
-                                  return std::make_tuple(
-                                      std::error_code{},
-                                      net::buffer_copy(buffers, msg->buffer()));
-                              });
-               });
+ice::task<void>
+datagram_client<NextLayer>::channel_state::refresh_task() {
+    utils::scope_guard on_error([this]() noexcept {
+        ICE_IN_DEBUG {
+            std::cout << "refresh_task stopped, channel: " << this->channel()
+                      << ", peer: " << this->peer().address() << ':'
+                      << this->peer().port() << '\n';
+        }
+        this->remove_from_set();
+        this->remove_from_permission();
+    });
+    net::steady_timer timer(this->client().context());
+    while (true) {
+        timer.expires_after(std::chrono::seconds(60 * 9));
+        auto ec = co_await timer.async_wait(asio2exec::use_sender);
+        if (ec)
+            break;
+        std::optional<bool> ret = co_await stdexec::stopped_as_optional(
+            this->client().channel_bind(this->peer(), this->channel()));
+        if (!ret) {
+            ICE_IN_DEBUG {
+                std::cout << "channel_state::refresh_task cancelled, channel = "
+                          << this->channel() << '\n';
+            }
+            break;
+        }
+        if (!*ret) {
+            ICE_IN_DEBUG {
+                std::cout << "channel_state::refresh_task failed, channel = "
+                          << this->channel() << '\n';
+            }
+            break;
+        }
+    }
+    if (this->_state !=
+        datagram_client<NextLayer>::channel_state::state_t::expired)
+        co_return;
+    on_error.dismiss();
+    /*
+        To prevent race conditions, the client MUST wait 5 minutes after the
+       channel binding expires before attempting to bind the channel number to a
+       different transport address or the transport address to a different
+       channel number.
+    */
+    ICE_IN_DEBUG {
+        std::cout << "refresh_task expired, channel: " << this->channel()
+                  << ", peer: " << this->peer().address() << ':'
+                  << this->peer().port() << '\n';
+    }
+    this->set_permission(nullptr);
+    utils::scope_guard on_exit([this]() noexcept { this->remove_from_set(); });
+    timer.expires_after(std::chrono::seconds(60 * 5));
+    co_await utils::stop_when(timer.async_wait(asio2exec::use_sender),
+                              this->_stop.get_future());
+}
+
+inline bool validate_turn_channel(const ice::io_buffer_ptr &buf,
+                                  uint16_t &channel_number,
+                                  uint16_t &len) noexcept {
+    if (buf->size() < 4) {
+        ICE_IN_DEBUG { std::cout << "WARNING: invalid turn channel message\n"; }
+        return false;
+    }
+    channel_number = binary::read_big<uint16_t>(buf->data());
+    len = binary::read_big<uint16_t>(buf->begin() + 2);
+    if (channel_number < 0x4000 || channel_number > 0x4FFF) {
+        ICE_IN_DEBUG { std::cout << "WARNING: invalid turn channel number\n"; }
+        return false;
+    }
+    if (buf->size() == len + 4)
+        return true;
+    if (len & 3) {
+        auto pad = 4 - (len & 3);
+        if (buf->size() == len + 4 + pad)
+            return true;
+        ICE_IN_DEBUG { std::cout << "WARNING: invalid turn channel message\n"; }
+        return false;
+    }
+    return true;
+}
+
+template <class NextLayer>
+bool datagram_client<NextLayer>::datagram_received(
+    io_buffer_ptr &buffer, const ice::endpoint &endpoint) {
+    if (!buffer || buffer->size() < 4 || endpoint != this->_server)
+        return false;
+    uint8_t first_byte = *buffer->begin();
+    if (first_byte >= 64 && first_byte <= 79) {
+        // TURN channel
+        uint16_t ch, len;
+        if (!validate_turn_channel(buffer, ch, len)) {
+            // ignore
+            return true;
+        }
+        auto it = this->_channel_to_peer.find(ch);
+        if (it == this->_channel_to_peer.end()) {
+            ICE_IN_DEBUG {
+                std::cout << "WARNING: unknown channel: " << ch << '\n';
+            }
+            // ignore
+            return true;
+        }
+        buffer->consume_front(4);
+        buffer->consume_back(buffer->size() - len);
+        assert(buffer->size() == len);
+        dispatch_receivers(this->receivers(), buffer, it->peer());
+        return true;
+    } else if (first_byte <= 3) {
+        // STUN message
+        if (buffer->size() < ice::stun::HEADER_SIZE) {
+            // ignore
+            return true;
+        }
+        auto cls =
+            ice::stun::message::get_class(buffer->data(), buffer->size());
+        if (cls == stun::class_t::STUN_CLASS_RESP_SUCCESS ||
+            cls == stun::class_t::STUN_CLASS_RESP_ERROR) {
+            dispatch_stun_response(this->_transactions, endpoint,
+                                   buffer->data(), buffer->size(), nullptr);
+            return true;
+        }
+        if (cls == stun::class_t::STUN_CLASS_REQUEST) {
+            // STUN request, ignore
+            return true;
+        }
+        stun::message indication;
+        if (!indication.parse(buffer->data(), buffer->size()) ||
+            indication.method != stun::method_t::STUN_METHOD_DATA ||
+            indication.xor_peer_address.size() != 1 ||
+            !indication.has_turn_data()) {
+            ICE_IN_DEBUG { std::cout << "WARNING: invalid STUN indication\n"; }
+            return true;
+        }
+        const std::byte *turn_data = indication.turn_data();
+        std::size_t turn_data_len = indication.turn_data_size();
+        buffer->consume_front((const uint8_t *)turn_data - buffer->begin());
+        buffer->consume_back(buffer->size() - turn_data_len);
+        assert(buffer->size() == turn_data_len);
+        dispatch_receivers(this->receivers(), buffer,
+                           indication.xor_peer_address.front());
+        return true;
+    }
+    // ignore
+    return true;
 }
 
 } // namespace ice::turn::impl

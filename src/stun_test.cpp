@@ -3,7 +3,7 @@
 
 #include "address.hpp"
 #include "base64.hpp"
-#include "hash2.hpp"
+#include "hash.hpp"
 #include "json.hpp"
 #include "stun.hpp"
 

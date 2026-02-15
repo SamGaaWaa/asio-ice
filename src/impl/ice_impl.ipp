@@ -269,8 +269,7 @@ agent_datagram_impl<Layer>::create_relayed_candidate(std::vector<ice::candidate>
     });
     if (this->_on_local_candidates)
         co_await this->_on_local_candidates(tmp.data(), tmp.size());
-    for (const auto& c: tmp)
-        this->pair_local_candidate(c);
+    this->pair_local_candidate(tmp.back());
     std::move(tmp.begin(), tmp.end(), std::back_inserter(component_candidates));
     co_return;
 }

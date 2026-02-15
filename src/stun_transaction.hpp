@@ -3,7 +3,7 @@
 #include "config.hpp"
 #include "any_transport.hpp"
 #include "stun.hpp"
-#include "shared_promise_v2.hpp"
+#include "shared_promise.hpp"
 #include "stop_when.hpp"
 #include "task.hpp"
 #include "scope_guard.hpp"
