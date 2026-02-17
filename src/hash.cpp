@@ -2,6 +2,8 @@
 
 #include <openssl/rand.h>
 
+#include <stdexcept>
+
 namespace ice::hash {
 
 void to_hex(const void *data, std::size_t size, char *out) noexcept {

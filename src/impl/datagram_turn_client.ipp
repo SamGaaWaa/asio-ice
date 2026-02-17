@@ -30,7 +30,7 @@ ice::task<bool> datagram_client<NextLayer>::request(const stun::message &req,
         if (!new_state.has_value()) {
             goto END;
         }
-        if (trans.state() == stun::transaction::state_t::ERROR) {
+        if (trans.state() == stun::transaction::state_t::ERR) {
             goto END;
         }
         assert(trans.state() == stun::transaction::state_t::DONE);

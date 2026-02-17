@@ -6,3 +6,4 @@ turn.log
 wireshark
 *.log
 aioice_test
+msvc-build

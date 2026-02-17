@@ -37,7 +37,7 @@ struct transaction
     using base_type = boost::intrusive::set_base_hook<
         boost::intrusive::link_mode<boost::intrusive::auto_unlink>>;
 
-    enum state_t { INIT, DONE, ERROR };
+    enum state_t { INIT, DONE, ERR };
 
     struct comparer {
         using type = std::array<uint8_t, 12>;
@@ -105,7 +105,7 @@ struct transaction
                 ICE_IN_DEBUG {
                     std::cerr << "USERNAME, NONCE or REALM too long\n";
                 }
-                set_state(state_t::ERROR);
+                set_state(state_t::ERR);
                 co_return;
             }
             buf.resize(n);
@@ -119,7 +119,7 @@ struct transaction
                     std::cerr << "STUN transaction failed: " << ec.message()
                               << '\n';
                 }
-                set_state(state_t::ERROR);
+                set_state(state_t::ERR);
                 co_return;
             }
             _timer.expires_after(retry_rto);
@@ -130,13 +130,13 @@ struct transaction
                     std::cerr << "STUN transaction failed: " << ec.message()
                               << '\n';
                 }
-                set_state(state_t::ERROR);
+                set_state(state_t::ERR);
                 co_return;
             }
         }
         co_return;
     } catch (...) {
-        set_state(state_t::ERROR);
+        set_state(state_t::ERR);
         throw;
     }
 
@@ -211,7 +211,7 @@ struct basic_request_t {
         if (!new_state.has_value()) {
             goto END;
         }
-        if (trans.state() == stun::transaction::state_t::ERROR) {
+        if (trans.state() == stun::transaction::state_t::ERR) {
             goto END;
         }
         assert(trans.state() == stun::transaction::state_t::DONE);

@@ -164,7 +164,8 @@ ice::task<void> agent_datagram_impl<Layer>::get_component_candidates(
         sock.bind(ice::endpoint(address, 0), ec);
         if (ec) {
             ICE_IN_DEBUG {
-                std::cerr << "Failed to bind socket: " << ec.message() << '\n';
+                std::cerr << "Failed to bind address \"" << address.to_string()
+                          << "\": " << ec.message() << '\n';
             }
             continue;
         }
@@ -1000,7 +1001,7 @@ agent_datagram_impl<Layer>::request(ice::candidate_pair &pair,
         if (!new_state.has_value()) {
             goto END;
         }
-        if (trans.state() == stun::transaction::state_t::ERROR) {
+        if (trans.state() == stun::transaction::state_t::ERR) {
             goto END;
         }
         assert(trans.state() == stun::transaction::state_t::DONE);

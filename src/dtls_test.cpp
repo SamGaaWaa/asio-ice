@@ -1,15 +1,3 @@
-#include <stdio.h>
-#include <string.h>
-#include <unistd.h>
-#include <sys/socket.h>
-#include <netinet/in.h>
-#include <arpa/inet.h>
-
-#include <openssl/ssl.h>
-#include <openssl/err.h>
-#include <openssl/bio.h>
-
-#include <thread>
 #include <algorithm>
 #include <iostream>
 
@@ -38,127 +26,186 @@ namespace net = asio;
 #define CLIENT_PORT 12345
 #define MAX_BUFFER 1024
 
-int dtls_server(const char *crt, const char *key) {
+const char *server_crt = R"(-----BEGIN CERTIFICATE-----
+MIID1zCCAr+gAwIBAgIUVO/Ug0WrVEZ+y/wpbYHoK+xr6HAwDQYJKoZIhvcNAQEL
+BQAwezELMAkGA1UEBhMCQ04xEzARBgNVBAgMClNvbWUtU3RhdGUxITAfBgNVBAoM
+GEludGVybmV0IFdpZGdpdHMgUHR5IEx0ZDESMBAGA1UEAwwJc2FtZ2Fhd2FhMSAw
+HgYJKoZIhvcNAQkBFhFzYW1nYWF3YWFAMTYzLmNvbTAeFw0yNTExMjkxMzE2MTZa
+Fw0yNjExMjkxMzE2MTZaMHsxCzAJBgNVBAYTAkNOMRMwEQYDVQQIDApTb21lLVN0
+YXRlMSEwHwYDVQQKDBhJbnRlcm5ldCBXaWRnaXRzIFB0eSBMdGQxEjAQBgNVBAMM
+CXNhbWdhYXdhYTEgMB4GCSqGSIb3DQEJARYRc2FtZ2Fhd2FhQDE2My5jb20wggEi
+MA0GCSqGSIb3DQEBAQUAA4IBDwAwggEKAoIBAQCx0FOMxYofPi4QcxsL4tjnx3ap
+CGhLleOIvCJGIlOBaMa067vsVYT7IKrViAUaT6CUIMtlPHA43HLqBDS5EaFJKUea
+2oWGekJAmbrRJcnWbEO0dZ+dtp4l7pdC3x8jxqVA2jJN5aXRQ+P8y7CTQH0llEnd
+/Btc3Pyf3cnuNEoAD+EtnsQdXDRVv8ADjEcZOQaqco/i5TwYu3HtFVnt6+/R5kVm
+O3ZUZiCa7u5sCfo3SleNd2elhn/TOTmhhizMeYfq22GvYQ38KkkwrPggX7nalC1s
+zVMUPRs0ZfoKOe0F0Zo6yHbBvs3vZwX+cdZc2fSmydXVqIkHJAYuzE+QUCJLAgMB
+AAGjUzBRMB0GA1UdDgQWBBRHsg0+SXLM20W3F6ZnEzmdsl5ShjAfBgNVHSMEGDAW
+gBRHsg0+SXLM20W3F6ZnEzmdsl5ShjAPBgNVHRMBAf8EBTADAQH/MA0GCSqGSIb3
+DQEBCwUAA4IBAQBgwmiAQ16w2TEK8YrUv/ErCorvih5CO/ZkBCs5oDD8Bk+QGx3l
+m4M/Nhb278HkWtgXz3LSKhqELRpArtF9xgy3j8eFAEpTb2By0/zbWa7gyifynICC
+RIYDI7JXColuotDQDcVTRrIxEUadgq2sFHvbqLx4qWgiGaRpzym6610m0FutwSJi
+k7q06eIXEY2O2+4F5Yeo36cs2wJnIZNC1Gm3I/SRZDURw4TFrFL2BZoFw8sHcF0y
+Fl4Mg1e0Qm5jvJN91nOvYym5uIziBwgujQBE8A9IyW0uc9T8QNcLsa3BurllkAE0
+JLXD2DHy6t4W9twktrhoR53zJuuqgnPMmTQQ
+-----END CERTIFICATE-----)";
+
+const char *server_key = R"(-----BEGIN PRIVATE KEY-----
+MIIEvQIBADANBgkqhkiG9w0BAQEFAASCBKcwggSjAgEAAoIBAQCx0FOMxYofPi4Q
+cxsL4tjnx3apCGhLleOIvCJGIlOBaMa067vsVYT7IKrViAUaT6CUIMtlPHA43HLq
+BDS5EaFJKUea2oWGekJAmbrRJcnWbEO0dZ+dtp4l7pdC3x8jxqVA2jJN5aXRQ+P8
+y7CTQH0llEnd/Btc3Pyf3cnuNEoAD+EtnsQdXDRVv8ADjEcZOQaqco/i5TwYu3Ht
+FVnt6+/R5kVmO3ZUZiCa7u5sCfo3SleNd2elhn/TOTmhhizMeYfq22GvYQ38Kkkw
+rPggX7nalC1szVMUPRs0ZfoKOe0F0Zo6yHbBvs3vZwX+cdZc2fSmydXVqIkHJAYu
+zE+QUCJLAgMBAAECgf9EUq5ygmO64cuvQiTmlvbSXMmqXLtQC4PAIAFxz0dG4TdW
+xLUSzYUxxjDvQdSR+sJsBk/+4w+RMBKRPz+tmKmtSEjdYjv9RXRixIz7etZxHrEH
+WV4VIg3Vp4ru/FVHlIyEeGPb3/LffmFXuMptH5Yp4updA6yQ+Yv2JdOLAJ2QrCf+
+yY7hTQN+u9yvsgoGeb5hpssN0zxGRqzWIYip2zbJ8JlsN46N7tDAvN+SUbtPcREY
+U7S5MF70DJ4n9LmWSl1EAmo4VI9T5wrncgsJU8FiTqaiYPD4bagheTAxoa4Zwcqn
+yNx6c8x0uJFXxPbLMzY7CP1nOSL6pDBFuiXmB9ECgYEA9fd9HRZPilId6UDRUAD8
+DsYydwVHzwwGE+2zN56+jFwqMIB+Pzm93ftNuI0fYTWqt2FzJYlW7On4gbhuIaPL
+rzbj3BPbGHJsepF1oeaEHsOwu+sWCns6myIRPOjHUkJkTB72pspXVGuiEXc70co/
+onZpO9KFSoSyI0KJPLB2URsCgYEAuREmMrGIpYONTdD7LkzxqcE3OlY8o+Bvk9Y/
+bKsogJPImsOEXDiGrfh/OQ5jWHlSTdZS2fcoIM+yFuNZluNphuzFFXMREnLDheh2
+44Ci+qi54sf+TxAcMcF88QF41OOaAG9VzYwPDJ8hoSsouiZulZnUiI/8cyk8chyg
+tfwZtpECgYEAteuOhezyd4O0y8g9B8cyplrBCHbHXcOu2x575y9qD7Y7HhRrS6gR
+XhV4rn7yLpva4DcbSzABMsj6HDekfQ0AoV8fuK6W5cX7pcvgDRbJsVdbaCG/85Ch
+EAxqY3pnsdeZBxP/qe0OGkphXDmr7MaBuk+KFczm+O6cMqgLiO+bEvECgYEAt4W4
+GYFQfsIL+GULEYkgBTUj7WfjTqecPkCyOLMqwQbMYh0NPt6XQCIzF4ObJPt6kNG+
+64Nbed49PtFJ4IW3+iMF9hVbkq3YEwzKCSVheaykWa32FLVnIDg+DElnZ8Yky9Wc
+gu8nZV7Q3KCODLtb4mLgDmSq9hCobojRHmbXoOECgYEA718z7tBoKDfyPFTMbCOc
+DlXC3z5zAK2XUB1+92EXBDXK45yOJBQU/l1MslQMjMaIAjrAh71uGRJ3kQIwGKKy
+tDe4vkRzWzwq8iKb7Q+IbzXif1GilqSHJ04T0bMFw1r+3TViFHQIi2x3ILvEkBGm
+h/AwPbciuIqmBgK4zkXXen8=
+-----END PRIVATE KEY-----)";
+
+int load_cert_and_key_from_str(SSL_CTX *ctx, const char *cert_pem, const char *key_pem) {
+    BIO *bio_cert = NULL;
+    BIO *bio_key = NULL;
+    X509 *cert = NULL;
+    EVP_PKEY *pkey = NULL;
+
+    bio_cert = BIO_new_mem_buf((void*)cert_pem, -1); // -1 表示自动计算长度
+    if (!bio_cert) goto err;
+
+    cert = PEM_read_bio_X509(bio_cert, NULL, NULL, NULL);
+    if (!cert) goto err;
+
+    bio_key = BIO_new_mem_buf((void*)key_pem, -1);
+    if (!bio_key) goto err;
+
+    pkey = PEM_read_bio_PrivateKey(bio_key, NULL, NULL, NULL);
+    if (!pkey) goto err;
+
+    if (SSL_CTX_use_certificate(ctx, cert) <= 0) goto err;
+    if (SSL_CTX_use_PrivateKey(ctx, pkey) <= 0) goto err;
+
+    if (!SSL_CTX_check_private_key(ctx)) goto err;
+
+    X509_free(cert);
+    EVP_PKEY_free(pkey);
+    BIO_free(bio_cert);
+    BIO_free(bio_key);
+    return 1;
+err:
+    ERR_print_errors_fp(stderr);
+    if (cert) X509_free(cert);
+    if (pkey) EVP_PKEY_free(pkey);
+    if (bio_cert) BIO_free(bio_cert);
+    if (bio_key) BIO_free(bio_key);
+    return 0;
+}
+
+ice::task<void> server_coro(ice::net::io_context& io_ctx, const char *crt, const char *key) {
     using namespace ice;
+    using DtlsTransport = ssl::dtls_transport<datagram_transport<net::ip::udp::socket>>;
 
-    SSL_CTX *ctx;
-    SSL *ssl;
-    BIO *bio;
-    int sock;
-    struct sockaddr_in server_addr, client_addr;
-    char buffer[MAX_BUFFER];
-    int ret;
-
-    ctx = SSL_CTX_new(DTLS_server_method());
+    SSL_CTX *ctx = SSL_CTX_new(DTLS_server_method());
     if (!ctx) {
         ERR_print_errors_fp(stderr);
-        return 1;
+        co_return;
     }
     utils::scope_guard ctx_guard([&]() noexcept {
         SSL_CTX_free(ctx);
     });
 
-    if (SSL_CTX_use_certificate_file(ctx, crt, SSL_FILETYPE_PEM) <= 0) {
-        ERR_print_errors_fp(stderr);
-        return -1;
-    }
-    if (SSL_CTX_use_PrivateKey_file(ctx, key, SSL_FILETYPE_PEM) <= 0) {
-        ERR_print_errors_fp(stderr);
-        return -1;
+    if (!load_cert_and_key_from_str(ctx, crt, key)) {
+        std::cerr << "load_cert_and_key_from_str failed\n";
+        co_return;
     }
 
-    sock = socket(AF_INET, SOCK_DGRAM, 0);
-    if (sock < 0) {
-        perror("socket");
-        return -1;
-    }
-    utils::scope_guard sock_guard([&]() noexcept {
-        close(sock);
-    });
+    net::ip::udp::socket sock{io_ctx};
+    sock.open(net::ip::udp::v4());
+    sock.bind(net::ip::udp::endpoint(net::ip::make_address("127.0.0.1"), SERVER_PORT));
+    auto sock_transport = std::make_shared<datagram_transport<net::ip::udp::socket>>(io_ctx, std::move(sock));
 
-    memset(&server_addr, 0, sizeof(server_addr));
-    server_addr.sin_family = AF_INET;
-    server_addr.sin_addr.s_addr = inet_addr("127.0.0.1");
-    server_addr.sin_port = htons(SERVER_PORT);
+    net::ip::udp::endpoint client_ep{net::ip::make_address("127.0.0.1"), CLIENT_PORT};
 
-    if (bind(sock, (struct sockaddr*)&server_addr, sizeof(server_addr)) < 0) {
-        perror("bind");
-        return -1;
-    }
-
-    memset(&client_addr, 0, sizeof(client_addr));
-    client_addr.sin_family = AF_INET;
-    client_addr.sin_addr.s_addr = inet_addr("127.0.0.1");
-    client_addr.sin_port = htons(CLIENT_PORT);
-
-    bio = BIO_new_dgram(sock, BIO_NOCLOSE);
-    if (!bio) {
-        ERR_print_errors_fp(stderr);
-        return -1;
-    }
-    utils::scope_guard bio_guard([&]() noexcept {
-        BIO_free_all(bio);
-    });
-
-    BIO_ctrl(bio, BIO_CTRL_DGRAM_SET_PEER, 0, &client_addr);
-
-    ssl = SSL_new(ctx);
+    SSL *ssl = SSL_new(ctx);
     if (!ssl) {
         ERR_print_errors_fp(stderr);
-        return -1;
+        co_return;
     }
     utils::scope_guard ssl_guard([&]() noexcept {
         SSL_free(ssl);
     });
 
-    SSL_set_bio(ssl, bio, bio);
-    bio_guard.dismiss();
+    SSL_set_accept_state(ssl);
 
-    std::cout << "Waiting for DTLS handshake...\n";
-    ret = SSL_accept(ssl);
-    if (ret <= 0) {
-        ERR_print_errors_fp(stderr);
-        return -1;
+    DtlsTransport dtls_server{sock_transport, client_ep, ssl};
+    ssl_guard.dismiss();
+
+    sock_transport->start();
+    if (auto ec = co_await dtls_server.async_handshake(DtlsTransport::handshake_type::server); ec) {
+        std::cerr << "DTLS accept error: " << ec.message() << '\n';
+        co_return;
     }
-    std::cout << "DTLS handshake completed\n";
+    std::cout << "DTLS accept completed\n";
 
     std::cout << "Waiting for data from client...\n";
+    char buffer[MAX_BUFFER];
     while (true) {
-        ret = SSL_read(ssl, buffer, sizeof(buffer) - 1);
-        if (ret > 0) {
-            buffer[ret] = '\0';
-            ret = SSL_write(ssl, buffer, ret);
-            if (ret <= 0) {
+        auto [ec, n] = co_await dtls_server.async_receive(net::buffer(buffer, sizeof(buffer) - 1));
+        if (ec) {
+            std::cout << "Server read error: " << ec.message() << '\n';
+            co_return;
+        } else if (n > 0) {
+            buffer[n] = '\0';
+            std::tie(ec, n) = co_await dtls_server.async_send(net::buffer(buffer, n));
+            if (ec || n == 0) {
                 std::cout << "Sent response failed\n";
-                return -1;
+                co_return;
             }
-        } else if (ret == 0) {
+        } else if (n == 0) {
             std::cout << "Client closed the connection\n";
             // test fast shutdown
-            std::this_thread::sleep_for(std::chrono::seconds{10});
-            SSL_shutdown(ssl);
-            return 0;
-        } else {
-            ERR_print_errors_fp(stderr);
-            return -1;
+            net::steady_timer timer{io_ctx, std::chrono::seconds(5)};
+            co_await timer.async_wait(asio2exec::use_sender);
+            ec = co_await dtls_server.async_shutdown(false);
+            if (ec)
+                std::cerr << "Server shutdown failed: " << ec.message() << '\n';
+            else
+                std::cout << "Server shutdown success\n";
+            co_return;
         }
     }
-    return 0;
+    co_return;
 }
 
 int main() {
     using namespace ice;
-    using DtlsClient = ssl::dtls_transport<datagram_transport<net::ip::udp::socket>>;
+    using DtlsTransport = ssl::dtls_transport<datagram_transport<net::ip::udp::socket>>;
 
     SSL_library_init();
     SSL_load_error_strings();
     OpenSSL_add_all_algorithms();
 
-    std::thread server_th{dtls_server, "/mnt/d/openSource/asio-ice/clang-build/server.crt", "/mnt/d/openSource/asio-ice/clang-build/server.key"};
-
-    sleep(5);
-
     net::io_context io_ctx;
+    stdexec::start_detached(stdexec::starts_on(
+        asio2exec::scheduler{io_ctx},
+        server_coro(io_ctx, server_crt, server_key)
+    ));
+
     SSL_CTX *ctx;
     SSL *ssl;
 
@@ -189,12 +236,12 @@ int main() {
 
     SSL_set_connect_state(ssl);
 
-    DtlsClient dtls_client{sock_transport, server_ep, ssl};
+    DtlsTransport dtls_client{sock_transport, server_ep, ssl};
     ssl_guard.dismiss();
 
     auto work = [&]()-> ice::task<void> {
         sock_transport->start();
-        auto ec = co_await dtls_client.async_handshake(DtlsClient::handshake_type::client);
+        auto ec = co_await dtls_client.async_handshake(DtlsTransport::handshake_type::client);
         if (ec) {
             std::cerr << "DTLS connect error: " << ec.message() << '\n';
             co_return;
@@ -240,7 +287,6 @@ int main() {
                                 }))
                             ));
     io_ctx.run();
-    server_th.join();
     std::cout << "Finish\n";
     return 0;
 }

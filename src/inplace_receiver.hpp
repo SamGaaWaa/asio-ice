@@ -269,7 +269,7 @@ template <> struct inplace_receiver<void> {
                 case VALUE:
                     _storage->_state = EMPTY;
                     return stdexec::set_value(std::move(_r));
-                case ERROR:
+                case ERR:
                     _storage->_state = EMPTY;
                     stdexec::set_error(std::move(_r),
                                        std::move(_storage->_error));
@@ -321,7 +321,7 @@ template <> struct inplace_receiver<void> {
                 case VALUE:
                     _storage->_state = EMPTY;
                     return stdexec::set_value(std::move(_r));
-                case ERROR:
+                case ERR:
                     _storage->_state = EMPTY;
                     stdexec::set_error(std::move(_r),
                                        std::move(_storage->_error));
@@ -382,7 +382,7 @@ template <> struct inplace_receiver<void> {
             op_base *op = std::exchange(_waiter, nullptr);
             return op->set_error(op, std::move(e));
         }
-        _state = ERROR;
+        _state = ERR;
         _error = std::move(e);
     }
 
@@ -395,7 +395,7 @@ template <> struct inplace_receiver<void> {
         _state = STOPPED;
     }
 
-    enum state_t { EMPTY, STOPPED, VALUE, ERROR };
+    enum state_t { EMPTY, STOPPED, VALUE, ERR };
 
     stdexec::inplace_stop_source _source;
     state_t _state{EMPTY};

@@ -59,4 +59,24 @@ private:
     ice::shared_promise<void> _notifier{};
 };
 
+template <class T>
+inline bool operator==(const property<T>& a, const T& b) noexcept {
+    return a.get() == b;
+}
+
+template <class T>
+inline bool operator==(const T& a, const property<T>& b) noexcept {
+    return a == b.get();
+}
+
+template <class T>
+inline auto operator<=>(const property<T>& a, const T& b) noexcept {
+    return a.get() <=> b;
+}
+
+template <class T>
+inline auto operator<=>(const T& a, const property<T>& b) noexcept {
+    return a <=> b.get();
+}
+
 } // namespace ice::utils

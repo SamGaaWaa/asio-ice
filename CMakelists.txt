@@ -9,9 +9,9 @@ set(STANDALONE_ASIO_DIR "E:\\openSource\\asio")
 # set(STDEXEC_DIR "E:\\openSource\\asio2exec\\stdexec")
 # set(Boost_DIR "D:\\openSource\\boost_1_88_0_prebuild\\lib64-msvc-14.3\\cmake\\Boost-1.88.0")
 set(ASIOICE_USE_BOOST_ASIO ON)
-set(OPENSSL_DIR "E:\\openSource\\openssl-3.1.0\\x64")
-set(OPENSSL_LIB_DIR ${OPENSSL_DIR}/lib)
-set(OPENSSL_INCLUDE_DIR ${OPENSSL_DIR}/include)
+# set(OPENSSL_DIR "E:\\openSource\\openssl-3.1.0\\x64")
+# set(OPENSSL_LIB_DIR ${OPENSSL_DIR}/lib)
+# set(OPENSSL_INCLUDE_DIR ${OPENSSL_DIR}/include)
 set(ENABLE_IO_URING OFF)
 
 find_library(
