@@ -32,22 +32,13 @@ endif()
 
 if(ASIOICE_USE_BOOST_ASIO)
     set(__ASIOICE_USE_BOOST_ASIO 1)
-    set(CPPMDNS_USE_BOOST_ASIO ON)
+    # set(CPPMDNS_USE_BOOST_ASIO ON)
 else()
     set(__ASIOICE_USE_BOOST_ASIO 0)
-    set(CPPMDNS_USE_BOOST_ASIO OFF)
+    # set(CPPMDNS_USE_BOOST_ASIO OFF)
 endif()
 
 set(Boost_DEBUG ON)
-# if(CMAKE_BUILD_TYPE STREQUAL "Debug")
-#     message(STATUS "Debug build: Using Boost debug libraries")
-#     set(Boost_USE_DEBUG_LIBS ON)
-#     set(Boost_USE_RELEASE_LIBS OFF)
-# elseif(CMAKE_BUILD_TYPE STREQUAL "Release")
-#     message(STATUS "${CMAKE_BUILD_TYPE} build: Using Boost release libraries")
-#     set(Boost_USE_DEBUG_LIBS OFF)
-#     set(Boost_USE_RELEASE_LIBS ON)
-# endif()
 set(Boost_USE_STATIC_LIBS ON)
 find_package(Boost 1.83 CONFIG REQUIRED COMPONENTS json context)
 if(Boost_FOUND)
@@ -67,7 +58,7 @@ else()
 endif()
 configure_file("${CMAKE_CURRENT_SOURCE_DIR}/include/config.hpp.in" "${CMAKE_CURRENT_SOURCE_DIR}/include/config.hpp")
 
-add_subdirectory(cppmdns)
+# add_subdirectory(cppmdns)
 
 file(GLOB ICE_SRC_FILES 
     src/ice.cpp
@@ -95,7 +86,7 @@ target_compile_options(asioice_compile_flags INTERFACE
                        $<$<COMPILE_LANG_AND_ID:CXX,MSVC>:/Zc:__cplusplus /Zc:preprocessor /D_WIN32_WINNT=0x0601 /Zm200 /bigobj /W4 /wd4100 /wd4101 /wd4127 /wd4324 /wd4456 /wd4459>
                        )
 
-target_link_libraries(asioice PRIVATE cppmdns ${OPENSSL_SSL_LIB} ${OPENSSL_CRYPTO_LIB} Boost::boost Boost::context asioice_compile_flags)
+target_link_libraries(asioice PRIVATE ${OPENSSL_SSL_LIB} ${OPENSSL_CRYPTO_LIB} Boost::boost Boost::context asioice_compile_flags)
 if(NOT ASIOICE_USE_BOOST_ASIO)
     target_include_directories(asioice PUBLIC ${STANDALONE_ASIO_DIR}/asio/include)
 endif()
@@ -106,7 +97,7 @@ target_include_directories(asioice PRIVATE ${OPENSSL_INCLUDE_DIR})
 target_include_directories(asioice PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/third_party)
 
 add_library(test_flags INTERFACE)
-target_link_libraries(test_flags INTERFACE cppmdns ${OPENSSL_SSL_LIB} ${OPENSSL_CRYPTO_LIB} Boost::boost Boost::context)
+target_link_libraries(test_flags INTERFACE ${OPENSSL_SSL_LIB} ${OPENSSL_CRYPTO_LIB} Boost::boost Boost::context)
 if(NOT ASIOICE_USE_BOOST_ASIO)
     target_include_directories(test_flags INTERFACE ${STANDALONE_ASIO_DIR}/asio/include)
 endif()
@@ -127,5 +118,5 @@ if(ICE_TEST)
 endif()
 
 add_executable(ice_test main.cpp)
-target_link_libraries(ice_test cppmdns ${OPENSSL_SSL_LIB} ${OPENSSL_CRYPTO_LIB} asioice test_flags)
+target_link_libraries(ice_test ${OPENSSL_SSL_LIB} ${OPENSSL_CRYPTO_LIB} asioice test_flags)
 target_include_directories(ice_test PRIVATE ${OPENSSL_INCLUDE_DIR})

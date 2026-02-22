@@ -33,7 +33,6 @@ using std::error_code;
 #endif
 
 #include <exec/async_scope.hpp>
-#include <exec/task.hpp>
 
 #include <chrono>
 #include <iostream>
@@ -42,8 +41,7 @@ using std::error_code;
 constexpr auto buffer_max_size = 16;
 
 template <class T>
-using coro_task =
-    exec::__task::basic_task<T, exec::__task::__raw_task_context<T>>;
+using coro_task = ice::task<T>;
 
 uint64_t asio_channel_test(int times) {
     using namespace ice;

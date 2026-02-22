@@ -277,7 +277,7 @@ agent_datagram_impl<Layer>::create_relayed_candidate(std::vector<ice::candidate>
 
 template <class Layer>
 ice::task<void>
-agent_datagram_impl<Layer>::do_gather_candidates(auto... self) {
+agent_datagram_impl<Layer>::do_gather_candidates() {
     if (this->_state == agent_state_t::CLOSED ||
         this->_state == agent_state_t::CONNECTED)
         co_return;
@@ -648,7 +648,9 @@ void agent_datagram_impl<Layer>::check_complete(
 }
 
 template <class Layer>
-ice::task<bool> agent_datagram_impl<Layer>::connect(auto... self) noexcept {
+ice::task<bool>
+agent_datagram_impl<Layer>::do_connect(auto... self) noexcept
+{
     if (this->_state == agent_state_t::CONNECTING ||
         this->_state == agent_state_t::CLOSED ||
         this->_state == agent_state_t::CONNECTED ||
@@ -1651,6 +1653,48 @@ agent_datagram_impl<Layer>::create_turn_permission(const net::ip::address& ip)
                 this->shared_from_this());
         }
     }
+}
+
+template <class Layer>
+auto
+agent_datagram_impl<Layer>::on_closed() noexcept {
+    return stdexec::just() |
+            stdexec::let_value([this] {
+                return utils::if_else(
+                            stdexec::just(this->_state == agent_state_t::CLOSED),
+                            [] { return stdexec::just(); },
+                            [this] {
+                                return this->_state.on_change() |
+                                        stdexec::continues_on(asio2exec::scheduler{this->context()});
+                            }
+                        );
+            }) |
+            stdexec::then([this] {
+                return this->_state == agent_state_t::CLOSED;
+            }) |
+            exec::repeat_until();
+}
+
+template <class Layer>
+auto
+agent_datagram_impl<Layer>::on_connected_or_closed() noexcept {
+    return stdexec::just() |
+            stdexec::let_value([this] {
+                return utils::if_else(
+                            stdexec::just(this->_state == agent_state_t::CONNECTED ||
+                                            this->_state == agent_state_t::CLOSED),
+                            [] { return stdexec::just(); },
+                            [this] {
+                                return this->_state.on_change() |
+                                        stdexec::continues_on(asio2exec::scheduler{this->context()});
+                            }
+                        );
+            }) |
+            stdexec::then([this] {
+                return this->_state == agent_state_t::CONNECTED ||
+                        this->_state == agent_state_t::CLOSED;
+            }) |
+            exec::repeat_until();
 }
 
 } // namespace ice::impl

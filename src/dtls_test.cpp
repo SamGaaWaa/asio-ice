@@ -21,6 +21,7 @@ namespace net = asio;
 #endif
 
 #include <exec/finally.hpp>
+#include <exec/start_detached.hpp>
 
 #define SERVER_PORT 4433
 #define CLIENT_PORT 12345
@@ -201,7 +202,7 @@ int main() {
     OpenSSL_add_all_algorithms();
 
     net::io_context io_ctx;
-    stdexec::start_detached(stdexec::starts_on(
+    exec::start_detached(stdexec::starts_on(
         asio2exec::scheduler{io_ctx},
         server_coro(io_ctx, server_crt, server_key)
     ));
@@ -279,7 +280,7 @@ int main() {
     };
 
     asio2exec::scheduler sched{io_ctx};
-    stdexec::start_detached(stdexec::starts_on(
+    exec::start_detached(stdexec::starts_on(
                                 sched,
                                 exec::finally(work(), stdexec::just() | stdexec::then([&] {
                                     dtls_client.close();

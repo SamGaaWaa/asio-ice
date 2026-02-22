@@ -230,7 +230,7 @@ class async_queue {
 
 } // namespace ice
 
-// #include <exec/task.hpp>
+// #include <stdexec/execution.hpp>
 // #include <exec/async_scope.hpp>
 
 // #include <iostream>
@@ -238,7 +238,7 @@ class async_queue {
 // void test() {
 //     async_queue<int> q(10);
 
-//     auto reader = [&](std::string name)->exec::task<void> {
+//     auto reader = [&](std::string name)->stdexec::task<void> {
 //         while (true) {
 //             std::optional<int> x = co_await q.async_pop();
 //             if (!x) {
@@ -249,7 +249,7 @@ class async_queue {
 //         }
 //     };
 
-//     auto writer = [&]()->exec::task<void> {
+//     auto writer = [&]()->stdexec::task<void> {
 //         for (int i = 0; i < 20; ++i) {
 //             q.push(i);
 //         }

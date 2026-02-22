@@ -160,10 +160,9 @@ template <class... Args> struct shared_promise {
                 stdexec::set_stopped(std::move(_r));
             }
 
-            friend void tag_invoke(stdexec::start_t, op_t &self) noexcept {
-                self._ops.push_back(self);
+            void start() & noexcept {
+                _ops.push_back(*this);
             }
-
           private:
             R _r;
             operation_list_type &_ops;
@@ -199,16 +198,15 @@ template <class... Args> struct shared_promise {
                 stdexec::set_stopped(std::move(_r));
             }
 
-            friend void tag_invoke(stdexec::start_t,
-                                   cancelable_op_t &self) noexcept {
-                const auto &env = stdexec::get_env(self._r);
+            void start() & noexcept {
+                const auto &env = stdexec::get_env(_r);
                 const auto &token = stdexec::get_stop_token(env);
                 if (token.stop_requested()) {
-                    stdexec::set_stopped(std::move(self._r));
+                    stdexec::set_stopped(std::move(_r));
                     return;
                 }
-                self._ops.push_back(self);
-                self._stop_cb.emplace(token, on_stop_t{self});
+                _ops.push_back(*this);
+                _stop_cb.emplace(token, on_stop_t{*this});
             }
 
           private:
@@ -230,14 +228,14 @@ template <class... Args> struct shared_promise {
 
       public:
         template <stdexec::receiver R>
-        friend stdexec::operation_state auto
-        tag_invoke(stdexec::connect_t, future f, R &&r) noexcept {
+        stdexec::operation_state auto
+        connect(R &&r) && noexcept {
             if constexpr (stdexec::unstoppable_token<
                               stdexec::stop_token_of_t<stdexec::env_of_t<R>>>) {
-                return op_t<std::decay_t<R>>{std::forward<R>(r), *f._ops};
+                return op_t<std::decay_t<R>>{std::forward<R>(r), *_ops};
             } else {
                 return cancelable_op_t<std::decay_t<R>>{std::forward<R>(r),
-                                                        *f._ops};
+                                                        *_ops};
             }
         }
 
@@ -355,8 +353,8 @@ template <> struct shared_promise<void> {
                 stdexec::set_stopped(std::move(_r));
             }
 
-            friend void tag_invoke(stdexec::start_t, op_t &self) noexcept {
-                self._ops.push_back(self);
+            void start() & noexcept {
+                _ops.push_back(*this);
             }
 
           private:
@@ -385,16 +383,15 @@ template <> struct shared_promise<void> {
                 stdexec::set_stopped(std::move(_r));
             }
 
-            friend void tag_invoke(stdexec::start_t,
-                                   cancelable_op_t &self) noexcept {
-                const auto &env = stdexec::get_env(self._r);
+            void start() & noexcept {
+                const auto &env = stdexec::get_env(_r);
                 const auto &token = stdexec::get_stop_token(env);
                 if (token.stop_requested()) {
-                    stdexec::set_stopped(std::move(self._r));
+                    stdexec::set_stopped(std::move(_r));
                     return;
                 }
-                self._ops.push_back(self);
-                self._stop_cb.emplace(token, on_stop_t{self});
+                _ops.push_back(*this);
+                _stop_cb.emplace(token, on_stop_t{*this});
             }
 
           private:
@@ -416,14 +413,14 @@ template <> struct shared_promise<void> {
 
       public:
         template <stdexec::receiver R>
-        friend stdexec::operation_state auto
-        tag_invoke(stdexec::connect_t, future f, R &&r) noexcept {
+        stdexec::operation_state auto
+        connect(R &&r) && noexcept {
             if constexpr (stdexec::unstoppable_token<
                               stdexec::stop_token_of_t<stdexec::env_of_t<R>>>) {
-                return op_t<std::decay_t<R>>{std::forward<R>(r), *f._ops};
+                return op_t<std::decay_t<R>>{std::forward<R>(r), *_ops};
             } else {
                 return cancelable_op_t<std::decay_t<R>>{std::forward<R>(r),
-                                                        *f._ops};
+                                                        *_ops};
             }
         }
 

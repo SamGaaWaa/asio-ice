@@ -211,28 +211,18 @@ struct promise_base : public stdexec::with_awaitable_senders<D>
     struct env_t {
         const promise_base *promise;
 
-        friend auto
-        tag_invoke(stdexec::get_stop_token_t,
-                   const env_t &env) noexcept -> stdexec::inplace_stop_token {
-            return env.promise->get_token();
+        auto
+        query(stdexec::get_stop_token_t) const noexcept -> stdexec::inplace_stop_token {
+            return promise->get_token();
         }
-
-        // friend auto tag_invoke(stdexec::get_allocator_t, const env_t&
-        // env)noexcept
-        //     -> std::pmr::polymorphic_allocator<>
-        // {
-        //     return env.promise->get_allocator();
-        // }
     };
 
-    friend env_t tag_invoke(stdexec::get_env_t,
-                            const promise_base &promise) noexcept {
-        return {&promise};
+    env_t get_env() const noexcept {
+        return {this};
     }
 
   private:
     stdexec::inplace_stop_token _stop_token{};
-    // mutable __child_storage _child_storage{};
 };
 
 struct __any_stop_callback_t {

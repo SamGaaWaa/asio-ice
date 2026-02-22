@@ -7,3 +7,4 @@ wireshark
 *.log
 aioice_test
 msvc-build
+include/config.hpp

@@ -25,6 +25,8 @@
 
 #include <exec/async_scope.hpp>
 #include <exec/finally.hpp>
+#include <exec/start_detached.hpp>
+#include <exec/repeat_until.hpp>
 
 #if ASIOICE_USE_BOOST_ASIO > 0
 #define ASIO_TO_EXEC_USE_BOOST 1
@@ -124,6 +126,8 @@ struct agent_datagram_impl
         return _state.on_change() |
             stdexec::continues_on(asio2exec::scheduler{_ctx});
     }
+    auto on_closed() noexcept;
+    auto on_connected_or_closed() noexcept;
 
     check_list_state_t check_list_state() const noexcept {
         return _check_list_state;
@@ -134,10 +138,10 @@ struct agent_datagram_impl
     bool all_components_nominated() const noexcept;
     bool all_components_have_valid_pair() const noexcept;
 
-    auto gather_candidates(auto... self) {
+    auto gather_candidates() {
         return utils::stop_when(
-            this->do_gather_candidates(this->shared_from_this(), std::move(self)...),
-            this->_promise.get_future()
+            this->do_gather_candidates(),
+            this->on_connected_or_closed()
         );
     }
 
@@ -147,9 +151,15 @@ struct agent_datagram_impl
         return stdexec::just(true);
     }
 
-    ice::task<bool> connect(auto... self) noexcept;
+    auto connect(auto... self) noexcept {
+        return utils::stop_when(
+            this->do_connect(std::move(self)...),
+            this->on_closed()
+        );
+    }
 
-    boost::container::small_vector<ice::candidate_pair*, 2> nominated_pairs() const;
+    boost::container::small_vector<ice::candidate_pair*, 2>
+    nominated_pairs() const;
 
     template <class Func>
     void on_local_candidates(Func&& cb) {
@@ -212,7 +222,7 @@ struct agent_datagram_impl
         succeed, failed, canceled
     };
 
-    ice::task<void> do_gather_candidates(auto... self);
+    ice::task<void> do_gather_candidates();
 
     ice::task<void> get_component_candidates(
         std::vector<ice::candidate> &component_candidates, uint8_t component,
@@ -277,6 +287,8 @@ struct agent_datagram_impl
         ice::any_transport transport,
         ice::endpoint source,
         ice::io_buffer_ptr buf);
+
+    ice::task<bool> do_connect(auto... self) noexcept;
 
     template <class Transport>
     auto send_stun(Transport& transport, const stun::message& msg, const ice::endpoint& ep);
@@ -543,7 +555,7 @@ inline ice::task<void> gather_task(ice::net::io_context &ctx) try {
 
 void gathering_test(int num) {
     ice::net::io_context ctx;
-    stdexec::start_detached(
+    exec::start_detached(
         stdexec::starts_on(asio2exec::scheduler{ctx}, gather_task(ctx)));
     ctx.run();
 }

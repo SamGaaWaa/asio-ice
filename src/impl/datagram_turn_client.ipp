@@ -559,7 +559,7 @@ datagram_client<NextLayer>::create_permission(std::ranges::view auto peers, auto
                                 return this->_creating_permissions.find(ip) == this->_creating_permissions.end();
                             });
                         }) |
-                        exec::repeat_effect_until() |
+                        exec::repeat_until() |
                         stdexec::then([&] {
                             return std::ranges::all_of(creating, [&](const auto& ip) {
                                 return this->_permissions.find(ip) != this->_permissions.end();

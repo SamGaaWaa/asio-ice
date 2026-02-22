@@ -25,6 +25,8 @@ namespace net = asio;
 
 #include <iostream>
 
+#include <exec/start_detached.hpp>
+
 ice::task<void> timeout(ice::net::io_context &ctx) {
     ice::net::steady_timer timer(ctx, std::chrono::seconds(60));
     std::cout << "Waiting...\n";
@@ -55,7 +57,7 @@ void test() {
         }),
         timer.async_wait(asio2exec::use_sender));
 
-    stdexec::start_detached(std::move(work));
+    exec::start_detached(std::move(work));
 
     ctx.run();
 }

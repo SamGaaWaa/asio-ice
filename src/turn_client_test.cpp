@@ -8,6 +8,8 @@
 
 #include <iostream>
 
+#include <exec/start_detached.hpp>
+
 using Transport = ice::datagram_transport<ice::net::ip::udp::socket>;
 using TurnClient = ice::turn::client<Transport, true>;
 
@@ -134,10 +136,11 @@ void allocate_test(std::size_t epoch_count) {
 
     asio2exec::scheduler sched{ctx};
     auto work = stdexec::when_all(peer_recv_coro(),
-                                  allocate_coro() | stdexec::let_value([] {
-                                      return stdexec::just_stopped();
+                                  allocate_coro() | stdexec::let_value([&] {
+                                      return stdexec::just_stopped() |
+                                            stdexec::continues_on(sched);
                                   }));
-    stdexec::start_detached(stdexec::starts_on(sched, std::move(work)));
+    exec::start_detached(stdexec::starts_on(sched, std::move(work)));
     ctx.run();
 
     auto total_time = std::chrono::duration_cast<std::chrono::duration<double>>(
