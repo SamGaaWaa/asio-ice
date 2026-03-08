@@ -258,14 +258,14 @@ agent_datagram_impl<Layer>::create_relayed_candidate(std::vector<ice::candidate>
     create_stun_receiver(turn_transport);
     tmp.emplace_back(ice::candidate{
         .foundation =
-            candidate_foundation(candidate_type::relayed, this->_config.transport,
+            candidate_foundation(candidate_type::relay, this->_config.transport,
                                 relayed.address(),
                                 client->remote_endpoint().address()),
         .component = component,
         .transport_type = this->_config.transport,
-        .priority = candidate_priority(component, candidate_type::relayed),
+        .priority = candidate_priority(component, candidate_type::relay),
         .endpoint = relayed,
-        .type = candidate_type::relayed,
+        .type = candidate_type::relay,
         .transport = std::move(turn_transport)
     });
     if (this->_on_local_candidates)
@@ -328,7 +328,7 @@ inline bool __validate_remote_candidate(const ice::candidate &c) noexcept {
     switch (c.type) {
     case ice::candidate_type::host:
     case ice::candidate_type::srflx:
-    case ice::candidate_type::relayed:
+    case ice::candidate_type::relay:
         return true;
     default:
         return false;
@@ -806,7 +806,7 @@ agent_datagram_impl<Layer>::do_check(check_task ct) {
         req.set_hmac_key(this->remote_password());
 
         // Create permission
-        if (pair.local_candidate().type == ice::candidate_type::relayed) {
+        if (pair.local_candidate().type == ice::candidate_type::relay) {
             auto client = pair.local_candidate().transport.template get<typename agent_datagram_impl<Layer>::turn_client_type>();
             assert(client);
             if (!client->has_permission(pair.remote_candidate().endpoint.address())) {
@@ -1585,14 +1585,14 @@ agent_datagram_impl<Layer>::free_candidates() {
 
     boost::container::flat_multimap<typename agent_datagram_impl<Layer>::turn_client_type*, net::ip::address> in_use_permissions;
     for (auto pair: nominated_pairs) {
-        if (pair->local_candidate().type != ice::candidate_type::relayed)
+        if (pair->local_candidate().type != ice::candidate_type::relay)
             continue;
         auto client = pair->local_candidate().transport.template get<typename agent_datagram_impl<Layer>::turn_client_type>();
         assert(client);
         in_use_permissions.emplace(client, pair->remote_candidate().endpoint.address());
     }
     for (auto pair: nominated_pairs) {
-        if (pair->local_candidate().type != ice::candidate_type::relayed)
+        if (pair->local_candidate().type != ice::candidate_type::relay)
             continue;
         auto client = pair->local_candidate().transport.template get<typename agent_datagram_impl<Layer>::turn_client_type>();
         assert(client);
@@ -1639,7 +1639,7 @@ agent_datagram_impl<Layer>::create_turn_permission(const net::ip::address& ip)
     if (this->_state == agent_state_t::CLOSED)
         return;
     for (const auto& local_c: this->_local_candidates) {
-        if (local_c.type != ice::candidate_type::relayed)
+        if (local_c.type != ice::candidate_type::relay)
             continue;
         auto client = local_c.transport.template get<typename agent_datagram_impl<Layer>::turn_client_type>();
         assert(client);

@@ -3,6 +3,8 @@
 #include "json.hpp"
 #include "string_utils.hpp"
 
+#include <ctre.hpp>
+
 #include <cstring>
 #include <iomanip>
 #include <iostream>
@@ -11,7 +13,7 @@
 
 namespace ice {
 
-std::string_view to_string(candidate_type type) noexcept {
+std::string_view type_to_string(candidate_type type) noexcept {
     switch (type) {
     case candidate_type::host:
         return "host";
@@ -19,7 +21,7 @@ std::string_view to_string(candidate_type type) noexcept {
         return "srflx";
     case candidate_type::prflx:
         return "prflx";
-    case candidate_type::relayed:
+    case candidate_type::relay:
         return "relay";
     }
     return "unknown";
@@ -38,7 +40,7 @@ std::string candidate_foundation(candidate_type type,
                                  const net::ip::address &base_address,
                                  std::optional<net::ip::address> server) {
     std::string key;
-    std::string_view type_str = to_string(type);
+    std::string_view type_str = type_to_string(type);
     std::string addr_str = base_address.to_string();
     key.reserve(type_str.size() + 2 + transport.size() + addr_str.size() + 17);
     key += type_str;
@@ -79,7 +81,7 @@ std::string candidate::to_string(int indent) const {
     j["transport"] = this->transport_type;
     j["priority"] = this->priority;
     j["endpoint"] = this->endpoint.to_string();
-    j["type"] = ice::to_string(this->type);
+    j["type"] = type_to_string(this->type);
 
     if (this->related) {
         j["related"] = this->related->to_string();
@@ -94,21 +96,6 @@ std::string candidate::to_string(int indent) const {
     return j.dump(indent);
 }
 
-// bool operator==(const candidate &lhs, const candidate &rhs) noexcept {
-//     return lhs.foundation == rhs.foundation && lhs.component == rhs.component &&
-//            std::ranges::equal(lhs.transport_type, rhs.transport_type,
-//                               [](char a, char b) noexcept {
-//                                   return std::tolower(a) == std::tolower(b);
-//                               }) &&
-//            lhs.priority == rhs.priority && lhs.endpoint == rhs.endpoint &&
-//            lhs.type == rhs.type && lhs.related == rhs.related &&
-//            std::ranges::equal(lhs.tcptype, rhs.tcptype,
-//                               [](char a, char b) noexcept {
-//                                   return std::tolower(a) == std::tolower(b);
-//                               }) &&
-//            lhs.generation == rhs.generation;
-// }
-
 bool candidate::can_pair_with(const candidate &other) const noexcept {
     return this->type != ice::candidate_type::srflx &&
            this->component == other.component &&
@@ -117,6 +104,103 @@ bool candidate::can_pair_with(const candidate &other) const noexcept {
             (this->endpoint.address().is_v6() &&
              other.endpoint.address().is_v6())) &&
             utils::case_insensitive_equal(this->transport_type, other.transport_type);
+}
+
+std::optional<candidate>
+candidate::from_sdp(std::string_view sdp, std::size_t *nread) noexcept
+{
+    const auto match = ctre::match<
+        R"(^candidate: *(?<fd>[a-zA-Z\d+/]{1,32}))"
+        R"( +(?<com>\d{1,5}))"
+        R"( +(?<tran>[a-zA-Z]+))"
+        R"( +(?<pri>\d{1,10}))"
+        R"( +(?<addr>[a-zA-Z0-9.:\-]{1,255}))"
+        R"( +(?<port>\d{1,5}))"
+        R"( +typ +(?<type>host|srflx|relay))"
+        R"(( +raddr +(?<raddr>[a-zA-Z0-9.:\-]{1,255}))?)"
+        R"(( +rport +(?<rport>\d{1,5}))?)"
+    >(sdp);
+
+    if (!match) {
+        ICE_IN_DEBUG{ std::cout << "Invalid SDP: " << sdp << '\n'; }
+        return {};
+    }
+
+    candidate c;
+
+    c.foundation = match.get<"fd">();
+
+    std::string_view com = match.get<"com">();
+    if (std::from_chars(com.data(), com.data() + com.size(), c.component).ec != std::errc{})
+        return {};
+
+    c.transport_type = match.get<"tran">();
+
+    std::string_view pri = match.get<"pri">();
+    if (std::from_chars(pri.data(), pri.data() + pri.size(), c.priority).ec != std::errc{})
+        return {};
+
+#if ASIOICE_USE_BOOST_ASIO
+    boost::system::error_code ec;
+#else
+    net::error_code ec;
+#endif
+    net::ip::address addr = net::ip::make_address(match.get<"addr">(), ec);
+    if (ec)
+        return {};
+
+    std::string_view port_str = match.get<"port">();
+    uint16_t port = 0;
+    if (std::from_chars(port_str.data(), port_str.data() + port_str.size(), port).ec != std::errc{})
+        return {};
+    c.endpoint = ice::endpoint(addr, port);
+
+    if (auto type_str = match.get<"type">(); type_str == "host")
+        c.type = candidate_type::host;
+    else if (type_str == "srflx")
+        c.type = candidate_type::srflx;
+    else if (type_str == "relay")
+        c.type = candidate_type::relay;
+    else
+        return {};
+
+    if (match.get<"raddr">() != "") {
+        net::ip::address raddr = net::ip::make_address(match.get<"raddr">(), ec);
+        if (ec)
+            return {};
+        uint16_t rport = 0;
+        if (match.get<"rport">() != "") {
+            std::string_view rport_str = match.get<"rport">();
+            if (std::from_chars(rport_str.data(), rport_str.data() + rport_str.size(), rport).ec != std::errc{})
+                return {};
+        }
+        c.related.emplace(raddr, rport);
+    }
+
+    if (nread)
+        *nread = std::string_view{match}.size();
+    return c;
+}
+
+std::string
+candidate::to_sdp() const
+{
+    std::ostringstream sdp;
+    sdp << "candidate:"
+        << this->foundation << ' '
+        << (int)this->component << ' '
+        << this->transport_type << ' '
+        << this->priority << ' '
+        << this->endpoint.address().to_string() << ' '
+        << this->endpoint.port() << " typ "
+        << type_to_string(this->type);
+    if (this->related) {
+        sdp << " raddr " << this->related->address().to_string()
+            << " rport " << this->related->port();
+    }
+    if (!this->tcptype.empty())
+        sdp << " tcptype " << this->tcptype;
+    return std::move(sdp).str();
 }
 
 } // namespace ice

@@ -61,7 +61,7 @@ std::string candidate_pair::to_string(int indent) const {
     local["transport"] = this->local_candidate().transport_type;
     local["priority"] = this->local_candidate().priority;
     local["endpoint"] = this->local_candidate().endpoint.to_string();
-    local["type"] = ice::to_string(this->local_candidate().type);
+    local["type"] = ice::type_to_string(this->local_candidate().type);
 
     if (this->local_candidate().related) {
         local["related"] = this->local_candidate().related->to_string();
@@ -78,7 +78,7 @@ std::string candidate_pair::to_string(int indent) const {
     remote["transport"] = this->remote_candidate().transport_type;
     remote["priority"] = this->remote_candidate().priority;
     remote["endpoint"] = this->remote_candidate().endpoint.to_string();
-    remote["type"] = ice::to_string(this->remote_candidate().type);
+    remote["type"] = ice::type_to_string(this->remote_candidate().type);
 
     if (!this->remote_candidate().tcptype.empty()) {
         remote["tcptype"] = this->remote_candidate().tcptype;
