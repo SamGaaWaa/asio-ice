@@ -77,16 +77,11 @@ inline ice::task<void> gather_task(ice::net::io_context &ctx) try {
         .username = "user1",
         .password = "pass1",
         .ice_controlling = true,
-        .turn_servers = {
-            {
-                {net::ip::make_address("127.0.0.1"), 13478},
-                "samgaawaa",
-                "1234"
-            }
-        },
+        .turn_servers = {{{net::ip::make_address("127.0.0.1"), 13478},
+                          "samgaawaa",
+                          "1234"}},
         .component_count = 2,
-        .transport_policy = ice::transport_policy::ALL
-    };
+        .transport_policy = ice::transport_policy::ALL};
 
     auto agent1 =
         std::make_shared<impl::agent_datagram_impl<net::ip::udp::socket>>(
@@ -96,12 +91,12 @@ inline ice::task<void> gather_task(ice::net::io_context &ctx) try {
         .username = "user2",
         .password = "pass2",
         .ice_controlling = false,
-        .stun_servers = {
-            {net::ip::make_address("14.29.112.241"), 20002},
-        },
+        .stun_servers =
+            {
+                {net::ip::make_address("14.29.112.241"), 20002},
+            },
         .component_count = 2,
-        .transport_policy = ice::transport_policy::ALL
-    };
+        .transport_policy = ice::transport_policy::ALL};
     auto agent2 =
         std::make_shared<impl::agent_datagram_impl<net::ip::udp::socket>>(
             ctx, config2);
@@ -120,46 +115,54 @@ inline ice::task<void> gather_task(ice::net::io_context &ctx) try {
     net::steady_timer timer1(ctx, std::chrono::seconds(5));
     net::steady_timer timer2(ctx, std::chrono::seconds(5));
 
-    agent1->on_local_candidates([&agent2](const ice::candidate *c, std::size_t n)->ice::task<void> {
-        if (!c) {
-            std::cout << "Agent1 finish gathering\n";
-            co_await agent2->add_remote_candidate();
-            co_return;
-        }
-        net::steady_timer timer(agent2->context(), std::chrono::milliseconds(60));
-        for (std::size_t i = 0; i < n; ++i) {
-            std::cout << "Agent1's local candidates: " << c[i].to_string() << '\n';
-        }
-        std::cout << "Agent1 is sending local candidates to agent2\n";
-        // Simulate network latency
-        co_await timer.async_wait(asio2exec::use_sender);
-        for (std::size_t i = 0; i < n; ++i) {
-            co_await agent2->add_remote_candidate(c[i]);
-        }
-    });
+    agent1->on_local_candidates(
+        [&agent2](const ice::candidate *c, std::size_t n) -> ice::task<void> {
+            if (!c) {
+                std::cout << "Agent1 finish gathering\n";
+                co_await agent2->add_remote_candidate();
+                co_return;
+            }
+            net::steady_timer timer(agent2->context(),
+                                    std::chrono::milliseconds(60));
+            for (std::size_t i = 0; i < n; ++i) {
+                std::cout << "Agent1's local candidates: " << c[i].to_string()
+                          << '\n';
+            }
+            std::cout << "Agent1 is sending local candidates to agent2\n";
+            // Simulate network latency
+            co_await timer.async_wait(asio2exec::use_sender);
+            for (std::size_t i = 0; i < n; ++i) {
+                co_await agent2->add_remote_candidate(c[i]);
+            }
+        });
 
-    agent2->on_local_candidates([&agent1](const ice::candidate *c, std::size_t n)->ice::task<void> {
-        if (!c) {
-            std::cout << "Agent2 finish gathering\n";
-            co_await agent1->add_remote_candidate();
-            co_return;
-        }
-        net::steady_timer timer(agent1->context(), std::chrono::milliseconds(60));
-        for (std::size_t i = 0; i < n; ++i) {
-            std::cout << "Agent2's local candidates: " << c[i].to_string() << '\n';
-        }
-        std::cout << "Agent2 is sending local candidates to agent1\n";
-        // Simulate network latency
-        co_await timer.async_wait(asio2exec::use_sender);
-        for (std::size_t i = 0; i < n; ++i) {
-            co_await agent1->add_remote_candidate(c[i]);
-        }
-    });
+    agent2->on_local_candidates(
+        [&agent1](const ice::candidate *c, std::size_t n) -> ice::task<void> {
+            if (!c) {
+                std::cout << "Agent2 finish gathering\n";
+                co_await agent1->add_remote_candidate();
+                co_return;
+            }
+            net::steady_timer timer(agent1->context(),
+                                    std::chrono::milliseconds(60));
+            for (std::size_t i = 0; i < n; ++i) {
+                std::cout << "Agent2's local candidates: " << c[i].to_string()
+                          << '\n';
+            }
+            std::cout << "Agent2 is sending local candidates to agent1\n";
+            // Simulate network latency
+            co_await timer.async_wait(asio2exec::use_sender);
+            for (std::size_t i = 0; i < n; ++i) {
+                co_await agent1->add_remote_candidate(c[i]);
+            }
+        });
 
     std::cout << "Agent1 is gathering...\n";
-    scope.spawn(stdexec::starts_on(sched, utils::stop_when(
-                                agent1->gather_candidates(),
-                              timer1.async_wait(asio2exec::use_sender))) | utils::ignore());
+    scope.spawn(
+        stdexec::starts_on(
+            sched, utils::stop_when(agent1->gather_candidates(),
+                                    timer1.async_wait(asio2exec::use_sender))) |
+        utils::ignore());
 
     std::cout << "Agent1 create OFFER with empty candidate list\n";
     std::cout << "Agent1 will response early checks\n";
@@ -171,9 +174,11 @@ inline ice::task<void> gather_task(ice::net::io_context &ctx) try {
     agent2->set_remote_password(agent1->local_password());
 
     std::cout << "Agent2 is gathering...\n";
-    scope.spawn(stdexec::starts_on(sched, utils::stop_when(
-                                agent2->gather_candidates(),
-                              timer2.async_wait(asio2exec::use_sender))) | utils::ignore());
+    scope.spawn(
+        stdexec::starts_on(
+            sched, utils::stop_when(agent2->gather_candidates(),
+                                    timer2.async_wait(asio2exec::use_sender))) |
+        utils::ignore());
     std::cout << "Agent2 is connecting ...\n";
     scope.spawn(stdexec::starts_on(sched, agent2->connect()) | utils::ignore());
 
@@ -196,16 +201,18 @@ inline ice::task<void> gather_task(ice::net::io_context &ctx) try {
         auto np1 = agent1->nominated_pairs();
         auto np2 = agent2->nominated_pairs();
         std::cout << "\nAgent1's nominated pairs:\n";
-        for (const auto& p: np1) {
+        for (const auto &p : np1) {
             std::cout << p->to_string() << '\n';
         }
         std::cout << "\nAgent2's nominated pairs:\n";
-        for (const auto& p: np2) {
+        for (const auto &p : np2) {
             std::cout << p->to_string() << '\n';
         }
     } else {
-        std::cout << "Agent1 connect " << (agent1_connected ? "success, " : "failed, ")
-                << "agent2 connect " << (agent2_connected ? "success\n" : "failed\n");
+        std::cout << "Agent1 connect "
+                  << (agent1_connected ? "success, " : "failed, ")
+                  << "agent2 connect "
+                  << (agent2_connected ? "success\n" : "failed\n");
     }
 } catch (const std::exception &e) {
     std::cerr << "Unhandled exception: " << e.what() << '\n';
@@ -219,6 +226,4 @@ void gathering_test(int num) {
     ctx.run();
 }
 
-int main() {
-    gathering_test(0);
-}
+int main() { gathering_test(0); }

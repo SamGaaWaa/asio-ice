@@ -48,7 +48,8 @@ struct transaction
 
     transaction(net::io_context &ctx, const stun::message &req,
                 const ice::endpoint &stun_server, stun::message &resp) noexcept
-        : _ctx{ctx}, request{req}, server{stun_server}, response{resp}, _timer{ctx} {}
+        : _ctx{ctx}, request{req}, server{stun_server}, response{resp},
+          _timer{ctx} {}
 
     transaction(const transaction &) = delete;
     transaction &operator=(const transaction &) = delete;
@@ -56,8 +57,11 @@ struct transaction
     transaction &operator=(transaction &&) = delete;
 
     template <class Transport> auto run(Transport &transport) {
-        return utils::stop_when(retry(transport), _stop_retry.get_future() | stdexec::continues_on(asio2exec::scheduler{_ctx})) |
-                stdexec::then([](auto&&...) {});
+        return utils::stop_when(
+                   retry(transport),
+                   _stop_retry.get_future() |
+                       stdexec::continues_on(asio2exec::scheduler{_ctx})) |
+               stdexec::then([](auto &&...) {});
     }
 
     state_t state() const noexcept { return _state; }
@@ -111,7 +115,7 @@ struct transaction
             buf.resize(n);
         }
 
-        for (std::size_t i = 0; ; ++i) {
+        for (std::size_t i = 0;; ++i) {
             auto [ec, _] = co_await transport.async_send_to(
                 net::const_buffer(buf.data(), buf.size()), server);
             if (ec) {

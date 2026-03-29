@@ -37,9 +37,7 @@ struct datagram_transport_impl
 
     datagram_transport_impl(net::io_context &ctx, Socket &&sock) noexcept
         : _ctx(ctx), _sock(std::move(sock)),
-          _local_endpoint(_sock.local_endpoint()),
-          _early_data(16 * 1024)
-        {}
+          _local_endpoint(_sock.local_endpoint()), _early_data(16 * 1024) {}
 
     template <class... Args>
     datagram_transport_impl(net::io_context &ctx, Args &&...args)
@@ -80,6 +78,7 @@ struct datagram_transport_impl
     const auto &receivers() const noexcept { return _receivers; }
 
     void clear_early_data() noexcept;
+
   private:
     ice::task<void> recv_loop();
 

@@ -46,7 +46,7 @@ static ::BIO_METHOD *BIO_ice_datagram_method() noexcept {
 
 static int __write(::BIO *b, const char *buf, int num) noexcept {
     assert(buf && num > 0);
-    datagram_bio *self = static_cast<datagram_bio*>(::BIO_get_data(b));
+    datagram_bio *self = static_cast<datagram_bio *>(::BIO_get_data(b));
     assert(self);
 
     ::BIO_clear_retry_flags(b);
@@ -58,13 +58,13 @@ static int __write(::BIO *b, const char *buf, int num) noexcept {
         return -1;
     }
     self->out.resize(num);
-    std::copy(buf, buf + num, (char*)self->out.data());
+    std::copy(buf, buf + num, (char *)self->out.data());
     return num;
 }
 
 static int __read(::BIO *b, char *buf, int size) noexcept {
     assert(buf && size > 0);
-    datagram_bio *self = static_cast<datagram_bio*>(::BIO_get_data(b));
+    datagram_bio *self = static_cast<datagram_bio *>(::BIO_get_data(b));
     assert(self);
 
     ::BIO_clear_retry_flags(b);
@@ -76,7 +76,8 @@ static int __read(::BIO *b, char *buf, int size) noexcept {
     std::memcpy(buf, self->in->data(), nread);
     ICE_IN_DEBUG {
         if (nread < self->in->size())
-            std::cout << "BIO_ice_datagram_method::read: drop " << self->in->size() - nread << " bytes\n";
+            std::cout << "BIO_ice_datagram_method::read: drop "
+                      << self->in->size() - nread << " bytes\n";
     }
     self->in.reset();
     return nread;
@@ -88,7 +89,7 @@ static int __puts(::BIO *b, const char *str) noexcept {
 }
 
 static long __ctrl(::BIO *b, int cmd, long arg1, void *arg2) noexcept {
-    datagram_bio *self = static_cast<datagram_bio*>(::BIO_get_data(b));
+    datagram_bio *self = static_cast<datagram_bio *>(::BIO_get_data(b));
     assert(self);
     switch (cmd) {
     case BIO_CTRL_RESET:

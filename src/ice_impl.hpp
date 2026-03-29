@@ -66,7 +66,7 @@ namespace net = asio;
 
 namespace ice::impl {
 
-enum struct agent_state_t: char {
+enum struct agent_state_t : char {
     INIT,
     GATHERING,
     CONNECTING,
@@ -74,11 +74,7 @@ enum struct agent_state_t: char {
     CLOSED
 };
 
-enum struct check_list_state_t {
-    RUNNING,
-    COMPLETED,
-    FAILED
-};
+enum struct check_list_state_t { RUNNING, COMPLETED, FAILED };
 
 template <class Layer>
 struct agent_datagram_impl
@@ -91,8 +87,7 @@ struct agent_datagram_impl
 
     agent_datagram_impl(net::io_context &ctx, config_type config) noexcept
         : _ctx(ctx), _config(std::move(config)),
-          _ice_controlling(_config.ice_controlling)
-    {
+          _ice_controlling(_config.ice_controlling) {
         ice::hash::random_bytes(&_tie_breaker, sizeof(_tie_breaker));
     }
 
@@ -102,7 +97,9 @@ struct agent_datagram_impl
     agent_datagram_impl &operator=(agent_datagram_impl &&) = delete;
 
     const auto &local_candidates() const noexcept { return _local_candidates; }
-    const auto &remote_candidates() const noexcept { return _remote_candidates; }
+    const auto &remote_candidates() const noexcept {
+        return _remote_candidates;
+    }
     const auto &context() const noexcept { return _ctx; }
     auto &context() noexcept { return _ctx; }
     const auto &config() const noexcept { return _config; }
@@ -124,7 +121,7 @@ struct agent_datagram_impl
     agent_state_t state() const noexcept { return _state; }
     auto on_state_change() noexcept {
         return _state.on_change() |
-            stdexec::continues_on(asio2exec::scheduler{_ctx});
+               stdexec::continues_on(asio2exec::scheduler{_ctx});
     }
     auto on_closed() noexcept;
     auto on_connected_or_closed() noexcept;
@@ -139,10 +136,8 @@ struct agent_datagram_impl
     bool all_components_have_valid_pair() const noexcept;
 
     auto gather_candidates() {
-        return utils::stop_when(
-            this->do_gather_candidates(),
-            this->on_connected_or_closed()
-        );
+        return utils::stop_when(this->do_gather_candidates(),
+                                this->on_connected_or_closed());
     }
 
     ice::task<bool> add_remote_candidate(ice::candidate c, auto... self);
@@ -152,32 +147,29 @@ struct agent_datagram_impl
     }
 
     auto connect(auto... self) noexcept {
-        return utils::stop_when(
-            this->do_connect(std::move(self)...),
-            this->on_closed()
-        );
+        return utils::stop_when(this->do_connect(std::move(self)...),
+                                this->on_closed());
     }
 
-    boost::container::small_vector<ice::candidate_pair*, 2>
+    boost::container::small_vector<ice::candidate_pair *, 2>
     nominated_pairs() const;
 
-    template <class Func>
-    void on_local_candidates(Func&& cb) {
+    template <class Func> void on_local_candidates(Func &&cb) {
         _on_local_candidates = std::forward<Func>(cb);
     }
+
   private:
-    struct stun_receiver: ice::datagram_receiver {
-        stun_receiver(const ice::any_transport& transport, agent_datagram_impl *agent) noexcept
-            : ice::datagram_receiver(),
-            _transport(transport),
-            _agent(agent) {
+    struct stun_receiver : ice::datagram_receiver {
+        stun_receiver(const ice::any_transport &transport,
+                      agent_datagram_impl *agent) noexcept
+            : ice::datagram_receiver(), _transport(transport), _agent(agent) {
             _transport.add_receiver(*this);
         }
-        const auto& transport() const noexcept {
-            return _transport;
-        }
-        bool datagram_received(io_buffer_ptr &buffer, const ice::endpoint &endpoint) override;
-    private:
+        const auto &transport() const noexcept { return _transport; }
+        bool datagram_received(io_buffer_ptr &buffer,
+                               const ice::endpoint &endpoint) override;
+
+      private:
         ice::any_transport _transport;
         agent_datagram_impl *_agent;
     };
@@ -195,16 +187,14 @@ struct agent_datagram_impl
         bool nominated = false;
     };
 
-    struct transaction_state:
-        boost::intrusive::set_base_hook<boost::intrusive::link_mode<boost::intrusive::auto_unlink>>
-    {
-        transaction_state(ice::candidate_pair& p, stun::transaction& t) noexcept:
-            pair{&p},
-            transaction{&t}
-        {}
+    struct transaction_state
+        : boost::intrusive::set_base_hook<
+              boost::intrusive::link_mode<boost::intrusive::auto_unlink>> {
+        transaction_state(ice::candidate_pair &p, stun::transaction &t) noexcept
+            : pair{&p}, transaction{&t} {}
 
         struct key_type {
-            using type = ice::candidate_pair*;
+            using type = ice::candidate_pair *;
             type operator()(const transaction_state &s) const noexcept {
                 return s.pair;
             }
@@ -214,13 +204,11 @@ struct agent_datagram_impl
     };
 
     using transaction_state_set = boost::intrusive::multiset<
-            transaction_state,
-            boost::intrusive::key_of_value<typename transaction_state::key_type>,
-            boost::intrusive::constant_time_size<false>>;
+        transaction_state,
+        boost::intrusive::key_of_value<typename transaction_state::key_type>,
+        boost::intrusive::constant_time_size<false>>;
 
-    enum struct request_result: char {
-        succeed, failed, canceled
-    };
+    enum struct request_result : char { succeed, failed, canceled };
 
     ice::task<void> do_gather_candidates();
 
@@ -237,17 +225,17 @@ struct agent_datagram_impl
     ice::task<void> server_reflexive_candidate(
         std::vector<ice::candidate> &srflx_candidates,
         const std::vector<ice::candidate> &local_candidates,
-        const std::vector<ice::endpoint>& stun_servers) noexcept;
+        const std::vector<ice::endpoint> &stun_servers) noexcept;
 
     ice::task<void>
     create_relayed_candidate(std::vector<ice::candidate> &component_candidates,
-                                std::shared_ptr<turn_client_type> client,
-                                raw_transport_ptr host_transport,
-                               uint8_t component) noexcept;
+                             std::shared_ptr<turn_client_type> client,
+                             raw_transport_ptr host_transport,
+                             uint8_t component) noexcept;
 
-    void pair_local_candidate(const ice::candidate& c);
-    void pair_remote_candidate(const ice::candidate& c);
-    void init_pair_state(ice::candidate_pair& pair) const noexcept;
+    void pair_local_candidate(const ice::candidate &c);
+    void pair_remote_candidate(const ice::candidate &c);
+    void init_pair_state(ice::candidate_pair &pair) const noexcept;
     auto generate_gathering_end_indication() noexcept;
     void sort_check_list() noexcept;
 
@@ -259,8 +247,9 @@ struct agent_datagram_impl
 
     void unfreeze_initial() noexcept;
 
-    ice::task<request_result> request(ice::candidate_pair &pair, const stun::message &req,
-                            stun::message &resp) noexcept;
+    ice::task<request_result> request(ice::candidate_pair &pair,
+                                      const stun::message &req,
+                                      stun::message &resp) noexcept;
 
     void switch_role(bool ice_controlling) noexcept;
 
@@ -268,39 +257,38 @@ struct agent_datagram_impl
         _check_list_state = s;
     }
 
-    std::shared_ptr<ice::candidate_pair> construct_valid_pair(
-        const stun::message& req,
-        const stun::message& resp,
-        check_task& ct
-    );
+    std::shared_ptr<ice::candidate_pair>
+    construct_valid_pair(const stun::message &req, const stun::message &resp,
+                         check_task &ct);
 
     void build_request(stun::message &req, ice::candidate_pair &pair) noexcept;
 
-    bool in_triggered_check_queue(const ice::candidate_pair& p) const noexcept;
+    bool in_triggered_check_queue(const ice::candidate_pair &p) const noexcept;
 
     ice::task<void> check(check_task ct);
     ice::task<void> do_check(check_task ct);
 
     bool verify_username(std::string_view name) const noexcept;
 
-    ice::task<void> do_handle_request(
-        ice::any_transport transport,
-        ice::endpoint source,
-        ice::io_buffer_ptr buf);
+    ice::task<void> do_handle_request(ice::any_transport transport,
+                                      ice::endpoint source,
+                                      ice::io_buffer_ptr buf);
 
     ice::task<bool> do_connect(auto... self) noexcept;
 
     template <class Transport>
-    auto send_stun(Transport& transport, const stun::message& msg, const ice::endpoint& ep);
+    auto send_stun(Transport &transport, const stun::message &msg,
+                   const ice::endpoint &ep);
 
     void check_complete(ice::candidate_pair &pair) noexcept;
 
-    void request_handler(ice::any_transport& transport, const ice::endpoint &source, ice::io_buffer_ptr buf);
+    void request_handler(ice::any_transport &transport,
+                         const ice::endpoint &source, ice::io_buffer_ptr buf);
 
-    void create_stun_receiver(const ice::any_transport& transport) noexcept;
-    void create_turn_permission(const net::ip::address& ip);
+    void create_stun_receiver(const ice::any_transport &transport) noexcept;
+    void create_turn_permission(const net::ip::address &ip);
 
-    bool set_nominated(ice::candidate_pair& pair) noexcept;
+    bool set_nominated(ice::candidate_pair &pair) noexcept;
     void default_nominate();
 
     ice::task<void> free_candidates();
@@ -310,7 +298,7 @@ struct agent_datagram_impl
     using valid_list_type = std::vector<valid_pair>;
 
     net::io_context &_ctx;
-    ice::shared_promise<void> _promise{}; // use for some detached work
+    ice::shared_promise<void> _promise{};  // use for some detached work
     stun::transaction_set _transactions{}; // use for connectivity checks
     transaction_state_set _transaction_states{};
     config_type _config;
@@ -325,7 +313,8 @@ struct agent_datagram_impl
     bool _remote_candidates_end = false;
     // std::vector<turn_client_type> _turn_clients;
     check_list_type _check_list{};
-    ice::utils::property<check_list_state_t> _check_list_state{check_list_state_t::RUNNING};
+    ice::utils::property<check_list_state_t> _check_list_state{
+        check_list_state_t::RUNNING};
     valid_list_type _valid_list{};
     std::deque<check_task> _triggered_check_queue{};
     std::size_t _pending_check_count{0};
@@ -336,7 +325,8 @@ struct agent_datagram_impl
     ice::utils::property<agent_state_t> _state{agent_state_t::INIT};
 
     // callbacks
-    utils::async_function<void(const ice::candidate*, std::size_t)> _on_local_candidates{};
+    utils::async_function<void(const ice::candidate *, std::size_t)>
+        _on_local_candidates{};
 };
 
 } // namespace ice::impl

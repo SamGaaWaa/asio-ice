@@ -1,4 +1,4 @@
-#include "io_buffer.hpp"
+#include "io_buffer2.hpp"
 #include "receiver.hpp"
 #include "scope_guard.hpp"
 #include "socket_transport.hpp"
@@ -47,8 +47,7 @@ void allocate_test(std::size_t epoch_count) {
 
     ice::candidate local_c;
     local_c.transport = client.impl().shared_from_this();
-    auto cpair =
-        std::make_shared<ice::candidate_pair>(local_c, remote_c);
+    auto cpair = std::make_shared<ice::candidate_pair>(local_c, remote_c);
     queue_datagram_receiver data_queue(cpair, 16);
 
     auto allocate_coro = [&]() -> ice::task<void> {
@@ -138,7 +137,7 @@ void allocate_test(std::size_t epoch_count) {
     auto work = stdexec::when_all(peer_recv_coro(),
                                   allocate_coro() | stdexec::let_value([&] {
                                       return stdexec::just_stopped() |
-                                            stdexec::continues_on(sched);
+                                             stdexec::continues_on(sched);
                                   }));
     exec::start_detached(stdexec::starts_on(sched, std::move(work)));
     ctx.run();

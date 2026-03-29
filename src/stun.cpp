@@ -441,8 +441,8 @@ static int parse_address(const void *data, std::size_t buf_size,
     if (buf_size < 4)
         return -1;
     pad = binary::read_big<uint8_t>(data);
-    protocol = binary::read_big<uint8_t>((const char*)data + 1);
-    port = binary::read_big<uint16_t>((const char*)data + 2);
+    protocol = binary::read_big<uint8_t>((const char *)data + 1);
+    port = binary::read_big<uint16_t>((const char *)data + 2);
     if (pad != 0)
         return -1;
     const uint8_t *iter = reinterpret_cast<const uint8_t *>(data) + 4;

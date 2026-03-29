@@ -241,8 +241,7 @@ ice::task<bool> datagram_client<NextLayer>::request_with_retry(
     co_return true;
 }
 
-template <class NextLayer>
-void datagram_client<NextLayer>::stop() noexcept {
+template <class NextLayer> void datagram_client<NextLayer>::stop() noexcept {
     if (!_is_running)
         return;
     _is_running = false;
@@ -269,10 +268,9 @@ void datagram_client<NextLayer>::stop() noexcept {
         if (auto n = req.write_to(&buf[0], 1024); n > 0) {
             net::const_buffer data{&buf[0], (std::size_t)n};
             utils::detached_with_data(
-                this->next_layer().async_send_to(data, this->_server, asio2exec::use_sender),
-                this->shared_from_this(),
-                std::move(buf)
-            );
+                this->next_layer().async_send_to(data, this->_server,
+                                                 asio2exec::use_sender),
+                this->shared_from_this(), std::move(buf));
         }
     }
     do_delete_allocation();
@@ -308,11 +306,13 @@ void datagram_client<NextLayer>::start_refresh_allocation_task() {
     if (!this->is_running())
         return;
     asio2exec::scheduler sched{this->context()};
-    utils::detached_with_data(stdexec::starts_on(
-        sched, utils::stop_when(
-                   this->refresh_allocation_task(),
-                   this->_stop_refresh_allocation_task.get_future() |
-                       stdexec::continues_on(sched))), this->shared_from_this());
+    utils::detached_with_data(
+        stdexec::starts_on(
+            sched,
+            utils::stop_when(this->refresh_allocation_task(),
+                             this->_stop_refresh_allocation_task.get_future() |
+                                 stdexec::continues_on(sched))),
+        this->shared_from_this());
 }
 
 template <class NextLayer>
@@ -464,8 +464,7 @@ uint16_t datagram_client<NextLayer>::generate_channel_number() const {
 }
 
 template <class NextLayer>
-ice::task<void>
-datagram_client<NextLayer>::permission_state::refresh_task() {
+ice::task<void> datagram_client<NextLayer>::permission_state::refresh_task() {
     utils::scope_guard on_exit([this]() noexcept {
         ICE_IN_DEBUG { std::cout << "permission_state::refresh_task exit\n"; }
         if (this->is_linked())
@@ -512,16 +511,18 @@ void datagram_client<NextLayer>::permission_state::start() {
     if (!this->_client->is_running())
         return;
     asio2exec::scheduler sched{this->client().context()};
-    utils::detached_with_data(stdexec::starts_on(
-        sched, utils::stop_when(this->refresh_task(),
-                                this->_stop.get_future() |
-                                    stdexec::continues_on(sched))), this->shared_from_this());
+    utils::detached_with_data(
+        stdexec::starts_on(sched,
+                           utils::stop_when(this->refresh_task(),
+                                            this->_stop.get_future() |
+                                                stdexec::continues_on(sched))),
+        this->shared_from_this());
 }
 
 template <class NextLayer>
 ice::task<bool>
-datagram_client<NextLayer>::create_permission(std::ranges::view auto peers, auto... self)
-{
+datagram_client<NextLayer>::create_permission(std::ranges::view auto peers,
+                                              auto... self) {
     if (!this->is_running() || peers.empty() || !this->_relayed_address)
         co_return false;
     if (this->_relayed_address->address().is_v4() &&
@@ -549,22 +550,22 @@ datagram_client<NextLayer>::create_permission(std::ranges::view auto peers, auto
             creating.insert(peer);
     }
 
-    auto wait_finish = stdexec::just() |
-                        stdexec::let_value([&] {
-                            return this->_new_permissions_created.get_future() |
-                                    stdexec::continues_on(asio2exec::scheduler{this->context()});
-                        }) |
-                        stdexec::then([&] {
-                            return std::ranges::all_of(creating, [&](const auto& ip) {
-                                return this->_creating_permissions.find(ip) == this->_creating_permissions.end();
-                            });
-                        }) |
-                        exec::repeat_until() |
-                        stdexec::then([&] {
-                            return std::ranges::all_of(creating, [&](const auto& ip) {
-                                return this->_permissions.find(ip) != this->_permissions.end();
-                            });
-                        });
+    auto wait_finish =
+        stdexec::just() | stdexec::let_value([&] {
+            return this->_new_permissions_created.get_future() |
+                   stdexec::continues_on(asio2exec::scheduler{this->context()});
+        }) |
+        stdexec::then([&] {
+            return std::ranges::all_of(creating, [&](const auto &ip) {
+                return this->_creating_permissions.find(ip) ==
+                       this->_creating_permissions.end();
+            });
+        }) |
+        exec::repeat_until() | stdexec::then([&] {
+            return std::ranges::all_of(creating, [&](const auto &ip) {
+                return this->_permissions.find(ip) != this->_permissions.end();
+            });
+        });
     if (req.xor_peer_address.empty()) {
         if (creating.empty())
             co_return true;
@@ -581,12 +582,12 @@ datagram_client<NextLayer>::create_permission(std::ranges::view auto peers, auto
             });
         req.xor_peer_address.erase(first, last);
     }
-    utils::scope_guard clear_creating([&]()noexcept {
-        for (const auto& addr: req.xor_peer_address)
+    utils::scope_guard clear_creating([&]() noexcept {
+        for (const auto &addr : req.xor_peer_address)
             this->_creating_permissions.erase(addr.address());
         this->_new_permissions_created.set_value();
     });
-    for (const auto& addr: req.xor_peer_address)
+    for (const auto &addr : req.xor_peer_address)
         this->_creating_permissions.insert(addr.address());
     req.fill_random_transaction_id();
 
@@ -595,12 +596,11 @@ datagram_client<NextLayer>::create_permission(std::ranges::view auto peers, auto
     if (creating.empty())
         success = co_await this->request_with_retry(req, resp, 7);
     else {
-        std::tuple<std::tuple<bool>, std::tuple<bool>>
-        result = co_await stdexec::when_all(
-            std::move(wait_finish),
-            this->request_with_retry(req, resp, 7)
-        );
-        success = std::get<0>(std::get<0>(result)) && std::get<0>(std::get<1>(result));
+        std::tuple<std::tuple<bool>, std::tuple<bool>> result =
+            co_await stdexec::when_all(std::move(wait_finish),
+                                       this->request_with_retry(req, resp, 7));
+        success = std::get<0>(std::get<0>(result)) &&
+                  std::get<0>(std::get<1>(result));
     }
     if (!success) {
         ICE_IN_DEBUG { std::cout << "Create or refresh permissions failed\n"; }
@@ -611,7 +611,8 @@ datagram_client<NextLayer>::create_permission(std::ranges::view auto peers, auto
         co_return true;
     for (const auto &peer : req.xor_peer_address) {
         ICE_IN_DEBUG {
-            assert(this->_permissions.find(peer.address()) == this->_permissions.end());
+            assert(this->_permissions.find(peer.address()) ==
+                   this->_permissions.end());
         }
         auto state =
             std::make_shared<datagram_client<NextLayer>::permission_state>(
@@ -789,15 +790,16 @@ void datagram_client<NextLayer>::channel_state::start() {
     if (!this->_client->is_running())
         return;
     asio2exec::scheduler sched{this->client().context()};
-    utils::detached_with_data(stdexec::starts_on(
-        sched, utils::stop_when(this->refresh_task(),
-                                this->_stop.get_future() |
-                                    stdexec::continues_on(sched))), this->shared_from_this());
+    utils::detached_with_data(
+        stdexec::starts_on(sched,
+                           utils::stop_when(this->refresh_task(),
+                                            this->_stop.get_future() |
+                                                stdexec::continues_on(sched))),
+        this->shared_from_this());
 }
 
 template <class NextLayer>
-ice::task<void>
-datagram_client<NextLayer>::channel_state::refresh_task() {
+ice::task<void> datagram_client<NextLayer>::channel_state::refresh_task() {
     utils::scope_guard on_error([this]() noexcept {
         ICE_IN_DEBUG {
             std::cout << "refresh_task stopped, channel: " << this->channel()

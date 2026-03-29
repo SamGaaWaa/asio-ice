@@ -113,9 +113,8 @@ template <class... Args> struct shared_promise {
         op.set_stopped();
     }
 
-    bool empty() const noexcept {
-        return _operations.empty();
-    }
+    bool empty() const noexcept { return _operations.empty(); }
+
   private:
     struct future {
         using sender_concept = stdexec::sender_t;
@@ -160,9 +159,8 @@ template <class... Args> struct shared_promise {
                 stdexec::set_stopped(std::move(_r));
             }
 
-            void start() & noexcept {
-                _ops.push_back(*this);
-            }
+            void start() & noexcept { _ops.push_back(*this); }
+
           private:
             R _r;
             operation_list_type &_ops;
@@ -228,8 +226,7 @@ template <class... Args> struct shared_promise {
 
       public:
         template <stdexec::receiver R>
-        stdexec::operation_state auto
-        connect(R &&r) && noexcept {
+        stdexec::operation_state auto connect(R &&r) && noexcept {
             if constexpr (stdexec::unstoppable_token<
                               stdexec::stop_token_of_t<stdexec::env_of_t<R>>>) {
                 return op_t<std::decay_t<R>>{std::forward<R>(r), *_ops};
@@ -315,9 +312,8 @@ template <> struct shared_promise<void> {
         op.set_stopped();
     }
 
-    bool empty() const noexcept {
-        return _operations.empty();
-    }
+    bool empty() const noexcept { return _operations.empty(); }
+
   private:
     struct future {
         using sender_concept = stdexec::sender_t;
@@ -353,9 +349,7 @@ template <> struct shared_promise<void> {
                 stdexec::set_stopped(std::move(_r));
             }
 
-            void start() & noexcept {
-                _ops.push_back(*this);
-            }
+            void start() & noexcept { _ops.push_back(*this); }
 
           private:
             R _r;
@@ -413,8 +407,7 @@ template <> struct shared_promise<void> {
 
       public:
         template <stdexec::receiver R>
-        stdexec::operation_state auto
-        connect(R &&r) && noexcept {
+        stdexec::operation_state auto connect(R &&r) && noexcept {
             if constexpr (stdexec::unstoppable_token<
                               stdexec::stop_token_of_t<stdexec::env_of_t<R>>>) {
                 return op_t<std::decay_t<R>>{std::forward<R>(r), *_ops};

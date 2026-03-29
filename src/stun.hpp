@@ -105,13 +105,17 @@ struct message {
         bool verify(std::string_view key, const message &msg) const;
         algo_t algo() const noexcept { return _algo; }
 
-        friend auto operator<=>(const integrity &lhs, const integrity &rhs) noexcept {
-            return std::to_underlying(lhs._algo) <=> std::to_underlying(rhs._algo);
+        friend auto operator<=>(const integrity &lhs,
+                                const integrity &rhs) noexcept {
+            return std::to_underlying(lhs._algo) <=>
+                   std::to_underlying(rhs._algo);
         }
 
-        friend bool operator==(const integrity &lhs, const integrity &rhs) noexcept {
+        friend bool operator==(const integrity &lhs,
+                               const integrity &rhs) noexcept {
             return lhs._algo == rhs._algo;
         }
+
       private:
         friend struct message;
 

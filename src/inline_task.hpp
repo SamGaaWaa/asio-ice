@@ -211,15 +211,13 @@ struct promise_base : public stdexec::with_awaitable_senders<D>
     struct env_t {
         const promise_base *promise;
 
-        auto
-        query(stdexec::get_stop_token_t) const noexcept -> stdexec::inplace_stop_token {
+        auto query(stdexec::get_stop_token_t) const noexcept
+            -> stdexec::inplace_stop_token {
             return promise->get_token();
         }
     };
 
-    env_t get_env() const noexcept {
-        return {this};
-    }
+    env_t get_env() const noexcept { return {this}; }
 
   private:
     stdexec::inplace_stop_token _stop_token{};

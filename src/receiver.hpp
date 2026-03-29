@@ -2,7 +2,7 @@
 
 #include "config.hpp"
 #include "async_queue.hpp"
-#include "io_buffer.hpp"
+#include "io_buffer2.hpp"
 #include "scope_guard.hpp"
 #include "address.hpp"
 
@@ -96,9 +96,7 @@ inline bool dispatch_receivers(ReceiverList &receivers, io_buffer_ptr &buffer1,
     if (receivers.empty())
         return false;
     auto buffer{std::move(buffer1)};
-    utils::scope_guard on_err([&]() noexcept {
-        buffer1 = std::move(buffer);
-    });
+    utils::scope_guard on_err([&]() noexcept { buffer1 = std::move(buffer); });
     ReceiverList receivers1;
     receivers.swap(receivers1);
     utils::scope_guard on_exit([&]() noexcept {

@@ -61,7 +61,6 @@ configure_file("${CMAKE_CURRENT_SOURCE_DIR}/include/config.hpp.in" "${CMAKE_CURR
 # add_subdirectory(cppmdns)
 
 file(GLOB ICE_SRC_FILES 
-    src/ice.cpp
     src/stun.cpp
     src/base64.cpp
     src/address.cpp
@@ -71,6 +70,7 @@ file(GLOB ICE_SRC_FILES
     src/boost_context/context.cpp
     src/ssl/datagram_bio.cpp
     src/string_utils.cpp
+    src/io_buffer2.cpp
 )
 add_library(asioice STATIC ${ICE_SRC_FILES})
 

@@ -1,7 +1,7 @@
 #pragma once
 
 #include "config.hpp"
-#include "io_buffer.hpp"
+#include "io_buffer2.hpp"
 #include "address.hpp"
 #include "receiver.hpp"
 
@@ -12,16 +12,15 @@
 namespace ice::impl {
 
 struct early_data_cache {
-    early_data_cache(std::size_t max_bytes = 16 * 1024) noexcept:
-        _max_bytes{max_bytes}
-    {}
+    early_data_cache(std::size_t max_bytes = 16 * 1024) noexcept
+        : _max_bytes{max_bytes} {}
 
-    early_data_cache(const early_data_cache&) = delete;
-    early_data_cache(early_data_cache&&) = delete;
-    early_data_cache& operator=(const early_data_cache&) = delete;
-    early_data_cache& operator=(early_data_cache&&) = delete;
+    early_data_cache(const early_data_cache &) = delete;
+    early_data_cache(early_data_cache &&) = delete;
+    early_data_cache &operator=(const early_data_cache &) = delete;
+    early_data_cache &operator=(early_data_cache &&) = delete;
 
-    bool put(ice::io_buffer_ptr& data, const ice::endpoint& source) {
+    bool put(ice::io_buffer_ptr &data, const ice::endpoint &source) {
         if (!data)
             return false;
         if (data->size() + _bytes > _max_bytes)
@@ -31,7 +30,7 @@ struct early_data_cache {
         return true;
     }
 
-    void dispatch_receiver(ice::datagram_receiver& receiver) {
+    void dispatch_receiver(ice::datagram_receiver &receiver) {
         if (this->_early_data.empty())
             return;
         std::vector<early_data_t> early_data{};
@@ -45,34 +44,34 @@ struct early_data_cache {
                 receiver.unlink();
             if (this->_early_data.empty()) {
                 std::swap(early_data, this->_early_data);
-                for (const auto& data: this->_early_data)
+                for (const auto &data : this->_early_data)
                     this->_bytes += data.data->size();
             } else {
-                for (auto& data: early_data) {
+                for (auto &data : early_data) {
                     put(data.data, data.source);
                 }
             }
         });
-        for (auto& data: early_data) {
+        for (auto &data : early_data) {
             ice::dispatch_receivers(tmp, data.data, data.source);
         }
-        std::erase_if(early_data, [](const auto& data) noexcept {
-            return !data.data;
-        });
+        std::erase_if(early_data,
+                      [](const auto &data) noexcept { return !data.data; });
     }
 
     void clear() noexcept {
         std::vector<early_data_t>{}.swap(this->_early_data);
         this->_bytes = 0;
     }
-private:
+
+  private:
     using receiver_list_t =
         boost::intrusive::list<datagram_receiver,
                                boost::intrusive::constant_time_size<false>>;
 
     struct early_data_t {
-      ice::io_buffer_ptr data;
-      ice::endpoint source;
+        ice::io_buffer_ptr data;
+        ice::endpoint source;
     };
 
     std::vector<early_data_t> _early_data{};

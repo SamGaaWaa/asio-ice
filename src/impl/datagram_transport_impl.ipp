@@ -4,10 +4,12 @@ template <class Socket> void datagram_transport_impl<Socket>::start() {
     if (this->_running)
         return;
     asio2exec::scheduler sched{this->context()};
-    utils::detached_with_data(stdexec::starts_on(
-        sched, utils::stop_when(this->recv_loop(),
-                                this->_stop.get_future() |
-                                    stdexec::continues_on(sched))), this->shared_from_this());
+    utils::detached_with_data(
+        stdexec::starts_on(sched,
+                           utils::stop_when(this->recv_loop(),
+                                            this->_stop.get_future() |
+                                                stdexec::continues_on(sched))),
+        this->shared_from_this());
     this->_running = true;
 }
 
@@ -28,8 +30,7 @@ ice::task<void> datagram_transport_impl<Socket>::recv_loop() {
             co_return;
         buf->commit_back(n);
         if (!dispatch_receivers(this->receivers(), buf, ep) &&
-            !this->_stop_cache_early_data)
-        {
+            !this->_stop_cache_early_data) {
             this->_early_data.put(buf, ep);
         }
     }
@@ -42,8 +43,8 @@ void datagram_transport_impl<Socket>::clear_early_data() noexcept {
 }
 
 template <class Socket>
-void
-datagram_transport_impl<Socket>::add_receiver(datagram_receiver &receiver) noexcept {
+void datagram_transport_impl<Socket>::add_receiver(
+    datagram_receiver &receiver) noexcept {
     this->_early_data.dispatch_receiver(receiver);
     this->receivers().push_back(receiver);
 }

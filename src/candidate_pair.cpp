@@ -38,18 +38,15 @@ bool candidate_pair::datagram_received(io_buffer_ptr &buffer,
 }
 
 void candidate_pair::set_priority(bool ice_controlling) noexcept {
-    this->_priority = compute_priority(local_candidate(), remote_candidate(), ice_controlling);
+    this->_priority = compute_priority(local_candidate(), remote_candidate(),
+                                       ice_controlling);
 }
 
-uint64_t candidate_pair::compute_priority(
-    const ice::candidate& local,
-    const ice::candidate& remote,
-    bool ice_controlling) noexcept
-{
-    uint64_t G = ice_controlling ? local.priority
-                                 : remote.priority;
-    uint64_t D = ice_controlling ? remote.priority
-                                 : local.priority;
+uint64_t candidate_pair::compute_priority(const ice::candidate &local,
+                                          const ice::candidate &remote,
+                                          bool ice_controlling) noexcept {
+    uint64_t G = ice_controlling ? local.priority : remote.priority;
+    uint64_t D = ice_controlling ? remote.priority : local.priority;
     return (1llu << 32) * std::min(G, D) + 2 * std::max(G, D) + (G > D ? 1 : 0);
 }
 

@@ -64,8 +64,12 @@ template <class NextLayer> class client<NextLayer, true> {
     const std::string &username() const noexcept { return _impl->username(); }
     const std::string &password() const noexcept { return _impl->password(); }
 
-    const std::optional<ice::endpoint>& relayed_address() const noexcept { return _impl->relayed_address(); }
-    const std::optional<ice::endpoint>& reflex_address() const noexcept { return _impl->reflex_address(); }
+    const std::optional<ice::endpoint> &relayed_address() const noexcept {
+        return _impl->relayed_address();
+    }
+    const std::optional<ice::endpoint> &reflex_address() const noexcept {
+        return _impl->reflex_address();
+    }
 
     ice::task<bool> request(const stun::message &msg, ice::endpoint &from,
                             stun::message &resp, std::size_t retries,

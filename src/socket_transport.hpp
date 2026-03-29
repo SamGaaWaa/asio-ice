@@ -71,9 +71,8 @@ template <class Socket> struct datagram_transport {
         _impl->add_receiver(receiver);
     }
 
-    void clear_early_data() noexcept {
-        _impl->clear_early_data();
-    }
+    void clear_early_data() noexcept { _impl->clear_early_data(); }
+
   private:
     std::shared_ptr<impl_type> _impl;
 };

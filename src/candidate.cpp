@@ -103,26 +103,25 @@ bool candidate::can_pair_with(const candidate &other) const noexcept {
              other.endpoint.address().is_v4()) ||
             (this->endpoint.address().is_v6() &&
              other.endpoint.address().is_v6())) &&
-            utils::case_insensitive_equal(this->transport_type, other.transport_type);
+           utils::case_insensitive_equal(this->transport_type,
+                                         other.transport_type);
 }
 
-std::optional<candidate>
-candidate::from_sdp(std::string_view sdp, std::size_t *nread) noexcept
-{
-    const auto match = ctre::match<
-        R"(^candidate: *(?<fd>[a-zA-Z\d+/]{1,32}))"
-        R"( +(?<com>\d{1,5}))"
-        R"( +(?<tran>[a-zA-Z]+))"
-        R"( +(?<pri>\d{1,10}))"
-        R"( +(?<addr>[a-zA-Z0-9.:\-]{1,255}))"
-        R"( +(?<port>\d{1,5}))"
-        R"( +typ +(?<type>host|srflx|relay))"
-        R"(( +raddr +(?<raddr>[a-zA-Z0-9.:\-]{1,255}))?)"
-        R"(( +rport +(?<rport>\d{1,5}))?)"
-    >(sdp);
+std::optional<candidate> candidate::from_sdp(std::string_view sdp,
+                                             std::size_t *nread) noexcept {
+    const auto match =
+        ctre::match<R"(^candidate: *(?<fd>[a-zA-Z\d+/]{1,32}))"
+                    R"( +(?<com>\d{1,5}))"
+                    R"( +(?<tran>[a-zA-Z]+))"
+                    R"( +(?<pri>\d{1,10}))"
+                    R"( +(?<addr>[a-zA-Z0-9.:\-]{1,255}))"
+                    R"( +(?<port>\d{1,5}))"
+                    R"( +typ +(?<type>host|srflx|relay))"
+                    R"(( +raddr +(?<raddr>[a-zA-Z0-9.:\-]{1,255}))?)"
+                    R"(( +rport +(?<rport>\d{1,5}))?)">(sdp);
 
     if (!match) {
-        ICE_IN_DEBUG{ std::cout << "Invalid SDP: " << sdp << '\n'; }
+        ICE_IN_DEBUG { std::cout << "Invalid SDP: " << sdp << '\n'; }
         return {};
     }
 
@@ -131,13 +130,15 @@ candidate::from_sdp(std::string_view sdp, std::size_t *nread) noexcept
     c.foundation = match.get<"fd">();
 
     std::string_view com = match.get<"com">();
-    if (std::from_chars(com.data(), com.data() + com.size(), c.component).ec != std::errc{})
+    if (std::from_chars(com.data(), com.data() + com.size(), c.component).ec !=
+        std::errc{})
         return {};
 
     c.transport_type = match.get<"tran">();
 
     std::string_view pri = match.get<"pri">();
-    if (std::from_chars(pri.data(), pri.data() + pri.size(), c.priority).ec != std::errc{})
+    if (std::from_chars(pri.data(), pri.data() + pri.size(), c.priority).ec !=
+        std::errc{})
         return {};
 
 #if ASIOICE_USE_BOOST_ASIO
@@ -151,7 +152,9 @@ candidate::from_sdp(std::string_view sdp, std::size_t *nread) noexcept
 
     std::string_view port_str = match.get<"port">();
     uint16_t port = 0;
-    if (std::from_chars(port_str.data(), port_str.data() + port_str.size(), port).ec != std::errc{})
+    if (std::from_chars(port_str.data(), port_str.data() + port_str.size(),
+                        port)
+            .ec != std::errc{})
         return {};
     c.endpoint = ice::endpoint(addr, port);
 
@@ -165,13 +168,16 @@ candidate::from_sdp(std::string_view sdp, std::size_t *nread) noexcept
         return {};
 
     if (match.get<"raddr">() != "") {
-        net::ip::address raddr = net::ip::make_address(match.get<"raddr">(), ec);
+        net::ip::address raddr =
+            net::ip::make_address(match.get<"raddr">(), ec);
         if (ec)
             return {};
         uint16_t rport = 0;
         if (match.get<"rport">() != "") {
             std::string_view rport_str = match.get<"rport">();
-            if (std::from_chars(rport_str.data(), rport_str.data() + rport_str.size(), rport).ec != std::errc{})
+            if (std::from_chars(rport_str.data(),
+                                rport_str.data() + rport_str.size(), rport)
+                    .ec != std::errc{})
                 return {};
         }
         c.related.emplace(raddr, rport);
@@ -182,21 +188,15 @@ candidate::from_sdp(std::string_view sdp, std::size_t *nread) noexcept
     return c;
 }
 
-std::string
-candidate::to_sdp() const
-{
+std::string candidate::to_sdp() const {
     std::ostringstream sdp;
-    sdp << "candidate:"
-        << this->foundation << ' '
-        << (int)this->component << ' '
-        << this->transport_type << ' '
-        << this->priority << ' '
-        << this->endpoint.address().to_string() << ' '
-        << this->endpoint.port() << " typ "
-        << type_to_string(this->type);
+    sdp << "candidate:" << this->foundation << ' ' << (int)this->component
+        << ' ' << this->transport_type << ' ' << this->priority << ' '
+        << this->endpoint.address().to_string() << ' ' << this->endpoint.port()
+        << " typ " << type_to_string(this->type);
     if (this->related) {
-        sdp << " raddr " << this->related->address().to_string()
-            << " rport " << this->related->port();
+        sdp << " raddr " << this->related->address().to_string() << " rport "
+            << this->related->port();
     }
     if (!this->tcptype.empty())
         sdp << " tcptype " << this->tcptype;

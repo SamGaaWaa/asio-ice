@@ -29,19 +29,20 @@ std::string random_string(std::size_t n) {
     if (n == 0)
         return res;
     auto hex_size = (n % 2) ? (n + 1) : n;
-    res.resize_and_overwrite(hex_size, [&](char *p, std::size_t) -> std::size_t {
-        unsigned char buf[256];
-        char *it = p;
-        const char * const end = p + hex_size; 
-        while (it < end) {
-            std::size_t byte_size = (end - it) / 2;
-            byte_size = byte_size > sizeof(buf) ? sizeof(buf) : byte_size;
-            ice::hash::random_bytes(buf, byte_size);
-            ice::hash::to_hex(buf, byte_size, it);
-            it += (byte_size * 2);
-        }
-        return n;
-    });
+    res.resize_and_overwrite(
+        hex_size, [&](char *p, std::size_t) -> std::size_t {
+            unsigned char buf[256];
+            char *it = p;
+            const char *const end = p + hex_size;
+            while (it < end) {
+                std::size_t byte_size = (end - it) / 2;
+                byte_size = byte_size > sizeof(buf) ? sizeof(buf) : byte_size;
+                ice::hash::random_bytes(buf, byte_size);
+                ice::hash::to_hex(buf, byte_size, it);
+                it += (byte_size * 2);
+            }
+            return n;
+        });
     return res;
 }
 

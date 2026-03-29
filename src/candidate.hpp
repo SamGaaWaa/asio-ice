@@ -31,9 +31,11 @@ std::string_view type_to_string(candidate_type type) noexcept;
 struct candidate {
     bool can_pair_with(const candidate &other) const noexcept;
     std::string to_string(int indent = 4) const;
-    // friend bool operator==(const candidate &lhs, const candidate &rhs) noexcept;
+    // friend bool operator==(const candidate &lhs, const candidate &rhs)
+    // noexcept;
     bool operator==(const candidate &) const noexcept = delete;
-    static std::optional<candidate> from_sdp(std::string_view sdp, std::size_t *nread = nullptr) noexcept;
+    static std::optional<candidate>
+    from_sdp(std::string_view sdp, std::size_t *nread = nullptr) noexcept;
     std::string to_sdp() const;
 
     std::string foundation;

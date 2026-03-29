@@ -271,9 +271,7 @@ struct any_transport {
         get_interface()->add_receiver(receiver);
     }
 
-    void clear_early_data() noexcept {
-        get_interface()->clear_early_data();
-    }
+    void clear_early_data() noexcept { get_interface()->clear_early_data(); }
 
     bool equal_to(const any_transport &other) const noexcept {
         return get_interface()->equal_to(*other.get_interface());

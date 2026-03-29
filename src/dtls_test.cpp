@@ -80,28 +80,36 @@ tDe4vkRzWzwq8iKb7Q+IbzXif1GilqSHJ04T0bMFw1r+3TViFHQIi2x3ILvEkBGm
 h/AwPbciuIqmBgK4zkXXen8=
 -----END PRIVATE KEY-----)";
 
-int load_cert_and_key_from_str(SSL_CTX *ctx, const char *cert_pem, const char *key_pem) {
+int load_cert_and_key_from_str(SSL_CTX *ctx, const char *cert_pem,
+                               const char *key_pem) {
     BIO *bio_cert = NULL;
     BIO *bio_key = NULL;
     X509 *cert = NULL;
     EVP_PKEY *pkey = NULL;
 
-    bio_cert = BIO_new_mem_buf((void*)cert_pem, -1); // -1 表示自动计算长度
-    if (!bio_cert) goto err;
+    bio_cert = BIO_new_mem_buf((void *)cert_pem, -1); // -1 表示自动计算长度
+    if (!bio_cert)
+        goto err;
 
     cert = PEM_read_bio_X509(bio_cert, NULL, NULL, NULL);
-    if (!cert) goto err;
+    if (!cert)
+        goto err;
 
-    bio_key = BIO_new_mem_buf((void*)key_pem, -1);
-    if (!bio_key) goto err;
+    bio_key = BIO_new_mem_buf((void *)key_pem, -1);
+    if (!bio_key)
+        goto err;
 
     pkey = PEM_read_bio_PrivateKey(bio_key, NULL, NULL, NULL);
-    if (!pkey) goto err;
+    if (!pkey)
+        goto err;
 
-    if (SSL_CTX_use_certificate(ctx, cert) <= 0) goto err;
-    if (SSL_CTX_use_PrivateKey(ctx, pkey) <= 0) goto err;
+    if (SSL_CTX_use_certificate(ctx, cert) <= 0)
+        goto err;
+    if (SSL_CTX_use_PrivateKey(ctx, pkey) <= 0)
+        goto err;
 
-    if (!SSL_CTX_check_private_key(ctx)) goto err;
+    if (!SSL_CTX_check_private_key(ctx))
+        goto err;
 
     X509_free(cert);
     EVP_PKEY_free(pkey);
@@ -110,25 +118,29 @@ int load_cert_and_key_from_str(SSL_CTX *ctx, const char *cert_pem, const char *k
     return 1;
 err:
     ERR_print_errors_fp(stderr);
-    if (cert) X509_free(cert);
-    if (pkey) EVP_PKEY_free(pkey);
-    if (bio_cert) BIO_free(bio_cert);
-    if (bio_key) BIO_free(bio_key);
+    if (cert)
+        X509_free(cert);
+    if (pkey)
+        EVP_PKEY_free(pkey);
+    if (bio_cert)
+        BIO_free(bio_cert);
+    if (bio_key)
+        BIO_free(bio_key);
     return 0;
 }
 
-ice::task<void> server_coro(ice::net::io_context& io_ctx, const char *crt, const char *key) {
+ice::task<void> server_coro(ice::net::io_context &io_ctx, const char *crt,
+                            const char *key) {
     using namespace ice;
-    using DtlsTransport = ssl::dtls_transport<datagram_transport<net::ip::udp::socket>>;
+    using DtlsTransport =
+        ssl::dtls_transport<datagram_transport<net::ip::udp::socket>>;
 
     SSL_CTX *ctx = SSL_CTX_new(DTLS_server_method());
     if (!ctx) {
         ERR_print_errors_fp(stderr);
         co_return;
     }
-    utils::scope_guard ctx_guard([&]() noexcept {
-        SSL_CTX_free(ctx);
-    });
+    utils::scope_guard ctx_guard([&]() noexcept { SSL_CTX_free(ctx); });
 
     if (!load_cert_and_key_from_str(ctx, crt, key)) {
         std::cerr << "load_cert_and_key_from_str failed\n";
@@ -137,19 +149,21 @@ ice::task<void> server_coro(ice::net::io_context& io_ctx, const char *crt, const
 
     net::ip::udp::socket sock{io_ctx};
     sock.open(net::ip::udp::v4());
-    sock.bind(net::ip::udp::endpoint(net::ip::make_address("127.0.0.1"), SERVER_PORT));
-    auto sock_transport = std::make_shared<datagram_transport<net::ip::udp::socket>>(io_ctx, std::move(sock));
+    sock.bind(net::ip::udp::endpoint(net::ip::make_address("127.0.0.1"),
+                                     SERVER_PORT));
+    auto sock_transport =
+        std::make_shared<datagram_transport<net::ip::udp::socket>>(
+            io_ctx, std::move(sock));
 
-    net::ip::udp::endpoint client_ep{net::ip::make_address("127.0.0.1"), CLIENT_PORT};
+    net::ip::udp::endpoint client_ep{net::ip::make_address("127.0.0.1"),
+                                     CLIENT_PORT};
 
     SSL *ssl = SSL_new(ctx);
     if (!ssl) {
         ERR_print_errors_fp(stderr);
         co_return;
     }
-    utils::scope_guard ssl_guard([&]() noexcept {
-        SSL_free(ssl);
-    });
+    utils::scope_guard ssl_guard([&]() noexcept { SSL_free(ssl); });
 
     SSL_set_accept_state(ssl);
 
@@ -157,7 +171,9 @@ ice::task<void> server_coro(ice::net::io_context& io_ctx, const char *crt, const
     ssl_guard.dismiss();
 
     sock_transport->start();
-    if (auto ec = co_await dtls_server.async_handshake(DtlsTransport::handshake_type::server); ec) {
+    if (auto ec = co_await dtls_server.async_handshake(
+            DtlsTransport::handshake_type::server);
+        ec) {
         std::cerr << "DTLS accept error: " << ec.message() << '\n';
         co_return;
     }
@@ -166,13 +182,15 @@ ice::task<void> server_coro(ice::net::io_context& io_ctx, const char *crt, const
     std::cout << "Waiting for data from client...\n";
     char buffer[MAX_BUFFER];
     while (true) {
-        auto [ec, n] = co_await dtls_server.async_receive(net::buffer(buffer, sizeof(buffer) - 1));
+        auto [ec, n] = co_await dtls_server.async_receive(
+            net::buffer(buffer, sizeof(buffer) - 1));
         if (ec) {
             std::cout << "Server read error: " << ec.message() << '\n';
             co_return;
         } else if (n > 0) {
             buffer[n] = '\0';
-            std::tie(ec, n) = co_await dtls_server.async_send(net::buffer(buffer, n));
+            std::tie(ec, n) =
+                co_await dtls_server.async_send(net::buffer(buffer, n));
             if (ec || n == 0) {
                 std::cout << "Sent response failed\n";
                 co_return;
@@ -195,54 +213,55 @@ ice::task<void> server_coro(ice::net::io_context& io_ctx, const char *crt, const
 
 int main() {
     using namespace ice;
-    using DtlsTransport = ssl::dtls_transport<datagram_transport<net::ip::udp::socket>>;
+    using DtlsTransport =
+        ssl::dtls_transport<datagram_transport<net::ip::udp::socket>>;
 
     SSL_library_init();
     SSL_load_error_strings();
     OpenSSL_add_all_algorithms();
 
     net::io_context io_ctx;
-    exec::start_detached(stdexec::starts_on(
-        asio2exec::scheduler{io_ctx},
-        server_coro(io_ctx, server_crt, server_key)
-    ));
+    exec::start_detached(
+        stdexec::starts_on(asio2exec::scheduler{io_ctx},
+                           server_coro(io_ctx, server_crt, server_key)));
 
     SSL_CTX *ctx;
     SSL *ssl;
 
     net::ip::udp::socket sock{io_ctx};
     sock.open(net::ip::udp::v4());
-    sock.bind(net::ip::udp::endpoint(net::ip::make_address("127.0.0.1"), CLIENT_PORT));
-    auto sock_transport = std::make_shared<datagram_transport<net::ip::udp::socket>>(io_ctx, std::move(sock));
+    sock.bind(net::ip::udp::endpoint(net::ip::make_address("127.0.0.1"),
+                                     CLIENT_PORT));
+    auto sock_transport =
+        std::make_shared<datagram_transport<net::ip::udp::socket>>(
+            io_ctx, std::move(sock));
 
     ctx = SSL_CTX_new(DTLS_client_method());
     if (!ctx) {
         ERR_print_errors_fp(stderr);
         return -1;
     }
-    utils::scope_guard ctx_guard([&]() noexcept {
-        SSL_CTX_free(ctx);
-    });
+    utils::scope_guard ctx_guard([&]() noexcept { SSL_CTX_free(ctx); });
 
-    net::ip::udp::endpoint server_ep{net::ip::make_address("127.0.0.1"), SERVER_PORT};
+    net::ip::udp::endpoint server_ep{net::ip::make_address("127.0.0.1"),
+                                     SERVER_PORT};
 
     ssl = SSL_new(ctx);
     if (!ssl) {
         ERR_print_errors_fp(stderr);
         return -1;
     }
-    utils::scope_guard ssl_guard([&]() noexcept {
-        SSL_free(ssl);
-    });
+    utils::scope_guard ssl_guard([&]() noexcept { SSL_free(ssl); });
 
     SSL_set_connect_state(ssl);
 
     DtlsTransport dtls_client{sock_transport, server_ep, ssl};
     ssl_guard.dismiss();
 
-    auto work = [&]()-> ice::task<void> {
+    auto work = [&]() -> ice::task<void> {
         sock_transport->start();
-        auto ec = co_await dtls_client.async_handshake(DtlsTransport::handshake_type::client);
+        auto ec = co_await dtls_client.async_handshake(
+            DtlsTransport::handshake_type::client);
         if (ec) {
             std::cerr << "DTLS connect error: " << ec.message() << '\n';
             co_return;
@@ -264,9 +283,10 @@ int main() {
             auto [ec, n] = co_await dtls_client.async_send(net::buffer(msg));
             if (ec) {
                 std::cerr << "Send failed: " << ec.message() << '\n';
-                co_return; 
+                co_return;
             }
-            std::tie(ec, n) = co_await dtls_client.async_receive(net::buffer(recv_buf, sizeof(recv_buf)));
+            std::tie(ec, n) = co_await dtls_client.async_receive(
+                net::buffer(recv_buf, sizeof(recv_buf)));
             if (ec) {
                 std::cerr << "Read failed: " << ec.message() << '\n';
                 co_return;
@@ -281,12 +301,10 @@ int main() {
 
     asio2exec::scheduler sched{io_ctx};
     exec::start_detached(stdexec::starts_on(
-                                sched,
-                                exec::finally(work(), stdexec::just() | stdexec::then([&] {
-                                    dtls_client.close();
-                                    sock_transport->stop();
-                                }))
-                            ));
+        sched, exec::finally(work(), stdexec::just() | stdexec::then([&] {
+                                         dtls_client.close();
+                                         sock_transport->stop();
+                                     }))));
     io_ctx.run();
     std::cout << "Finish\n";
     return 0;

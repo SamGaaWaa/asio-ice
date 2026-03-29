@@ -36,9 +36,9 @@ namespace ice {
 //     boost::intrusive::tag<__triggered_check_queue_tag>,
 //     boost::intrusive::link_mode<boost::intrusive::auto_unlink>>;
 
-struct candidate_pair final : datagram_receiver,
-                              std::enable_shared_from_this<ice::candidate_pair>
-{
+struct candidate_pair final
+    : datagram_receiver,
+      std::enable_shared_from_this<ice::candidate_pair> {
 
     enum struct state_t {
         FROZEN = 0,
@@ -83,8 +83,12 @@ struct candidate_pair final : datagram_receiver,
 
     uint64_t priority() const noexcept { return _priority; }
     void set_priority(bool ice_controlling) noexcept;
-    void set_priority(uint64_t priority) noexcept { this->_priority = priority; }
-    static uint64_t compute_priority(const ice::candidate& local, const ice::candidate& remote, bool ice_controlling) noexcept;
+    void set_priority(uint64_t priority) noexcept {
+        this->_priority = priority;
+    }
+    static uint64_t compute_priority(const ice::candidate &local,
+                                     const ice::candidate &remote,
+                                     bool ice_controlling) noexcept;
 
     state_t state() const noexcept { return _state; }
     void set_state(state_t state) noexcept;
@@ -98,7 +102,9 @@ struct candidate_pair final : datagram_receiver,
     }
 
     auto component() const noexcept { return _local_candidate.component; }
-    const std::string& transport_type() const noexcept { return _local_candidate.transport_type; }
+    const std::string &transport_type() const noexcept {
+        return _local_candidate.transport_type;
+    }
 
     // bool in_triggered_queue() const noexcept {
     //     return __triggered_check_queue_base_hook::is_linked();
@@ -123,6 +129,7 @@ struct candidate_pair final : datagram_receiver,
     }
 
     std::string to_string(int indent = 4) const;
+
   private:
     using receiver_list_t =
         boost::intrusive::list<datagram_receiver,

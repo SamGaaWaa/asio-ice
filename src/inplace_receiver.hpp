@@ -198,7 +198,7 @@ template <class T> struct inplace_receiver {
         }
         _var.template emplace<3>();
     }
-    struct stopped_tag{};
+    struct stopped_tag {};
 
     stdexec::inplace_stop_source _source;
     std::variant<std::monostate, T, std::exception_ptr, stopped_tag> _var;

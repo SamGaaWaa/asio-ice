@@ -1,6 +1,6 @@
 #pragma once
 
-#include "io_buffer.hpp"
+#include "io_buffer2.hpp"
 
 #include <openssl/bio.h>
 
@@ -12,24 +12,21 @@ namespace ice::ssl::impl {
 
 struct datagram_bio {
     datagram_bio() noexcept = default;
-    datagram_bio(const datagram_bio&) = delete;
-    datagram_bio(datagram_bio&&) = delete;
-    datagram_bio& operator=(const datagram_bio&) = delete;
-    datagram_bio& operator=(datagram_bio&&) = delete;
+    datagram_bio(const datagram_bio &) = delete;
+    datagram_bio(datagram_bio &&) = delete;
+    datagram_bio &operator=(const datagram_bio &) = delete;
+    datagram_bio &operator=(datagram_bio &&) = delete;
 
     ::BIO *new_bio();
 
-    void last_io_failed(bool failed) noexcept {
-        _last_io_failed = failed;
-    }
+    void last_io_failed(bool failed) noexcept { _last_io_failed = failed; }
 
-    bool last_io_failed() const noexcept {
-        return _last_io_failed;
-    }
+    bool last_io_failed() const noexcept { return _last_io_failed; }
 
     std::vector<uint8_t> out{};
     ice::io_buffer_ptr in{};
-private:
+
+  private:
     bool _last_io_failed{false};
 };
 

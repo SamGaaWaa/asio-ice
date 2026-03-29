@@ -10,7 +10,7 @@
 #include "async_queue.hpp"
 #include "binary.hpp"
 #include "impl/buffer_wrapper.hpp"
-#include "io_buffer.hpp"
+#include "io_buffer2.hpp"
 #include "receiver.hpp"
 #include "shared_promise.hpp"
 #include "task.hpp"
@@ -61,9 +61,8 @@ struct datagram_client
                     const ice::endpoint &server, std::string username,
                     std::string password)
         : base_type(std::move(transport)),
-          _next_layer(base_type::transport<next_layer_type>()),
-          _server(server), _username(std::move(username)),
-          _password(std::move(password)) {}
+          _next_layer(base_type::transport<next_layer_type>()), _server(server),
+          _username(std::move(username)), _password(std::move(password)) {}
 
     void stop() noexcept;
 
@@ -89,12 +88,16 @@ struct datagram_client
     const std::string &username() const noexcept { return _username; }
     const std::string &password() const noexcept { return _password; }
 
-    const auto& permissions() const noexcept { return _permissions; }
-    const auto& channel_to_peer() const noexcept { return _channel_to_peer; }
-    const auto& peer_to_channel() const noexcept { return _peer_to_channel; }
+    const auto &permissions() const noexcept { return _permissions; }
+    const auto &channel_to_peer() const noexcept { return _channel_to_peer; }
+    const auto &peer_to_channel() const noexcept { return _peer_to_channel; }
 
-    const std::optional<ice::endpoint>& relayed_address() const noexcept { return _relayed_address; }
-    const std::optional<ice::endpoint>& reflex_address() const noexcept { return _reflex_address; }
+    const std::optional<ice::endpoint> &relayed_address() const noexcept {
+        return _relayed_address;
+    }
+    const std::optional<ice::endpoint> &reflex_address() const noexcept {
+        return _reflex_address;
+    }
 
     ice::task<bool> request(const stun::message &msg, ice::endpoint &from,
                             stun::message &resp, std::size_t retries,

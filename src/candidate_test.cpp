@@ -2,8 +2,7 @@
 
 #include <iostream>
 
-void verify(std::string_view sdp)
-{
+void verify(std::string_view sdp) {
     std::cout << "parsing \"" << sdp << "\"\n";
     auto c = ice::candidate::from_sdp(sdp);
     if (c) {

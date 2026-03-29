@@ -5,9 +5,6 @@
 
 namespace ice::boost_context {
 
-class fiber {
-    
-
-};
+class fiber {};
 
 } // namespace ice::boost_context

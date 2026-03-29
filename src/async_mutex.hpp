@@ -9,12 +9,10 @@ namespace ice::utils {
 
 struct async_mutex {
     struct guard {
-        guard(const guard&) = delete;
-        guard(guard&& other) noexcept:
-            _m{std::exchange(other._m, nullptr)}
-        {}
-        guard& operator=(const guard&) = delete;
-        guard& operator=(guard&& other) noexcept {
+        guard(const guard &) = delete;
+        guard(guard &&other) noexcept : _m{std::exchange(other._m, nullptr)} {}
+        guard &operator=(const guard &) = delete;
+        guard &operator=(guard &&other) noexcept {
             if (&other != this) {
                 unlock();
                 _m = std::exchange(other._m, nullptr);
@@ -22,17 +20,11 @@ struct async_mutex {
             return *this;
         }
 
-        ~guard() {
-            unlock();
-        }
+        ~guard() { unlock(); }
 
-        bool owns_lock() const noexcept {
-            return _m != nullptr;
-        }
+        bool owns_lock() const noexcept { return _m != nullptr; }
 
-        operator bool() const noexcept {
-            return owns_lock();
-        }
+        operator bool() const noexcept { return owns_lock(); }
 
         void unlock() noexcept {
             if (_m) {
@@ -40,11 +32,10 @@ struct async_mutex {
                 _m->_waiters.set_one_value();
             }
         }
-    private:
+
+      private:
         friend struct async_mutex;
-        guard(async_mutex& m) noexcept:
-            _m{&m}
-        {
+        guard(async_mutex &m) noexcept : _m{&m} {
             assert(!_m->_used);
             _m->_used = true;
         }
@@ -54,30 +45,24 @@ struct async_mutex {
 
     async_mutex() noexcept = default;
 
-    async_mutex(const async_mutex&) = delete;
-    async_mutex(async_mutex&&) = delete;
-    async_mutex& operator=(const async_mutex&) = delete;
-    async_mutex& operator=(async_mutex&&) = delete;
+    async_mutex(const async_mutex &) = delete;
+    async_mutex(async_mutex &&) = delete;
+    async_mutex &operator=(const async_mutex &) = delete;
+    async_mutex &operator=(async_mutex &&) = delete;
 
     auto lock() noexcept {
         return ice::utils::if_else(
             stdexec::just(_used),
             [this] {
                 return _waiters.get_future() |
-                        stdexec::then([this] {
-                            return guard{*this};
-                        });
+                       stdexec::then([this] { return guard{*this}; });
             },
-            [this] {
-                return stdexec::just(guard{*this});
-            }
-        );
+            [this] { return stdexec::just(guard{*this}); });
     }
 
-    ~async_mutex() {
-        assert(!_used);
-    }
-private:
+    ~async_mutex() { assert(!_used); }
+
+  private:
     bool _used{false};
     ice::shared_promise<void> _waiters{};
 };

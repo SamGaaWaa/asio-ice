@@ -1,5 +1,3 @@
 #pragma once
 
-namespace ice {
-
-} // namespace ice
+namespace ice {} // namespace ice

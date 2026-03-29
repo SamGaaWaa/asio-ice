@@ -22,9 +22,7 @@ namespace net = asio;
 
 namespace ice {
 
-enum struct transport_policy {
-    ALL, RELAY
-};
+enum struct transport_policy { ALL, RELAY };
 
 struct turn_credentials {
     ice::endpoint address;
