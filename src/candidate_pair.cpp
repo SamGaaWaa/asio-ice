@@ -1,5 +1,27 @@
 #include "candidate_pair.hpp"
+#include "scope_guard.hpp"
+#include "stun.hpp"
+
 #include "json.hpp"
+
+#if ASIOICE_USE_BOOST_ASIO > 0
+#define ASIO_TO_EXEC_USE_BOOST 1
+#include "asio2exec.hpp"
+#include <boost/asio/io_context.hpp>
+#include <boost/asio/steady_timer.hpp>
+namespace ice {
+namespace net = boost::asio;
+}
+#else
+#include "asio2exec.hpp"
+#include <asio/io_context.hpp>
+#include <asio/steady_timer.hpp>
+namespace ice {
+namespace net = asio;
+}
+#endif
+
+#include <cassert>
 
 namespace ice {
 
@@ -9,13 +31,6 @@ void candidate_pair::set_state(state_t state) noexcept {
     _state = state;
     // TODO: emit event
 }
-
-// void candidate_pair::set_nominated(bool nominated) noexcept {
-//     if (nominated == _nominated)
-//         return;
-//     _nominated = nominated;
-//     // TODO: emit event
-// }
 
 bool candidate_pair::datagram_received(io_buffer_ptr &buffer,
                                        const ice::endpoint &endpoint) {
@@ -104,9 +119,68 @@ std::string candidate_pair::to_string(int indent) const {
             return "";
         }
     }(this->_state);
-    // res["nominated"] = this->_nominated;
-    // res["remote_nominated"] = this->_remote_nominated;
     return res.dump(indent);
+}
+
+ice::task<void>
+candidate_pair::keepalive_task(std::chrono::milliseconds ms,
+                               std::weak_ptr<candidate_pair> self) {
+    net::io_context *ctx = nullptr;
+    if (auto p = self.lock(); !p || p->_keepalive_started)
+        co_return;
+    else {
+        ICE_IN_DEBUG { std::cout << "Keepalive task started\n"; }
+        p->_keepalive_started = true;
+        ctx = &p->local_candidate().transport.context();
+    }
+    utils::scope_guard on_exit([&]() noexcept {
+        auto p = self.lock();
+        if (!p)
+            return;
+        ICE_IN_DEBUG { std::cout << "Keepalive task exited\n"; }
+        p->_keepalive_started = false;
+    });
+
+    net::steady_timer timer{*ctx};
+    while (true) {
+        auto p = self.lock();
+        if (!p)
+            co_return;
+        while (true) {
+            const auto now = std::chrono::steady_clock::now();
+            const auto send_time = p->last_keepalive_time() + ms;
+            if (send_time <= now)
+                break;
+            p = nullptr;
+            timer.expires_at(send_time);
+            co_await timer.async_wait(asio2exec::use_sender);
+            p = self.lock();
+            if (!p)
+                co_return;
+        }
+
+        stun::message msg;
+        msg.cls = stun::class_t::STUN_CLASS_INDICATION;
+        msg.method = stun::method_t::STUN_METHOD_BINDING;
+        msg.use_fingerprint(true);
+
+        char buf[1024];
+        int n = msg.write_to(buf, sizeof(buf));
+        assert(n > 0);
+
+        auto transport = p->local_candidate().transport;
+        auto dst = p->remote_candidate().endpoint;
+        p = nullptr;
+        auto [ec, _] =
+            co_await transport.async_send_to(net::buffer(buf, n), dst);
+        if (ec)
+            co_return;
+        p = self.lock();
+        if (!p)
+            co_return;
+        ICE_IN_DEBUG { std::cout << "Sent keepalive indication\n"; }
+        p->update_keepalive_time();
+    }
 }
 
 } // namespace ice

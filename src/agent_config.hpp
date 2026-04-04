@@ -46,6 +46,7 @@ struct agent_config {
     std::size_t max_pending_check_count = 100;
     std::chrono::milliseconds connectivity_check_timeout{5000};
     std::chrono::milliseconds connectivity_check_interval{20};
+    std::chrono::milliseconds keepalive_interval{15000};
 };
 
 } // namespace ice

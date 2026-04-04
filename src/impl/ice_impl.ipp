@@ -5,6 +5,8 @@ ice::task<void> agent_datagram_impl<Layer>::server_reflexive_candidate(
     std::vector<ice::candidate> &srflx_candidates,
     const ice::candidate &local_candidate, stun::transaction_set &transactions,
     const ice::endpoint &stun_server) noexcept try {
+    if (local_candidate.type != candidate_type::host)
+        co_return;
     auto transport = local_candidate.transport;
 
     stun::message req;
@@ -103,7 +105,8 @@ ice::task<void> agent_datagram_impl<Layer>::server_reflexive_candidate(
                 endpoint));
         }
     }
-    co_await utils::on_scope_empty(scope);
+    co_await (utils::on_scope_empty(scope) |
+              stdexec::continues_on(asio2exec::scheduler{this->context()}));
 } catch (std::exception &e) {
     ICE_IN_DEBUG { std::cerr << e.what() << '\n'; }
     co_return;
@@ -188,7 +191,7 @@ ice::task<void> agent_datagram_impl<Layer>::get_component_candidates(
                 ice::endpoint{address, transport->local_endpoint().port()},
             .type = candidate_type::host,
             .transport = transport});
-        create_stun_receiver(host_candidates.back().transport);
+        create_stun_receiver(host_candidates.back().transport, component);
         transport->start();
 
         // create TURN clients
@@ -219,7 +222,8 @@ ice::task<void> agent_datagram_impl<Layer>::get_component_candidates(
             component_candidates, host_candidates, this->_config.stun_servers);
     }
     if (!this->_config.turn_servers.empty()) {
-        co_await utils::on_scope_empty(scope);
+        co_await (utils::on_scope_empty(scope) |
+                  stdexec::continues_on(asio2exec::scheduler{this->context()}));
     }
     co_return;
 }
@@ -258,7 +262,7 @@ ice::task<void> agent_datagram_impl<Layer>::create_relayed_candidate(
             .transport = ice::any_transport{std::move(host_transport)}});
     }
     ice::any_transport turn_transport{client};
-    create_stun_receiver(turn_transport);
+    create_stun_receiver(turn_transport, component);
     tmp.emplace_back(ice::candidate{
         .foundation = candidate_foundation(
             candidate_type::relay, this->_config.transport, relayed.address(),
@@ -306,19 +310,13 @@ ice::task<void> agent_datagram_impl<Layer>::do_gather_candidates() {
         scope.spawn(get_component_candidates(this->_local_candidates, component,
                                              addresses));
     }
-    co_await (utils::on_scope_empty(scope) | stdexec::let_value([this] {
-                  return this->generate_gathering_end_indication() |
-                         stdexec::then([] { return std::monostate{}; });
-              }) |
-              stdexec::let_stopped([this] {
-                  return this->generate_gathering_end_indication() |
-                         stdexec::then([] { return std::monostate{}; });
-              }) |
-              stdexec::let_error([this](auto) {
-                  return this->generate_gathering_end_indication() |
-                         stdexec::then([] { return std::monostate{}; });
-              }) |
+    // TODO: may it throws
+    co_await (utils::on_scope_empty(scope) |
+              stdexec::continues_on(asio2exec::scheduler{this->context()}) |
+              stdexec::then([] { return std::monostate{}; }) |
               stdexec::stopped_as_optional());
+    // must execute
+    co_await this->generate_gathering_end_indication();
 }
 
 inline bool __validate_remote_candidate(const ice::candidate &c) noexcept {
@@ -741,7 +739,8 @@ ice::task<bool> agent_datagram_impl<Layer>::do_connect(auto... self) noexcept {
     }
     scope.request_stop();
     ICE_IN_DEBUG { std::cout << "Waiting for all checks to finish\n"; }
-    co_await utils::on_scope_empty(scope);
+    co_await (utils::on_scope_empty(scope) |
+              stdexec::continues_on(asio2exec::scheduler{this->context()}));
     ICE_IN_DEBUG {
         std::cout << "connect: "
                   << (this->_state == agent_state_t::CONNECTED ? "success\n"
@@ -754,6 +753,20 @@ ice::task<bool> agent_datagram_impl<Layer>::do_connect(auto... self) noexcept {
                                    this->free_candidates()),
                 this->_state.on_change()),
             this->shared_from_this());
+        // create turn channel
+        this->create_channel_for_valid_pair();
+        for (auto &valid_p : this->_valid_list) {
+            if (!valid_p.nominated)
+                continue;
+            utils::detached_with_data(
+                utils::stop_when(
+                    stdexec::starts_on(
+                        asio2exec::scheduler{this->context()},
+                        valid_p.pair->keepalive_task(
+                            this->_config.keepalive_interval, valid_p.pair)),
+                    this->_state.on_change()),
+                this->shared_from_this());
+        }
     }
     co_return this->_state == agent_state_t::CONNECTED;
 }
@@ -1142,8 +1155,8 @@ END:
 
 template <class Layer>
 void agent_datagram_impl<Layer>::create_stun_receiver(
-    const ice::any_transport &transport) noexcept {
-    this->_stun_receivers.emplace_back(transport, this);
+    const ice::any_transport &transport, uint8_t component) noexcept {
+    this->_stun_receivers.emplace_back(transport, this, component);
 }
 
 template <class Layer>
@@ -1424,8 +1437,16 @@ bool agent_datagram_impl<Layer>::stun_receiver::datagram_received(
     if (!buffer) [[unlikely]] // ignore empty buffers
         return true;
     const uint8_t b = *buffer->begin();
-    if (b > 3)
+    if (b > 3) {
+        if (b >= 64 && b <= 79) {
+            // channel data
+            return false;
+        }
+        // application data
+        if (this->_agent->_on_data)
+            this->_agent->_on_data(std::move(buffer), this->_component);
         return false;
+    }
     // STUN
     if (buffer->size() < ice::stun::HEADER_SIZE) {
         // invalid STUN, ignore
@@ -1733,7 +1754,7 @@ void agent_datagram_impl<Layer>::create_turn_permission(
             utils::detached_with_data(
                 utils::stop_when(client->create_permission(ip),
                                  this->_promise.get_future()),
-                this->shared_from_this());
+                this->shared_from_this(), local_c.transport);
         }
     }
 }
@@ -1772,6 +1793,75 @@ auto agent_datagram_impl<Layer>::on_connected_or_closed() noexcept {
                       this->_state == agent_state_t::CLOSED;
            }) |
            exec::repeat_until();
+}
+
+template <class Layer>
+auto agent_datagram_impl<Layer>::sendto(net::const_buffer data,
+                                        uint8_t component) {
+    std::shared_ptr<ice::candidate_pair> p{};
+    for (auto &valid_p : this->_valid_list) {
+        if (valid_p.nominated && valid_p.pair->component() == component)
+            [[likely]] {
+            p = valid_p.pair;
+            break;
+        }
+    }
+    ICE_IN_DEBUG {
+        if (!p)
+            std::cerr << "No nominated pairs for component " << component
+                      << '\n';
+    }
+    if (this->_state == agent_state_t::CLOSED) [[unlikely]]
+        p = nullptr;
+    return stdexec::just(std::move(p)) | stdexec::let_value([data](auto &pair) {
+               return utils::if_else(
+                   stdexec::just(pair == nullptr),
+                   [] {
+                       return stdexec::just(std::make_tuple(
+                           std::make_error_code(std::errc::bad_address),
+                           size_t{0}));
+                   },
+                   [&pair, data] {
+                       return pair->send(data.data(), data.size()) |
+                              stdexec::then(
+                                  [&pair](
+                                      std::tuple<std::error_code, std::size_t>
+                                          res) {
+                                      if (!std::get<0>(res))
+                                          pair->update_keepalive_time();
+                                      return std::move(res);
+                                  });
+                   });
+           });
+}
+
+template <class Layer>
+void agent_datagram_impl<Layer>::create_channel_for_valid_pair() {
+    for (auto &valid_p : this->_valid_list) {
+        if (!valid_p.nominated ||
+            valid_p.pair->local_candidate().type != candidate_type::relay)
+            continue;
+        auto client =
+            valid_p.pair->local_candidate()
+                .transport.template get<
+                    typename agent_datagram_impl<Layer>::turn_client_type>();
+        assert(client);
+        ICE_IN_DEBUG {
+            std::cout << "Creating channel for: " << valid_p.pair->to_string()
+                      << '\n';
+        }
+        utils::detached_with_data(
+            utils::stop_when(
+                stdexec::just(client,
+                              valid_p.pair->remote_candidate().endpoint) |
+                    stdexec::let_value([](auto client, ice::endpoint dst) {
+                        uint16_t ch = client->generate_channel_number();
+                        return client->channel_bind(dst, ch);
+                    }),
+                this->_promise.get_future()),
+            this->shared_from_this(),
+            valid_p.pair->local_candidate().transport);
+    }
 }
 
 } // namespace ice::impl

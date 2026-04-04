@@ -13,6 +13,7 @@
 #include "task.hpp"
 #include "stun.hpp"
 #include "stun_transaction.hpp"
+#include "shared_promise.hpp"
 
 #if ASIOICE_USE_BOOST_ASIO > 0
 #define ASIO_TO_EXEC_USE_BOOST 1
@@ -30,11 +31,6 @@ namespace net = asio;
 #include "asio2exec.hpp"
 
 namespace ice {
-
-// struct __triggered_check_queue_tag;
-// using __triggered_check_queue_base_hook = boost::intrusive::list_base_hook<
-//     boost::intrusive::tag<__triggered_check_queue_tag>,
-//     boost::intrusive::link_mode<boost::intrusive::auto_unlink>>;
 
 struct candidate_pair final
     : datagram_receiver,
@@ -93,11 +89,7 @@ struct candidate_pair final
     state_t state() const noexcept { return _state; }
     void set_state(state_t state) noexcept;
 
-    // bool nominated() const noexcept { return _nominated; }
-    // void set_nominated(bool nominated) noexcept;
-
     const std::string &foundation() const noexcept {
-        // TODO: What is candidate pair foundation?
         return _foundation;
     }
 
@@ -105,10 +97,6 @@ struct candidate_pair final
     const std::string &transport_type() const noexcept {
         return _local_candidate.transport_type;
     }
-
-    // bool in_triggered_queue() const noexcept {
-    //     return __triggered_check_queue_base_hook::is_linked();
-    // }
 
     template <class BufferSequence>
     ice::task<std::tuple<std::error_code, std::size_t>>
@@ -130,6 +118,15 @@ struct candidate_pair final
 
     std::string to_string(int indent = 4) const;
 
+    auto last_keepalive_time() const noexcept {
+        return _last_keepalive_time;
+    }
+
+    void update_keepalive_time() noexcept {
+        _last_keepalive_time = std::chrono::steady_clock::now();
+    }
+
+    ice::task<void> keepalive_task(std::chrono::milliseconds ms, std::weak_ptr<candidate_pair> self);
   private:
     using receiver_list_t =
         boost::intrusive::list<datagram_receiver,
@@ -139,10 +136,11 @@ struct candidate_pair final
     ice::candidate _remote_candidate;
     std::string _foundation;
     uint64_t _priority{};
-    // bool _nominated = false;
-    // bool _remote_nominated = false;
     state_t _state = state_t::FROZEN;
     receiver_list_t _receivers{};
+
+    bool _keepalive_started = false;
+    std::chrono::steady_clock::time_point _last_keepalive_time{};
 };
 
 } // namespace ice

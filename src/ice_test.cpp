@@ -67,7 +67,7 @@ inline void get_local_addresses_test(uint64_t n) {
               << "ns\n";
 }
 
-inline ice::task<void> gather_task(ice::net::io_context &ctx) try {
+inline ice::task<void> gather_task(ice::net::io_context &ctx, int num) try {
     using namespace ice;
 
     const char *stun_servers[] = {/*"stun.l.google.com:19302",*/
@@ -114,6 +114,21 @@ inline ice::task<void> gather_task(ice::net::io_context &ctx) try {
 
     net::steady_timer timer1(ctx, std::chrono::seconds(5));
     net::steady_timer timer2(ctx, std::chrono::seconds(5));
+
+    agent2->on_data([&](io_buffer_ptr data, uint8_t component) {
+        // remove header
+        data->consume_front(1);
+        if (component == 1)
+            std::cout << "RTP from agent1: "
+                      << std::string_view{(const char *)data->data(),
+                                          data->size()}
+                      << '\n';
+        else if (component == 2)
+            std::cout << "RTCP from agent1: "
+                      << std::string_view{(const char *)data->data(),
+                                          data->size()}
+                      << '\n';
+    });
 
     agent1->on_local_candidates(
         [&agent2](const ice::candidate *c, std::size_t n) -> ice::task<void> {
@@ -192,7 +207,7 @@ inline ice::task<void> gather_task(ice::net::io_context &ctx) try {
     std::cout << "Agent1 is connecting ...\n";
     scope.spawn(stdexec::starts_on(sched, agent1->connect()) | utils::ignore());
 
-    co_await ice::utils::on_scope_empty(scope);
+    co_await (ice::utils::on_scope_empty(scope) | stdexec::continues_on(sched));
 
     bool agent1_connected = agent1->state() == impl::agent_state_t::CONNECTED;
     bool agent2_connected = agent2->state() == impl::agent_state_t::CONNECTED;
@@ -208,6 +223,18 @@ inline ice::task<void> gather_task(ice::net::io_context &ctx) try {
         for (const auto &p : np2) {
             std::cout << p->to_string() << '\n';
         }
+        std::string_view rtp =
+            /*demultiplex with STUN*/ "\12This is RTP packet";
+        std::string_view rtcp =
+            /*demultiplex with STUN*/ "\12This is RTCP packet";
+        for (int i = 0; i < num; ++i) {
+            if (rand() % 2)
+                co_await agent1->sendto(net::buffer(rtp), 1);
+            else
+                co_await agent1->sendto(net::buffer(rtcp), 2);
+            timer1.expires_after(std::chrono::seconds(30));
+            co_await timer1.async_wait(asio2exec::use_sender);
+        }
     } else {
         std::cout << "Agent1 connect "
                   << (agent1_connected ? "success, " : "failed, ")
@@ -222,8 +249,10 @@ inline ice::task<void> gather_task(ice::net::io_context &ctx) try {
 void gathering_test(int num) {
     ice::net::io_context ctx;
     exec::start_detached(
-        stdexec::starts_on(asio2exec::scheduler{ctx}, gather_task(ctx)));
+        stdexec::starts_on(asio2exec::scheduler{ctx}, gather_task(ctx, num)));
     ctx.run();
 }
 
-int main() { gathering_test(0); }
+int main(int argc, char *argv[]) {
+    gathering_test(argc > 1 ? std::atoi(argv[1]) : 100);
+}

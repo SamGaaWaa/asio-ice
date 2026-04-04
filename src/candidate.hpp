@@ -47,6 +47,7 @@ struct candidate {
     std::optional<ice::endpoint> related;
     std::string tcptype;
     std::optional<uint32_t> generation;
+    std::string mdns_host;
     mutable ice::any_transport transport;
 };
 

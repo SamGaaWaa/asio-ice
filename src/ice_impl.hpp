@@ -158,11 +158,17 @@ struct agent_datagram_impl
         _on_local_candidates = std::forward<Func>(cb);
     }
 
+    auto sendto(net::const_buffer data, uint8_t component);
+    void on_data(std::function<void(ice::io_buffer_ptr, uint8_t)> callback) {
+        _on_data = std::move(callback);
+    }
+
   private:
     struct stun_receiver : ice::datagram_receiver {
         stun_receiver(const ice::any_transport &transport,
-                      agent_datagram_impl *agent) noexcept
-            : ice::datagram_receiver(), _transport(transport), _agent(agent) {
+                      agent_datagram_impl *agent, uint8_t component) noexcept
+            : ice::datagram_receiver(), _transport(transport), _agent(agent),
+              _component(component) {
             _transport.add_receiver(*this);
         }
         const auto &transport() const noexcept { return _transport; }
@@ -172,6 +178,7 @@ struct agent_datagram_impl
       private:
         ice::any_transport _transport;
         agent_datagram_impl *_agent;
+        uint8_t _component;
     };
 
     struct check_task {
@@ -285,13 +292,16 @@ struct agent_datagram_impl
     void request_handler(ice::any_transport &transport,
                          const ice::endpoint &source, ice::io_buffer_ptr buf);
 
-    void create_stun_receiver(const ice::any_transport &transport) noexcept;
+    void create_stun_receiver(const ice::any_transport &transport,
+                              uint8_t component) noexcept;
     void create_turn_permission(const net::ip::address &ip);
 
     bool set_nominated(ice::candidate_pair &pair) noexcept;
     void default_nominate();
 
     ice::task<void> free_candidates();
+
+    void create_channel_for_valid_pair();
 
     using check_list_type = std::vector<std::shared_ptr<ice::candidate_pair>>;
 
@@ -311,7 +321,6 @@ struct agent_datagram_impl
     std::vector<ice::candidate> _remote_candidates{};
     bool _local_candidates_end = false;
     bool _remote_candidates_end = false;
-    // std::vector<turn_client_type> _turn_clients;
     check_list_type _check_list{};
     ice::utils::property<check_list_state_t> _check_list_state{
         check_list_state_t::RUNNING};
@@ -321,6 +330,7 @@ struct agent_datagram_impl
     ice::shared_promise<void> _check_complete_notifier{};
     ice::shared_promise<void> _request_handler_promise{};
     std::size_t _outgoing_request_handler_count{0};
+    std::function<void(ice::io_buffer_ptr, uint8_t)> _on_data{};
     std::list<stun_receiver> _stun_receivers{};
     ice::utils::property<agent_state_t> _state{agent_state_t::INIT};
 
