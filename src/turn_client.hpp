@@ -10,9 +10,34 @@ constexpr bool is_channel_data(const void *data, std::size_t size) noexcept {
     return (static_cast<const uint8_t *>(data)[0] & 0xC0) == 0x40;
 }
 
+struct turn_interface {
+    virtual asioice::endpoint local_endpoint() const noexcept = 0;
+    virtual asioice::endpoint remote_endpoint() const noexcept = 0;
+    virtual const std::string &username() const noexcept = 0;
+    virtual const std::string &password() const noexcept = 0;
+    virtual std::optional<asioice::endpoint>
+    relayed_address() const noexcept = 0;
+    virtual std::optional<asioice::endpoint>
+    reflex_address() const noexcept = 0;
+    virtual asioice::task<std::optional<asioice::endpoint>>
+    create_allocation(std::chrono::seconds lifetime) = 0;
+    virtual asioice::task<bool> channel_bind(net::ip::udp::endpoint peer) = 0;
+    virtual asioice::task<void> delete_allocation() = 0;
+    virtual asioice::task<bool>
+    refresh(std::chrono::seconds time_to_expiry) = 0;
+    virtual bool has_permission(const net::ip::address ip) const noexcept = 0;
+    virtual asioice::task<bool> create_permission(net::ip::address peer) = 0;
+    virtual asioice::task<bool>
+    create_permission(std::span<net::ip::address> peers) = 0;
+    virtual void delete_permission(const net::ip::address &peer) noexcept = 0;
+    virtual void
+    delete_permission(std::span<net::ip::address> peers) noexcept = 0;
+};
+
 template <class NextLayer, bool IsDatagram> class client {};
 
-template <class NextLayer> class client<NextLayer, true> {
+template <class NextLayer>
+class client<NextLayer, true> final : public turn_interface {
   public:
     using impl_type = impl::datagram_client<NextLayer>;
     using next_layer_type = typename impl_type::next_layer_type;
@@ -53,74 +78,74 @@ template <class NextLayer> class client<NextLayer, true> {
     const auto &impl() const noexcept { return *_impl; }
     auto &impl() noexcept { return *_impl; }
 
-    asioice::endpoint local_endpoint() const noexcept {
+    asioice::endpoint local_endpoint() const noexcept override {
         return _impl->local_endpoint();
     }
 
-    asioice::endpoint remote_endpoint() const noexcept {
+    asioice::endpoint remote_endpoint() const noexcept override {
         return _impl->remote_endpoint();
     }
 
-    const std::string &username() const noexcept { return _impl->username(); }
-    const std::string &password() const noexcept { return _impl->password(); }
+    const std::string &username() const noexcept override {
+        return _impl->username();
+    }
+    const std::string &password() const noexcept override {
+        return _impl->password();
+    }
 
-    const std::optional<asioice::endpoint> &relayed_address() const noexcept {
+    std::optional<asioice::endpoint> relayed_address() const noexcept override {
         return _impl->relayed_address();
     }
-    const std::optional<asioice::endpoint> &reflex_address() const noexcept {
+    std::optional<asioice::endpoint> reflex_address() const noexcept override {
         return _impl->reflex_address();
     }
 
-    asioice::task<bool> request(const stun::message &msg, asioice::endpoint &from,
-                            stun::message &resp, std::size_t retries,
-                            auto... self) {
-        return _impl->request(msg, from, resp, retries, std::move(self)...);
+    asioice::task<bool> request(const stun::message &msg,
+                                asioice::endpoint &from, stun::message &resp,
+                                std::size_t retries) {
+        return _impl->request(msg, from, resp, retries);
     }
 
     /*
         Only support UDP between server and peer
     */
-    asioice::task<std::optional<asioice::endpoint>> create_allocation(auto lifetime,
-                                                              auto... self) {
-        return _impl->create_allocation(lifetime, std::move(self)...);
+    asioice::task<std::optional<asioice::endpoint>>
+    create_allocation(std::chrono::seconds lifetime) override {
+        return _impl->create_allocation(lifetime);
     }
 
-    uint16_t generate_channel_number() const {
-        return _impl->generate_channel_number();
+    asioice::task<bool> channel_bind(net::ip::udp::endpoint peer) override {
+        return _impl->channel_bind(peer);
     }
 
-    asioice::task<bool> channel_bind(net::ip::udp::endpoint peer, uint16_t channel,
-                                 auto... self) {
-        return _impl->channel_bind(peer, channel, std::move(self)...);
+    asioice::task<void> delete_allocation() override {
+        return _impl->delete_allocation();
     }
 
-    asioice::task<void> delete_allocation(auto... self) {
-        return _impl->delete_allocation(std::move(self)...);
+    asioice::task<bool> refresh(std::chrono::seconds time_to_expiry) override {
+        return _impl->refresh(time_to_expiry);
     }
 
-    asioice::task<bool> refresh(auto time_to_expiry, auto... self) {
-        return _impl->refresh(time_to_expiry, std::move(self)...);
-    }
-
-    bool has_permission(const net::ip::address ip) const noexcept {
+    bool has_permission(const net::ip::address ip) const noexcept override {
         return _impl->permissions().find(ip) != _impl->permissions().end();
     }
 
-    asioice::task<bool> create_permission(net::ip::address peer, auto... self) {
-        return _impl->create_permission(peer, std::move(self)...);
+    asioice::task<bool> create_permission(net::ip::address peer) override {
+        return _impl->create_permission(peer);
     }
 
-    asioice::task<bool> create_permission(std::ranges::view auto peers,
-                                      auto... self) {
-        return _impl->create_permission(std::move(peers), std::move(self)...);
+    asioice::task<bool>
+    create_permission(std::span<net::ip::address> peers) override {
+        return _impl->create_permission(peers);
     }
 
-    void delete_permission(const net::ip::address &peer) {
+    void delete_permission(const net::ip::address &peer) noexcept override {
         _impl->delete_permission(peer);
     }
 
-    void delete_permission(std::ranges::view auto peers) {
-        _impl->delete_permission(std::move(peers));
+    void
+    delete_permission(std::span<net::ip::address> peers) noexcept override {
+        _impl->delete_permission(peers);
     }
 
     template <class ConstBufferSequence>

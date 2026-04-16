@@ -3,7 +3,8 @@ namespace asioice::impl {
 template <class Layer>
 asioice::task<void> agent_datagram_impl<Layer>::server_reflexive_candidate(
     std::vector<asioice::candidate> &srflx_candidates,
-    const asioice::candidate &local_candidate, stun::transaction_set &transactions,
+    const asioice::candidate &local_candidate,
+    stun::transaction_set &transactions,
     const asioice::endpoint &stun_server) noexcept try {
     if (local_candidate.type != candidate_type::host)
         co_return;
@@ -230,9 +231,7 @@ asioice::task<void> agent_datagram_impl<Layer>::get_component_candidates(
 
 template <class Layer>
 asioice::task<void> agent_datagram_impl<Layer>::create_relayed_candidate(
-    std::vector<asioice::candidate> &component_candidates,
-    std::shared_ptr<typename agent_datagram_impl<Layer>::turn_client_type>
-        client,
+    std::vector<asioice::candidate> &component_candidates, auto client,
     typename agent_datagram_impl<Layer>::raw_transport_ptr host_transport,
     uint8_t component) noexcept {
     auto ret = co_await client->create_allocation(std::chrono::seconds(60 * 5));
@@ -331,7 +330,8 @@ inline bool __validate_remote_candidate(const asioice::candidate &c) noexcept {
 }
 
 template <class Layer>
-void agent_datagram_impl<Layer>::pair_local_candidate(const asioice::candidate &c) {
+void agent_datagram_impl<Layer>::pair_local_candidate(
+    const asioice::candidate &c) {
     assert(c.type != asioice::candidate_type::srflx &&
            "Should not pair srflx candidates");
     for (const auto &remote_c : this->_remote_candidates) {
@@ -347,8 +347,10 @@ void agent_datagram_impl<Layer>::pair_local_candidate(const asioice::candidate &
         // called the "checklist" for that data stream.
         auto it = std::ranges::find_if(
             this->_check_list, [&](const auto &p) noexcept {
-                return (p->state() == asioice::candidate_pair::state_t::WAITING ||
-                        p->state() == asioice::candidate_pair::state_t::FROZEN) &&
+                return (p->state() ==
+                            asioice::candidate_pair::state_t::WAITING ||
+                        p->state() ==
+                            asioice::candidate_pair::state_t::FROZEN) &&
                        p->local_candidate().endpoint == c.endpoint &&
                        p->remote_candidate().endpoint == remote_c.endpoint &&
                        utils::case_insensitive_equal(p->transport_type(),
@@ -386,8 +388,10 @@ void agent_datagram_impl<Layer>::pair_remote_candidate(
         // called the "checklist" for that data stream.
         auto it = std::ranges::find_if(
             this->_check_list, [&](const auto &p) noexcept {
-                return (p->state() == asioice::candidate_pair::state_t::WAITING ||
-                        p->state() == asioice::candidate_pair::state_t::FROZEN) &&
+                return (p->state() ==
+                            asioice::candidate_pair::state_t::WAITING ||
+                        p->state() ==
+                            asioice::candidate_pair::state_t::FROZEN) &&
                        p->local_candidate().endpoint == local_c.endpoint &&
                        p->remote_candidate().endpoint == c.endpoint &&
                        utils::case_insensitive_equal(p->transport_type(),
@@ -568,12 +572,12 @@ agent_datagram_impl<Layer>::pick_next_pair() noexcept {
         for (auto &p : this->_check_list) {
             if (p->state() != asioice::candidate_pair::state_t::FROZEN)
                 continue;
-            if (std::ranges::none_of(
-                    this->_check_list, [&p](const auto &pp) noexcept {
-                        return p->foundation() == pp->foundation() &&
-                               pp->state() ==
-                                   asioice::candidate_pair::state_t::IN_PROGRESS;
-                    })) {
+            if (std::ranges::none_of(this->_check_list, [&p](const auto
+                                                                 &pp) noexcept {
+                    return p->foundation() == pp->foundation() &&
+                           pp->state() ==
+                               asioice::candidate_pair::state_t::IN_PROGRESS;
+                })) {
                 p->set_state(asioice::candidate_pair::state_t::WAITING);
             }
         }
@@ -618,7 +622,8 @@ agent_datagram_impl<Layer>::pick_next_pair() noexcept {
 template <class Layer>
 void agent_datagram_impl<Layer>::unfreeze_initial() noexcept {
     asioice::small_set<std::string_view> seen_foundations;
-    std::vector<asioice::candidate_pair *> pairs(this->_check_list.size(), nullptr);
+    std::vector<asioice::candidate_pair *> pairs(this->_check_list.size(),
+                                                 nullptr);
     std::transform(this->_check_list.begin(), this->_check_list.end(),
                    pairs.begin(), [](auto &p) noexcept { return p.get(); });
     std::ranges::sort(pairs, [](const auto &a, const auto &b) noexcept {
@@ -656,7 +661,8 @@ void agent_datagram_impl<Layer>::check_complete(
 }
 
 template <class Layer>
-asioice::task<bool> agent_datagram_impl<Layer>::do_connect(auto... self) noexcept {
+asioice::task<bool>
+agent_datagram_impl<Layer>::do_connect(auto... self) noexcept {
     if (this->_state == agent_state_t::CONNECTING ||
         this->_state == agent_state_t::CLOSED ||
         this->_state == agent_state_t::CONNECTED ||
@@ -826,10 +832,8 @@ asioice::task<void> agent_datagram_impl<Layer>::do_check(check_task ct) {
 
         // Create permission
         if (pair.local_candidate().type == asioice::candidate_type::relay) {
-            auto client =
-                pair.local_candidate()
-                    .transport.template get<typename agent_datagram_impl<
-                        Layer>::turn_client_type>();
+            auto client = static_cast<turn::turn_interface *>(
+                pair.local_candidate().transport.data());
             assert(client);
             if (!client->has_permission(
                     pair.remote_candidate().endpoint.address())) {
@@ -898,7 +902,7 @@ asioice::task<void> agent_datagram_impl<Layer>::do_check(check_task ct) {
                 else if (req.ice_controlling)
                     this->switch_role(false);
                 asioice::hash::random_bytes(&this->_tie_breaker,
-                                        sizeof(this->_tie_breaker));
+                                            sizeof(this->_tie_breaker));
                 continue;
             }
 
@@ -1160,9 +1164,9 @@ void agent_datagram_impl<Layer>::create_stun_receiver(
 }
 
 template <class Layer>
-void agent_datagram_impl<Layer>::request_handler(asioice::any_transport &transport,
-                                                 const asioice::endpoint &source,
-                                                 asioice::io_buffer_ptr buf) {
+void agent_datagram_impl<Layer>::request_handler(
+    asioice::any_transport &transport, const asioice::endpoint &source,
+    asioice::io_buffer_ptr buf) {
     if (this->_state == agent_state_t::CLOSED)
         return;
     if (this->_outgoing_request_handler_count > 256) {
@@ -1316,11 +1320,11 @@ agent_datagram_impl<Layer>::do_handle_request(asioice::any_transport transport,
         // Learning Peer-Reflexive Candidates
         this->_remote_candidates.emplace_back(
             asioice::candidate{.foundation = utils::random_string(32),
-                           .component = local->component,
-                           .transport_type = local->transport_type,
-                           .priority = *req.priority,
-                           .endpoint = source,
-                           .type = asioice::candidate_type::prflx});
+                               .component = local->component,
+                               .transport_type = local->transport_type,
+                               .priority = *req.priority,
+                               .endpoint = source,
+                               .type = asioice::candidate_type::prflx});
         remote = &this->_remote_candidates.back();
         ICE_IN_DEBUG {
             std::cout << "Peer-Reflexive Candidate: " << remote->to_string()
@@ -1452,7 +1456,8 @@ bool agent_datagram_impl<Layer>::stun_receiver::datagram_received(
         // invalid STUN, ignore
         return true;
     }
-    auto cls = asioice::stun::message::get_class(buffer->data(), buffer->size());
+    auto cls =
+        asioice::stun::message::get_class(buffer->data(), buffer->size());
     if (cls == stun::class_t::STUN_CLASS_INDICATION)
         return false;
     if (cls == stun::class_t::STUN_CLASS_REQUEST) {
@@ -1677,38 +1682,19 @@ asioice::task<void> agent_datagram_impl<Layer>::free_candidates() {
             });
     };
 
-    boost::container::flat_multimap<
-        typename agent_datagram_impl<Layer>::turn_client_type *,
-        net::ip::address>
-        in_use_permissions;
+    asioice::small_set<turn::turn_interface *> turn_clients;
+    asioice::small_set<net::ip::address> in_use_permissions;
     for (auto pair : nominated_pairs) {
         if (pair->local_candidate().type != asioice::candidate_type::relay)
             continue;
-        auto client =
-            pair->local_candidate()
-                .transport.template get<
-                    typename agent_datagram_impl<Layer>::turn_client_type>();
-        assert(client);
-        in_use_permissions.emplace(client,
-                                   pair->remote_candidate().endpoint.address());
+        turn_clients.emplace(static_cast<turn::turn_interface *>(
+            pair->local_candidate().transport.data()));
+        in_use_permissions.emplace(pair->remote_candidate().endpoint.address());
     }
-    for (auto pair : nominated_pairs) {
-        if (pair->local_candidate().type != asioice::candidate_type::relay)
-            continue;
-        auto client =
-            pair->local_candidate()
-                .transport.template get<
-                    typename agent_datagram_impl<Layer>::turn_client_type>();
-        assert(client);
-        auto rng = in_use_permissions.equal_range(client);
-        auto permissions_in_use = [&](const net::ip::address &ip) noexcept {
-            return std::ranges::any_of(
-                std::ranges::subrange{rng.first, rng.second},
-                [&](const auto &kv) { return kv.second == ip; });
-        };
-        for (const auto &remote_c : this->_remote_candidates) {
-            auto remote_ip = remote_c.endpoint.address();
-            if (!permissions_in_use(remote_ip))
+    for (const auto &remote_c : this->_remote_candidates) {
+        auto remote_ip = remote_c.endpoint.address();
+        if (!in_use_permissions.contains(remote_ip)) {
+            for (auto client : turn_clients)
                 client->delete_permission(remote_ip);
         }
     }
@@ -1743,8 +1729,8 @@ void agent_datagram_impl<Layer>::create_turn_permission(
     for (const auto &local_c : this->_local_candidates) {
         if (local_c.type != asioice::candidate_type::relay)
             continue;
-        auto client = local_c.transport.template get<
-            typename agent_datagram_impl<Layer>::turn_client_type>();
+        auto client =
+            static_cast<turn::turn_interface *>(local_c.transport.data());
         assert(client);
         if (!client->has_permission(ip)) {
             ICE_IN_DEBUG {
@@ -1841,10 +1827,8 @@ void agent_datagram_impl<Layer>::create_channel_for_valid_pair() {
         if (!valid_p.nominated ||
             valid_p.pair->local_candidate().type != candidate_type::relay)
             continue;
-        auto client =
-            valid_p.pair->local_candidate()
-                .transport.template get<
-                    typename agent_datagram_impl<Layer>::turn_client_type>();
+        auto client = static_cast<turn::turn_interface *>(
+            valid_p.pair->local_candidate().transport.data());
         assert(client);
         ICE_IN_DEBUG {
             std::cout << "Creating channel for: " << valid_p.pair->to_string()
@@ -1855,8 +1839,7 @@ void agent_datagram_impl<Layer>::create_channel_for_valid_pair() {
                 stdexec::just(client,
                               valid_p.pair->remote_candidate().endpoint) |
                     stdexec::let_value([](auto client, asioice::endpoint dst) {
-                        uint16_t ch = client->generate_channel_number();
-                        return client->channel_bind(dst, ch);
+                        return client->channel_bind(dst);
                     }),
                 this->_promise.get_future()),
             this->shared_from_this(),

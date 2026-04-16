@@ -1,11 +1,9 @@
 namespace asioice::turn::impl {
 
 template <class NextLayer>
-asioice::task<bool> datagram_client<NextLayer>::request(const stun::message &req,
-                                                    asioice::endpoint &from,
-                                                    stun::message &resp,
-                                                    std::size_t retries,
-                                                    auto... self) noexcept {
+asioice::task<bool> datagram_client<NextLayer>::request(
+    const stun::message &req, asioice::endpoint &from, stun::message &resp,
+    std::size_t retries, auto... self) noexcept {
     auto it = this->_transactions.lower_bound(req.transaction_id);
     if (it != this->_transactions.end() &&
         it->request.transaction_id == req.transaction_id) {
@@ -352,7 +350,7 @@ datagram_client<NextLayer>::create_allocation(auto lifetime, auto... self) {
 
 template <class NextLayer>
 asioice::task<bool> datagram_client<NextLayer>::refresh(auto time_to_expiry,
-                                                    auto... self) {
+                                                        auto... self) {
     if (!this->is_running())
         co_return false;
     ICE_IN_DEBUG { std::cout << "Refreshing\n"; }
@@ -411,7 +409,8 @@ void datagram_client<NextLayer>::do_delete_allocation() {
 }
 
 template <class NextLayer>
-asioice::task<void> datagram_client<NextLayer>::delete_allocation(auto... self) {
+asioice::task<void>
+datagram_client<NextLayer>::delete_allocation(auto... self) {
     if (!this->_relayed_address)
         co_return;
     stun::message req;
@@ -464,7 +463,8 @@ uint16_t datagram_client<NextLayer>::generate_channel_number() const {
 }
 
 template <class NextLayer>
-asioice::task<void> datagram_client<NextLayer>::permission_state::refresh_task() {
+asioice::task<void>
+datagram_client<NextLayer>::permission_state::refresh_task() {
     utils::scope_guard on_exit([this]() noexcept {
         ICE_IN_DEBUG { std::cout << "permission_state::refresh_task exit\n"; }
         if (this->is_linked())
@@ -625,7 +625,7 @@ datagram_client<NextLayer>::create_permission(std::ranges::view auto peers,
 
 template <class NextLayer>
 void datagram_client<NextLayer>::delete_permission(
-    const net::ip::address &peer) {
+    const net::ip::address &peer) noexcept {
     if (!this->is_running())
         return;
     ICE_IN_DEBUG { std::cout << "Delete permission of \"" << peer << "\"\n"; }
@@ -708,7 +708,7 @@ auto datagram_client<NextLayer>::send_channel_data(
 template <class NextLayer>
 asioice::task<bool>
 datagram_client<NextLayer>::channel_bind(net::ip::udp::endpoint peer,
-                                         uint16_t channel, auto... self) {
+                                         auto... self) {
     if (!this->is_running())
         co_return false;
     if (!this->_relayed_address) {
@@ -725,6 +725,13 @@ datagram_client<NextLayer>::channel_bind(net::ip::udp::endpoint peer,
         }
         co_return false;
     }
+    uint8_t channel = 0;
+    if (auto it = this->_peer_to_channel.find(peer);
+        it != this->_peer_to_channel.end()) {
+        // refresh
+        channel = it->channel();
+    } else
+        channel = this->generate_channel_number();
     ICE_IN_DEBUG {
         std::cout << "Binding or refreshing channel: {" << peer.address() << ":"
                   << peer.port() << ", " << channel << "}\n";
@@ -816,7 +823,7 @@ asioice::task<void> datagram_client<NextLayer>::channel_state::refresh_task() {
         if (ec)
             break;
         std::optional<bool> ret = co_await stdexec::stopped_as_optional(
-            this->client().channel_bind(this->peer(), this->channel()));
+            this->client().channel_bind(this->peer()));
         if (!ret) {
             ICE_IN_DEBUG {
                 std::cout << "channel_state::refresh_task cancelled, channel = "

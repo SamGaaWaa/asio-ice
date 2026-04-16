@@ -99,20 +99,19 @@ struct datagram_client
         return _reflex_address;
     }
 
-    asioice::task<bool> request(const stun::message &msg, asioice::endpoint &from,
-                            stun::message &resp, std::size_t retries,
-                            auto... self) noexcept;
+    asioice::task<bool> request(const stun::message &msg,
+                                asioice::endpoint &from, stun::message &resp,
+                                std::size_t retries, auto... self) noexcept;
 
     /*
         Only support UDP between server and peer
     */
-    asioice::task<std::optional<asioice::endpoint>> create_allocation(auto lifetime,
-                                                              auto... self);
+    asioice::task<std::optional<asioice::endpoint>>
+    create_allocation(auto lifetime, auto... self);
 
     uint16_t generate_channel_number() const;
 
-    asioice::task<bool> channel_bind(net::ip::udp::endpoint peer, uint16_t channel,
-                                 auto... self);
+    asioice::task<bool> channel_bind(net::ip::udp::endpoint peer, auto... self);
 
     asioice::task<void> delete_allocation(auto... self);
 
@@ -125,11 +124,11 @@ struct datagram_client
     }
 
     asioice::task<bool> create_permission(std::ranges::view auto peers,
-                                      auto... self);
+                                          auto... self);
 
-    void delete_permission(const net::ip::address &peer);
+    void delete_permission(const net::ip::address &peer) noexcept;
 
-    void delete_permission(std::ranges::view auto peers) {
+    void delete_permission(std::ranges::view auto peers) noexcept {
         for (const auto &peer : peers) {
             delete_permission(peer);
         }
@@ -159,8 +158,9 @@ struct datagram_client
 
   private:
     void do_delete_allocation();
-    asioice::task<bool> request_with_retry(stun::message &req, stun::message &resp,
-                                       std::size_t retries);
+    asioice::task<bool> request_with_retry(stun::message &req,
+                                           stun::message &resp,
+                                           std::size_t retries);
 
     asioice::task<void> refresh_allocation_task();
     void start_refresh_allocation_task();

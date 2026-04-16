@@ -42,8 +42,8 @@ void allocate_test(std::size_t epoch_count) {
         net::ip::udp::endpoint(net::ip::make_address("127.0.0.1"), 0));
 
     auto peer = remote_peer.local_endpoint();
-    asioice::candidate remote_c{.endpoint =
-                                asioice::endpoint(peer.address(), peer.port())};
+    asioice::candidate remote_c{
+        .endpoint = asioice::endpoint(peer.address(), peer.port())};
 
     asioice::candidate local_c;
     local_c.transport = client.impl().shared_from_this();
@@ -67,8 +67,7 @@ void allocate_test(std::size_t epoch_count) {
         }
         std::cout << "Creat channel for " << peer.address() << ':'
                   << peer.port() << '\n';
-        uint16_t channel_num = client.generate_channel_number();
-        if (!co_await client.channel_bind(peer, channel_num)) {
+        if (!co_await client.channel_bind(peer)) {
             std::cerr << "Channel bind failed\n";
             co_return;
         }

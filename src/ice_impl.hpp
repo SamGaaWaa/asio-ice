@@ -139,7 +139,8 @@ struct agent_datagram_impl
                                 this->on_connected_or_closed());
     }
 
-    asioice::task<bool> add_remote_candidate(asioice::candidate c, auto... self);
+    asioice::task<bool> add_remote_candidate(asioice::candidate c,
+                                             auto... self);
     auto add_remote_candidate() noexcept {
         this->_remote_candidates_end = true;
         return stdexec::just(true);
@@ -158,7 +159,8 @@ struct agent_datagram_impl
     }
 
     auto sendto(net::const_buffer data, uint8_t component);
-    void on_data(std::function<void(asioice::io_buffer_ptr, uint8_t)> callback) {
+    void
+    on_data(std::function<void(asioice::io_buffer_ptr, uint8_t)> callback) {
         _on_data = std::move(callback);
     }
 
@@ -166,8 +168,8 @@ struct agent_datagram_impl
     struct stun_receiver : asioice::datagram_receiver {
         stun_receiver(const asioice::any_transport &transport,
                       agent_datagram_impl *agent, uint8_t component) noexcept
-            : asioice::datagram_receiver(), _transport(transport), _agent(agent),
-              _component(component) {
+            : asioice::datagram_receiver(), _transport(transport),
+              _agent(agent), _component(component) {
             _transport.add_receiver(*this);
         }
         const auto &transport() const noexcept { return _transport; }
@@ -196,7 +198,8 @@ struct agent_datagram_impl
     struct transaction_state
         : boost::intrusive::set_base_hook<
               boost::intrusive::link_mode<boost::intrusive::auto_unlink>> {
-        transaction_state(asioice::candidate_pair &p, stun::transaction &t) noexcept
+        transaction_state(asioice::candidate_pair &p,
+                          stun::transaction &t) noexcept
             : pair{&p}, transaction{&t} {}
 
         struct key_type {
@@ -219,25 +222,24 @@ struct agent_datagram_impl
     asioice::task<void> do_gather_candidates();
 
     asioice::task<void> get_component_candidates(
-        std::vector<asioice::candidate> &component_candidates, uint8_t component,
-        const std::vector<net::ip::address> &addresses, auto... self);
+        std::vector<asioice::candidate> &component_candidates,
+        uint8_t component, const std::vector<net::ip::address> &addresses,
+        auto... self);
 
-    asioice::task<void>
-    server_reflexive_candidate(std::vector<asioice::candidate> &srflx_candidates,
-                               const asioice::candidate &local_candidate,
-                               stun::transaction_set &transactions,
-                               const asioice::endpoint &stun_server) noexcept;
+    asioice::task<void> server_reflexive_candidate(
+        std::vector<asioice::candidate> &srflx_candidates,
+        const asioice::candidate &local_candidate,
+        stun::transaction_set &transactions,
+        const asioice::endpoint &stun_server) noexcept;
 
     asioice::task<void> server_reflexive_candidate(
         std::vector<asioice::candidate> &srflx_candidates,
         const std::vector<asioice::candidate> &local_candidates,
         const std::vector<asioice::endpoint> &stun_servers) noexcept;
 
-    asioice::task<void>
-    create_relayed_candidate(std::vector<asioice::candidate> &component_candidates,
-                             std::shared_ptr<turn_client_type> client,
-                             raw_transport_ptr host_transport,
-                             uint8_t component) noexcept;
+    asioice::task<void> create_relayed_candidate(
+        std::vector<asioice::candidate> &component_candidates, auto client,
+        raw_transport_ptr host_transport, uint8_t component) noexcept;
 
     void pair_local_candidate(const asioice::candidate &c);
     void pair_remote_candidate(const asioice::candidate &c);
@@ -254,8 +256,8 @@ struct agent_datagram_impl
     void unfreeze_initial() noexcept;
 
     asioice::task<request_result> request(asioice::candidate_pair &pair,
-                                      const stun::message &req,
-                                      stun::message &resp) noexcept;
+                                          const stun::message &req,
+                                          stun::message &resp) noexcept;
 
     void switch_role(bool ice_controlling) noexcept;
 
@@ -267,9 +269,11 @@ struct agent_datagram_impl
     construct_valid_pair(const stun::message &req, const stun::message &resp,
                          check_task &ct);
 
-    void build_request(stun::message &req, asioice::candidate_pair &pair) noexcept;
+    void build_request(stun::message &req,
+                       asioice::candidate_pair &pair) noexcept;
 
-    bool in_triggered_check_queue(const asioice::candidate_pair &p) const noexcept;
+    bool
+    in_triggered_check_queue(const asioice::candidate_pair &p) const noexcept;
 
     asioice::task<void> check(check_task ct);
     asioice::task<void> do_check(check_task ct);
@@ -277,8 +281,8 @@ struct agent_datagram_impl
     bool verify_username(std::string_view name) const noexcept;
 
     asioice::task<void> do_handle_request(asioice::any_transport transport,
-                                      asioice::endpoint source,
-                                      asioice::io_buffer_ptr buf);
+                                          asioice::endpoint source,
+                                          asioice::io_buffer_ptr buf);
 
     asioice::task<bool> do_connect(auto... self) noexcept;
 
@@ -289,7 +293,8 @@ struct agent_datagram_impl
     void check_complete(asioice::candidate_pair &pair) noexcept;
 
     void request_handler(asioice::any_transport &transport,
-                         const asioice::endpoint &source, asioice::io_buffer_ptr buf);
+                         const asioice::endpoint &source,
+                         asioice::io_buffer_ptr buf);
 
     void create_stun_receiver(const asioice::any_transport &transport,
                               uint8_t component) noexcept;
@@ -302,13 +307,14 @@ struct agent_datagram_impl
 
     void create_channel_for_valid_pair();
 
-    using check_list_type = std::vector<std::shared_ptr<asioice::candidate_pair>>;
+    using check_list_type =
+        std::vector<std::shared_ptr<asioice::candidate_pair>>;
 
     using valid_list_type = std::vector<valid_pair>;
 
     net::io_context &_ctx;
-    asioice::shared_promise<void> _promise{};  // use for some detached work
-    stun::transaction_set _transactions{}; // use for connectivity checks
+    asioice::shared_promise<void> _promise{}; // use for some detached work
+    stun::transaction_set _transactions{};    // use for connectivity checks
     transaction_state_set _transaction_states{};
     config_type _config;
     bool _ice_controlling = true;
