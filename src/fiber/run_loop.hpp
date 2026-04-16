@@ -30,7 +30,7 @@
 #include <mutex>
 #include <utility>
 
-namespace ice::fiber {
+namespace asioice::fiber {
 /////////////////////////////////////////////////////////////////////////////
 // run_loop
 namespace __loop {
@@ -218,4 +218,4 @@ inline auto run_loop::__pop_front_() -> __task * {
 
 // NOT TO SPEC
 using run_loop = __loop::run_loop;
-} // namespace ice::fiber
+} // namespace asioice::fiber

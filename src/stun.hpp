@@ -6,12 +6,12 @@
 
 #if ASIOICE_USE_BOOST_ASIO > 0
 #include <boost/asio/ip/address.hpp>
-namespace ice {
+namespace asioice {
 namespace net = boost::asio;
 }
 #else
 #include <asio/ip/address.hpp>
-namespace ice {
+namespace asioice {
 namespace net = asio;
 }
 #endif
@@ -28,7 +28,7 @@ namespace net = asio;
 #include <system_error>
 #include <vector>
 
-namespace ice::stun {
+namespace asioice::stun {
 
 inline constexpr std::size_t HEADER_SIZE = 20U;
 
@@ -259,4 +259,4 @@ struct message {
     mutable std::byte *_writable_turn_data{nullptr}; // only for serializing
 };
 
-} // namespace ice::stun
+} // namespace asioice::stun

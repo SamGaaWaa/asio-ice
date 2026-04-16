@@ -4,7 +4,7 @@
 #include <iostream>
 
 void test() {
-    using namespace ice;
+    using namespace asioice;
     io_buffer b1;                // default constructor
     io_buffer b2(10);            // constructor with head room
     io_buffer b3(b2);            // copy constructor
@@ -36,7 +36,7 @@ void test() {
 }
 
 void benchmark(int n) {
-    using namespace ice;
+    using namespace asioice;
     io_buffer_pool pool(16);
 
     uint8_t *max_addr = 0;

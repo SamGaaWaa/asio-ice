@@ -2,7 +2,7 @@
 
 #include "fiber/run_loop.hpp"
 
-namespace ice::fiber {
+namespace asioice::fiber {
 
 struct sync_wait_t {
   private:
@@ -80,4 +80,4 @@ struct sync_wait_t {
 };
 
 inline constexpr sync_wait_t sync_wait{};
-} // namespace ice::fiber
+} // namespace asioice::fiber

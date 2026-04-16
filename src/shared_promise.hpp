@@ -12,7 +12,7 @@
 
 #include "stdexec/execution.hpp"
 
-namespace ice {
+namespace asioice {
 
 namespace __shared_promise_detail {
 
@@ -433,4 +433,4 @@ template <> struct shared_promise<void> {
 template <class... Args>
 using shared_promise = __shared_promise_detail::shared_promise<Args...>;
 
-} // namespace ice
+} // namespace asioice

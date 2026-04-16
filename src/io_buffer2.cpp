@@ -4,7 +4,7 @@
 #include <memory>
 #include <stdexcept>
 
-namespace ice {
+namespace asioice {
 
 shared_block *shared_block::allocate(std::size_t capacity) {
     void *mem =
@@ -448,4 +448,4 @@ void io_buffer_pool::put(std::unique_ptr<io_buffer> buffer) noexcept {
     ++_size;
 }
 
-} // namespace ice
+} // namespace asioice

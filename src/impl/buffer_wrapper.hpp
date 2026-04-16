@@ -6,19 +6,19 @@
 
 #if ASIOICE_USE_BOOST_ASIO > 0
 #include <boost/asio/buffers_iterator.hpp>
-namespace ice {
+namespace asioice {
 namespace net = boost::asio;
 }
 #else
 #include <asio/buffers_iterator.hpp>
-namespace ice {
+namespace asioice {
 namespace net = asio;
 }
 #endif
 
 #include <boost/container/static_vector.hpp>
 
-namespace ice {
+namespace asioice {
 
 struct buffer_wrapper {
     // TODO:
@@ -54,4 +54,4 @@ struct buffer_wrapper {
     buffer_sequence_type _buffers;
 };
 
-} // namespace ice
+} // namespace asioice

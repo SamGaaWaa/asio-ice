@@ -2,7 +2,7 @@
 
 #include "impl/datagram_transport_impl.hpp"
 
-namespace ice {
+namespace asioice {
 
 template <class Socket> struct datagram_transport {
     using impl_type = impl::datagram_transport_impl<Socket>;
@@ -77,4 +77,4 @@ template <class Socket> struct datagram_transport {
     std::shared_ptr<impl_type> _impl;
 };
 
-} // namespace ice
+} // namespace asioice

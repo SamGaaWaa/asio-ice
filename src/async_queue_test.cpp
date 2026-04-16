@@ -13,10 +13,10 @@
 #include <boost/asio/experimental/channel.hpp>
 #include <boost/asio/io_context.hpp>
 #include <boost/asio/use_awaitable.hpp>
-namespace ice {
+namespace asioice {
 namespace net = boost::asio;
 using boost::system::error_code;
-} // namespace ice
+} // namespace asioice
 #else
 #include "asio2exec.hpp"
 #include <asio/awaitable.hpp>
@@ -26,10 +26,10 @@ using boost::system::error_code;
 #include <asio/io_context.hpp>
 #include <asio/use_awaitable.hpp>
 #include <system_error>
-namespace ice {
+namespace asioice {
 namespace net = asio;
 using std::error_code;
-} // namespace ice
+} // namespace asioice
 #endif
 
 #include <exec/async_scope.hpp>
@@ -40,13 +40,13 @@ using std::error_code;
 
 constexpr auto buffer_max_size = 16;
 
-template <class T> using coro_task = ice::task<T>;
+template <class T> using coro_task = asioice::task<T>;
 
 uint64_t asio_channel_test(int times) {
-    using namespace ice;
+    using namespace asioice;
 
     net::io_context ctx;
-    net::experimental::channel<void(ice::error_code, int)> ch{ctx,
+    net::experimental::channel<void(asioice::error_code, int)> ch{ctx,
                                                               buffer_max_size};
 
     uint64_t sum = 0;
@@ -54,7 +54,7 @@ uint64_t asio_channel_test(int times) {
     auto reader = [&]() -> net::awaitable<void> {
         for (int i = 0; i < times; ++i) {
             int ret;
-            if (!ch.try_receive([&](ice::error_code, int x) { ret = x; }))
+            if (!ch.try_receive([&](asioice::error_code, int x) { ret = x; }))
                 ret = co_await ch.async_receive(net::use_awaitable);
             sum += ret;
         }
@@ -62,7 +62,7 @@ uint64_t asio_channel_test(int times) {
 
     auto writer = [&]() -> net::awaitable<void> {
         for (int i = 1; i <= times; ++i) {
-            if (!ch.try_send(ice::error_code{}, i))
+            if (!ch.try_send(asioice::error_code{}, i))
                 co_await ch.async_send({}, i, net::use_awaitable);
         }
     };
@@ -75,11 +75,11 @@ uint64_t asio_channel_test(int times) {
 }
 
 uint64_t async_queue_test(int times) {
-    using namespace ice;
+    using namespace asioice;
 
     net::io_context ctx;
     asio2exec::scheduler sched{ctx};
-    async_queue<std::tuple<ice::error_code, int>> q(buffer_max_size);
+    async_queue<std::tuple<asioice::error_code, int>> q(buffer_max_size);
 
     uint64_t sum = 0;
 
@@ -96,7 +96,7 @@ uint64_t async_queue_test(int times) {
         for (int i = 1; i <= times; ++i) {
             while (q.full())
                 co_await stdexec::schedule(sched);
-            q.push(std::make_tuple(ice::error_code{}, i));
+            q.push(std::make_tuple(asioice::error_code{}, i));
         }
         q.close();
         co_return;
@@ -111,12 +111,12 @@ uint64_t async_queue_test(int times) {
 }
 
 uint64_t async_queue_with_circular_buffer_test(int times) {
-    using namespace ice;
+    using namespace asioice;
 
     net::io_context ctx;
     asio2exec::scheduler sched{ctx};
-    async_queue<std::tuple<ice::error_code, int>,
-                boost::circular_buffer<std::tuple<ice::error_code, int>>>
+    async_queue<std::tuple<asioice::error_code, int>,
+                boost::circular_buffer<std::tuple<asioice::error_code, int>>>
         q(buffer_max_size);
 
     uint64_t sum = 0;
@@ -134,7 +134,7 @@ uint64_t async_queue_with_circular_buffer_test(int times) {
         for (int i = 1; i <= times; ++i) {
             while (q.full())
                 co_await stdexec::schedule(sched);
-            q.push(std::make_tuple(ice::error_code{}, i));
+            q.push(std::make_tuple(asioice::error_code{}, i));
         }
         q.close();
         co_return;
@@ -149,15 +149,15 @@ uint64_t async_queue_with_circular_buffer_test(int times) {
 }
 
 uint64_t async_queue_with_inline_task_test(int times) {
-    using namespace ice;
+    using namespace asioice;
 
     net::io_context ctx;
     asio2exec::scheduler sched{ctx};
-    async_queue<std::tuple<ice::error_code, int>> q(buffer_max_size);
+    async_queue<std::tuple<asioice::error_code, int>> q(buffer_max_size);
 
     uint64_t sum = 0;
 
-    auto reader = [&]() -> ice::task<void> {
+    auto reader = [&]() -> asioice::task<void> {
         while (true) {
             auto ret = co_await q.async_pop();
             if (!ret)
@@ -166,11 +166,11 @@ uint64_t async_queue_with_inline_task_test(int times) {
         }
     };
 
-    auto writer = [&]() -> ice::task<void> {
+    auto writer = [&]() -> asioice::task<void> {
         for (int i = 1; i <= times; ++i) {
             while (q.full())
                 co_await stdexec::schedule(sched);
-            q.push(std::make_tuple(ice::error_code{}, i));
+            q.push(std::make_tuple(asioice::error_code{}, i));
         }
         q.close();
         co_return;

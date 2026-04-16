@@ -2,10 +2,10 @@
 
 #include <iostream>
 
-inline ice::task<void> resolve_server(ice::net::ip::udp::resolver &resolver,
+inline asioice::task<void> resolve_server(asioice::net::ip::udp::resolver &resolver,
                                       std::string_view stun_server,
-                                      std::vector<ice::endpoint> &endpoints) {
-    using namespace ice;
+                                      std::vector<asioice::endpoint> &endpoints) {
+    using namespace asioice;
     if (stun_server.size() < 1)
         co_return;
     std::string_view host, port;
@@ -51,7 +51,7 @@ inline ice::task<void> resolve_server(ice::net::ip::udp::resolver &resolver,
 }
 
 inline void get_local_addresses_test(uint64_t n) {
-    using namespace ice;
+    using namespace asioice;
     int addrs_num = 0;
     auto begin = std::chrono::high_resolution_clock::now();
     for (uint64_t i = 0; i < n; ++i) {
@@ -67,8 +67,8 @@ inline void get_local_addresses_test(uint64_t n) {
               << "ns\n";
 }
 
-inline ice::task<void> gather_task(ice::net::io_context &ctx, int num) try {
-    using namespace ice;
+inline asioice::task<void> gather_task(asioice::net::io_context &ctx, int num) try {
+    using namespace asioice;
 
     const char *stun_servers[] = {/*"stun.l.google.com:19302",*/
                                   "14.29.112.241:20002"};
@@ -81,7 +81,7 @@ inline ice::task<void> gather_task(ice::net::io_context &ctx, int num) try {
                           "samgaawaa",
                           "1234"}},
         .component_count = 2,
-        .transport_policy = ice::transport_policy::ALL};
+        .transport_policy = asioice::transport_policy::ALL};
 
     auto agent1 =
         std::make_shared<impl::agent_datagram_impl<net::ip::udp::socket>>(
@@ -96,7 +96,7 @@ inline ice::task<void> gather_task(ice::net::io_context &ctx, int num) try {
                 {net::ip::make_address("14.29.112.241"), 20002},
             },
         .component_count = 2,
-        .transport_policy = ice::transport_policy::ALL};
+        .transport_policy = asioice::transport_policy::ALL};
     auto agent2 =
         std::make_shared<impl::agent_datagram_impl<net::ip::udp::socket>>(
             ctx, config2);
@@ -131,7 +131,7 @@ inline ice::task<void> gather_task(ice::net::io_context &ctx, int num) try {
     });
 
     agent1->on_local_candidates(
-        [&agent2](const ice::candidate *c, std::size_t n) -> ice::task<void> {
+        [&agent2](const asioice::candidate *c, std::size_t n) -> asioice::task<void> {
             if (!c) {
                 std::cout << "Agent1 finish gathering\n";
                 co_await agent2->add_remote_candidate();
@@ -152,7 +152,7 @@ inline ice::task<void> gather_task(ice::net::io_context &ctx, int num) try {
         });
 
     agent2->on_local_candidates(
-        [&agent1](const ice::candidate *c, std::size_t n) -> ice::task<void> {
+        [&agent1](const asioice::candidate *c, std::size_t n) -> asioice::task<void> {
             if (!c) {
                 std::cout << "Agent2 finish gathering\n";
                 co_await agent1->add_remote_candidate();
@@ -207,7 +207,7 @@ inline ice::task<void> gather_task(ice::net::io_context &ctx, int num) try {
     std::cout << "Agent1 is connecting ...\n";
     scope.spawn(stdexec::starts_on(sched, agent1->connect()) | utils::ignore());
 
-    co_await (ice::utils::on_scope_empty(scope) | stdexec::continues_on(sched));
+    co_await (asioice::utils::on_scope_empty(scope) | stdexec::continues_on(sched));
 
     bool agent1_connected = agent1->state() == impl::agent_state_t::CONNECTED;
     bool agent2_connected = agent2->state() == impl::agent_state_t::CONNECTED;
@@ -247,7 +247,7 @@ inline ice::task<void> gather_task(ice::net::io_context &ctx, int num) try {
 }
 
 void gathering_test(int num) {
-    ice::net::io_context ctx;
+    asioice::net::io_context ctx;
     exec::start_detached(
         stdexec::starts_on(asio2exec::scheduler{ctx}, gather_task(ctx, num)));
     ctx.run();

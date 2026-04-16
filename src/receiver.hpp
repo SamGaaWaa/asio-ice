@@ -8,12 +8,12 @@
 
 #if ASIOICE_USE_BOOST_ASIO > 0
 #include <boost/asio/ip/udp.hpp>
-namespace ice {
+namespace asioice {
 namespace net = boost::asio;
 }
 #else
 #include <asio/ip/udp.hpp>
-namespace ice {
+namespace asioice {
 namespace net = asio;
 }
 #endif
@@ -22,7 +22,7 @@ namespace net = asio;
 
 #include <memory>
 
-namespace ice {
+namespace asioice {
 
 struct datagram_receiver
     : boost::intrusive::list_base_hook<
@@ -52,7 +52,7 @@ struct datagram_receiver
     }
 
     virtual bool datagram_received(io_buffer_ptr &buffer,
-                                   const ice::endpoint &endpoint) = 0;
+                                   const asioice::endpoint &endpoint) = 0;
 
     void detach() noexcept {
         if (is_linked()) {
@@ -82,17 +82,17 @@ struct queue_datagram_receiver : public datagram_receiver {
 
   private:
     virtual bool datagram_received(io_buffer_ptr &buffer,
-                                   const ice::endpoint &endpoint) override {
+                                   const asioice::endpoint &endpoint) override {
         _q.push(std::make_tuple(std::move(buffer), endpoint));
         return true;
     }
 
-    ice::async_queue<std::tuple<io_buffer_ptr, ice::endpoint>> _q;
+    asioice::async_queue<std::tuple<io_buffer_ptr, asioice::endpoint>> _q;
 };
 
 template <class ReceiverList>
 inline bool dispatch_receivers(ReceiverList &receivers, io_buffer_ptr &buffer1,
-                               const ice::endpoint &endpoint) {
+                               const asioice::endpoint &endpoint) {
     if (receivers.empty())
         return false;
     auto buffer{std::move(buffer1)};
@@ -121,4 +121,4 @@ inline bool dispatch_receivers(ReceiverList &receivers, io_buffer_ptr &buffer1,
     return false;
 }
 
-} // namespace ice
+} // namespace asioice

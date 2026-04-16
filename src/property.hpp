@@ -5,7 +5,7 @@
 
 #include <chrono>
 
-namespace ice::utils {
+namespace asioice::utils {
 
 template <class T> struct property {
     template <class... Args>
@@ -40,7 +40,7 @@ template <class T> struct property {
   private:
     T _val;
     std::chrono::time_point<std::chrono::steady_clock> _update_time{};
-    ice::shared_promise<void> _notifier{};
+    asioice::shared_promise<void> _notifier{};
 };
 
 template <class T>
@@ -63,4 +63,4 @@ inline auto operator<=>(const T &a, const property<T> &b) noexcept {
     return a <=> b.get();
 }
 
-} // namespace ice::utils
+} // namespace asioice::utils

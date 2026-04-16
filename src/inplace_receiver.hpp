@@ -6,7 +6,7 @@
 #include <optional>
 #include <type_traits>
 
-namespace ice::utils {
+namespace asioice::utils {
 
 template <class T> struct inplace_receiver {
     inplace_receiver() {}
@@ -403,4 +403,4 @@ template <> struct inplace_receiver<void> {
     op_base *_waiter{nullptr};
 };
 
-} // namespace ice::utils
+} // namespace asioice::utils

@@ -4,7 +4,7 @@
 #include <cstring>
 #include <iostream>
 
-namespace ice {
+namespace asioice {
 
 void test_basic() {
     // 测试 raw 缓冲区
@@ -273,17 +273,17 @@ void test_pool_and_ptr() {
     std::cout << "test_pool_and_ptr passed\n";
 }
 
-} // namespace ice
+} // namespace asioice
 
 int main() {
     try {
-        ice::test_basic();
-        ice::test_raw_buffer_conversion();
-        ice::test_expansion_conversion();
-        ice::test_swap_and_move();
-        ice::test_shared_buffer_safety();
-        ice::test_reshape();
-        ice::test_pool_and_ptr();
+        asioice::test_basic();
+        asioice::test_raw_buffer_conversion();
+        asioice::test_expansion_conversion();
+        asioice::test_swap_and_move();
+        asioice::test_shared_buffer_safety();
+        asioice::test_reshape();
+        asioice::test_pool_and_ptr();
         std::cout << "All io_buffer2 tests passed!\n";
         return 0;
     } catch (const std::exception &e) {

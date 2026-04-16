@@ -12,17 +12,17 @@
 
 #if ASIOICE_USE_BOOST_ASIO > 0
 #include <boost/asio/ip/udp.hpp>
-namespace ice {
+namespace asioice {
 namespace net = boost::asio;
 }
 #else
 #include <asio/ip/udp.hpp>
-namespace ice {
+namespace asioice {
 namespace net = asio;
 }
 #endif
 
-namespace ice {
+namespace asioice {
 
 enum struct candidate_type { host, srflx, prflx, relay };
 
@@ -42,13 +42,13 @@ struct candidate {
     uint8_t component;
     std::string transport_type;
     uint32_t priority;
-    ice::endpoint endpoint;
+    asioice::endpoint endpoint;
     candidate_type type;
-    std::optional<ice::endpoint> related;
+    std::optional<asioice::endpoint> related;
     std::string tcptype;
     std::optional<uint32_t> generation;
     std::string mdns_host;
-    mutable ice::any_transport transport;
+    mutable asioice::any_transport transport;
 };
 
 static_assert(std::is_copy_constructible_v<candidate>);
@@ -67,4 +67,4 @@ std::string candidate_foundation(candidate_type type,
 uint32_t candidate_priority(uint8_t component, candidate_type type,
                             uint32_t preference = 65535) noexcept;
 
-} // namespace ice
+} // namespace asioice

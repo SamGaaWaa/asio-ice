@@ -12,14 +12,14 @@
 #include <asio2exec.hpp>
 #include <boost/asio/buffer.hpp>
 #include <boost/asio/ip/udp.hpp>
-namespace ice {
+namespace asioice {
 namespace net = boost::asio;
 }
 #else
 #include <asio/buffer.hpp>
 #include <asio/ip/udp.hpp>
 #include <asio2exec.hpp>
-namespace ice {
+namespace asioice {
 namespace net = asio;
 }
 #endif
@@ -34,7 +34,7 @@ static constexpr unsigned char packet_bytes1[] = {
     0x61, 0x90, 0x21, 0x4d, 0x04, 0xc3, 0x4c, 0x94, 0x9b, 0x4b, 0x46,
     0x95, 0x6f, 0x80, 0x28, 0x00, 0x04, 0xa3, 0x28, 0x96, 0x52};
 
-// priority, ice-controlling, username
+// priority, asioice-controlling, username
 static constexpr unsigned char packet_bytes2[] = {
     0x00, 0x01, 0x00, 0x50, 0x21, 0x12, 0xa4, 0x42, 0xb3, 0x89, 0x4c, 0x59,
     0x58, 0x15, 0x83, 0x65, 0x71, 0xc7, 0x82, 0xfb, 0x00, 0x24, 0x00, 0x04,
@@ -58,7 +58,7 @@ static constexpr unsigned char packet_bytes3[] = {
     0xab, 0xbe, 0xd0, 0x86, 0x45, 0x69, 0xc2, 0x24, 0xcf, 0x3e, 0xbf, 0xf3,
     0x80, 0x28, 0x00, 0x04, 0x6b, 0xb7, 0xbb, 0xd8};
 
-// ice-controlled
+// asioice-controlled
 static constexpr unsigned char packet_bytes4[] = {
     0x00, 0x01, 0x00, 0x50, 0x21, 0x12, 0xa4, 0x42, 0xba, 0x84, 0x30, 0x66,
     0xe4, 0x89, 0x2d, 0xb1, 0x9e, 0x7d, 0x6e, 0x36, 0x00, 0x24, 0x00, 0x04,
@@ -117,7 +117,7 @@ static constexpr unsigned char packet_bytes5[] = {
 
 void parse_test1() {
     const auto begin = std::chrono::high_resolution_clock::now();
-    ice::stun::message resp;
+    asioice::stun::message resp;
     bool success = resp.parse(packet_bytes1, sizeof(packet_bytes1));
     const auto end = std::chrono::high_resolution_clock::now();
     if (!success)
@@ -133,7 +133,7 @@ void parse_test1() {
 
 void parse_test2() {
     const auto begin = std::chrono::high_resolution_clock::now();
-    ice::stun::message resp;
+    asioice::stun::message resp;
     bool success = resp.parse(packet_bytes2, sizeof(packet_bytes2));
     const auto end = std::chrono::high_resolution_clock::now();
     if (!success)
@@ -149,7 +149,7 @@ void parse_test2() {
 
 void parse_test3() {
     const auto begin = std::chrono::high_resolution_clock::now();
-    ice::stun::message resp;
+    asioice::stun::message resp;
     bool success = resp.parse(packet_bytes3, sizeof(packet_bytes3));
     const auto end = std::chrono::high_resolution_clock::now();
     if (!success)
@@ -165,7 +165,7 @@ void parse_test3() {
 
 void parse_test4() {
     const auto begin = std::chrono::high_resolution_clock::now();
-    ice::stun::message resp;
+    asioice::stun::message resp;
     bool success = resp.parse(packet_bytes4, sizeof(packet_bytes4));
     const auto end = std::chrono::high_resolution_clock::now();
     if (!success)
@@ -181,7 +181,7 @@ void parse_test4() {
 
 void parse_test5() {
     const auto begin = std::chrono::high_resolution_clock::now();
-    ice::stun::message resp;
+    asioice::stun::message resp;
     bool success = resp.parse(packet_bytes5, sizeof(packet_bytes5));
     const auto end = std::chrono::high_resolution_clock::now();
     if (!success)
@@ -200,7 +200,7 @@ void parse_test5() {
         resp.realm, "TheMatrIX");
     for (const auto &i : resp.integrities) {
         std::cout << "Integrity check with hmac key \""
-                  << ice::hash::to_hex(password.data(), password.size())
+                  << asioice::hash::to_hex(password.data(), password.size())
                   << "\"\n";
         if (i.verify(password, resp)) {
             std::cout << "Check integrity success!\n";
@@ -216,11 +216,11 @@ void parse_base64() {
     std::string b64;
     std::cin >> b64;
     std::vector<std::byte> raw;
-    raw.resize(ice::base64::decoded_size(b64.size()));
-    raw.resize(ice::base64::decode(raw.data(), b64.data(), b64.size()).first);
+    raw.resize(asioice::base64::decoded_size(b64.size()));
+    raw.resize(asioice::base64::decode(raw.data(), b64.data(), b64.size()).first);
 
     const auto begin = std::chrono::high_resolution_clock::now();
-    ice::stun::message resp;
+    asioice::stun::message resp;
     bool success = resp.parse(raw.data(), raw.size());
     const auto end = std::chrono::high_resolution_clock::now();
     if (!success)
@@ -235,10 +235,10 @@ void parse_base64() {
 }
 
 void write_test() {
-    ice::stun::message msg, parsed;
-    msg.mapped_address.emplace(ice::net::ip::make_address("127.0.0.1"), 8080);
-    msg.integrities.emplace_back(ice::stun::message::integrity::SHA1);
-    msg.integrities.emplace_back(ice::stun::message::integrity::SHA256);
+    asioice::stun::message msg, parsed;
+    msg.mapped_address.emplace(asioice::net::ip::make_address("127.0.0.1"), 8080);
+    msg.integrities.emplace_back(asioice::stun::message::integrity::SHA1);
+    msg.integrities.emplace_back(asioice::stun::message::integrity::SHA256);
     msg.use_fingerprint(true);
     msg.set_hmac_key("Hello");
 
@@ -268,7 +268,7 @@ void write_test() {
 }
 
 void request_test() {
-    using namespace ice;
+    using namespace asioice;
 
     net::io_context ctx;
     net::ip::udp::resolver resolver(ctx);

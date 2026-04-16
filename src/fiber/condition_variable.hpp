@@ -5,7 +5,7 @@
 #include <openssl/async.h>
 #include <utility>
 
-namespace ice::fiber {
+namespace asioice::fiber {
 
 struct condition_variable {
     condition_variable() = default;
@@ -42,4 +42,4 @@ struct condition_variable {
     std::atomic<callback_ctx *> _ctx{nullptr};
 };
 
-} // namespace ice::fiber
+} // namespace asioice::fiber

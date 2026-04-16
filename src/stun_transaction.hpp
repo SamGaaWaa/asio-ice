@@ -17,19 +17,19 @@
 #define ASIO_TO_EXEC_USE_BOOST 1
 #include <boost/asio/io_context.hpp>
 #include <boost/asio/steady_timer.hpp>
-namespace ice {
+namespace asioice {
 namespace net = boost::asio;
 }
 #else
 #include "asio2exec.hpp"
 #include <asio/io_context.hpp>
 #include <asio/steady_timer.hpp>
-namespace ice {
+namespace asioice {
 namespace net = asio;
 }
 #endif
 
-namespace ice::stun {
+namespace asioice::stun {
 
 struct transaction
     : boost::intrusive::set_base_hook<
@@ -47,7 +47,7 @@ struct transaction
     };
 
     transaction(net::io_context &ctx, const stun::message &req,
-                const ice::endpoint &stun_server, stun::message &resp) noexcept
+                const asioice::endpoint &stun_server, stun::message &resp) noexcept
         : _ctx{ctx}, request{req}, server{stun_server}, response{resp},
           _timer{ctx} {}
 
@@ -84,14 +84,14 @@ struct transaction
     auto on_state_change() noexcept { return _done.get_future(); }
 
     const stun::message &request;
-    ice::endpoint server;
+    asioice::endpoint server;
     stun::message &response;
-    ice::endpoint response_source;
+    asioice::endpoint response_source;
     const void *response_transport{nullptr};
 
   private:
     template <class Transport>
-    ice::task<void> retry(Transport &transport) noexcept try {
+    asioice::task<void> retry(Transport &transport) noexcept try {
         if (_retring) {
             ICE_IN_DEBUG { std::cerr << "Already retring\n"; }
             co_return;
@@ -148,8 +148,8 @@ struct transaction
     net::steady_timer _timer;
     std::size_t _max_retries{7};
     bool _retring{false};
-    ice::shared_promise<void> _stop_retry;
-    ice::shared_promise<state_t> _done;
+    asioice::shared_promise<void> _stop_retry;
+    asioice::shared_promise<state_t> _done;
     state_t _state{INIT};
 };
 
@@ -158,7 +158,7 @@ using transaction_set = boost::intrusive::set<
     boost::intrusive::constant_time_size<false>>;
 
 inline bool dispatch_stun_response(transaction_set &transactions,
-                                   const ice::endpoint &source,
+                                   const asioice::endpoint &source,
                                    const void *data, std::size_t size,
                                    const void *transport) noexcept {
     if (message::is_not_stun(data, size) || !message::is_response(data, size))
@@ -186,10 +186,10 @@ inline bool dispatch_stun_response(transaction_set &transactions,
 
 struct basic_request_t {
     template <class Transport>
-    ice::task<bool>
+    asioice::task<bool>
     operator()(Transport &transport, transaction_set &transactions,
-               const stun::message &req, const ice::endpoint &server,
-               stun::message &resp, ice::endpoint &from, std::size_t retries,
+               const stun::message &req, const asioice::endpoint &server,
+               stun::message &resp, asioice::endpoint &from, std::size_t retries,
                auto... self) const noexcept {
         auto it = transactions.lower_bound(req.transaction_id);
         if (it != transactions.end() &&
@@ -237,16 +237,16 @@ struct basic_request_t {
 
   private:
     template <class Transport1>
-    struct response_receiver : ice::datagram_receiver {
+    struct response_receiver : asioice::datagram_receiver {
         explicit response_receiver(Transport1 &t,
                                    transaction_set &transactions) noexcept
-            : ice::datagram_receiver(), _transport(t),
+            : asioice::datagram_receiver(), _transport(t),
               _transactions(transactions) {}
 
         bool datagram_received(io_buffer_ptr &buffer,
-                               const ice::endpoint &endpoint) override {
+                               const asioice::endpoint &endpoint) override {
             if constexpr (std::is_same_v<std::decay_t<Transport1>,
-                                         ice::any_transport>) {
+                                         asioice::any_transport>) {
                 return dispatch_stun_response(_transactions, endpoint,
                                               buffer->data(), buffer->size(),
                                               _transport.data());
@@ -265,4 +265,4 @@ struct basic_request_t {
 
 inline constexpr basic_request_t basic_request{};
 
-} // namespace ice::stun
+} // namespace asioice::stun

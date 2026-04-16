@@ -11,7 +11,7 @@
 #include <sstream>
 #include <string>
 
-namespace ice {
+namespace asioice {
 
 std::string_view type_to_string(candidate_type type) noexcept {
     switch (type) {
@@ -48,7 +48,7 @@ std::string candidate_foundation(candidate_type type,
     key += transport;
     key += '|';
     key += addr_str;
-    if (type != ice::candidate_type::host) {
+    if (type != asioice::candidate_type::host) {
         key += '|';
         key += server.value().to_string();
     }
@@ -97,7 +97,7 @@ std::string candidate::to_string(int indent) const {
 }
 
 bool candidate::can_pair_with(const candidate &other) const noexcept {
-    return this->type != ice::candidate_type::srflx &&
+    return this->type != asioice::candidate_type::srflx &&
            this->component == other.component &&
            ((this->endpoint.address().is_v4() &&
              other.endpoint.address().is_v4()) ||
@@ -156,7 +156,7 @@ std::optional<candidate> candidate::from_sdp(std::string_view sdp,
                         port)
             .ec != std::errc{})
         return {};
-    c.endpoint = ice::endpoint(addr, port);
+    c.endpoint = asioice::endpoint(addr, port);
 
     if (auto type_str = match.get<"type">(); type_str == "host")
         c.type = candidate_type::host;
@@ -203,4 +203,4 @@ std::string candidate::to_sdp() const {
     return std::move(sdp).str();
 }
 
-} // namespace ice
+} // namespace asioice

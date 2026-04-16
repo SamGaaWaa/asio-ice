@@ -1,7 +1,6 @@
 #pragma once
 
 #include "agent_config.hpp"
-#include "ice.hpp"
 #include "address.hpp"
 #include "candidate_pair.hpp"
 #include "config.hpp"
@@ -36,7 +35,7 @@
 #include <boost/asio/ip/basic_endpoint.hpp>
 #include <boost/asio/ip/udp.hpp>
 #include <boost/asio/as_tuple.hpp>
-namespace ice {
+namespace asioice {
 namespace net = boost::asio;
 }
 #else
@@ -46,7 +45,7 @@ namespace net = boost::asio;
 #include <asio/ip/basic_endpoint.hpp>
 #include <asio/ip/udp.hpp>
 #include <asio/as_tuple.hpp>
-namespace ice {
+namespace asioice {
 namespace net = asio;
 }
 #endif
@@ -64,7 +63,7 @@ namespace net = asio;
 #include <boost/intrusive/set.hpp>
 #include <boost/container/flat_map.hpp>
 
-namespace ice::impl {
+namespace asioice::impl {
 
 enum struct agent_state_t : char {
     INIT,
@@ -83,12 +82,12 @@ struct agent_datagram_impl
     using raw_transport = datagram_transport<Layer>;
     using raw_transport_ptr = std::shared_ptr<raw_transport>;
     using config_type = agent_config;
-    using turn_client_type = ice::turn::client<raw_transport, true>;
+    using turn_client_type = asioice::turn::client<raw_transport, true>;
 
     agent_datagram_impl(net::io_context &ctx, config_type config) noexcept
         : _ctx(ctx), _config(std::move(config)),
           _ice_controlling(_config.ice_controlling) {
-        ice::hash::random_bytes(&_tie_breaker, sizeof(_tie_breaker));
+        asioice::hash::random_bytes(&_tie_breaker, sizeof(_tie_breaker));
     }
 
     agent_datagram_impl(const agent_datagram_impl &) = delete;
@@ -140,7 +139,7 @@ struct agent_datagram_impl
                                 this->on_connected_or_closed());
     }
 
-    ice::task<bool> add_remote_candidate(ice::candidate c, auto... self);
+    asioice::task<bool> add_remote_candidate(asioice::candidate c, auto... self);
     auto add_remote_candidate() noexcept {
         this->_remote_candidates_end = true;
         return stdexec::just(true);
@@ -151,7 +150,7 @@ struct agent_datagram_impl
                                 this->on_closed());
     }
 
-    boost::container::small_vector<ice::candidate_pair *, 2>
+    boost::container::small_vector<asioice::candidate_pair *, 2>
     nominated_pairs() const;
 
     template <class Func> void on_local_candidates(Func &&cb) {
@@ -159,54 +158,54 @@ struct agent_datagram_impl
     }
 
     auto sendto(net::const_buffer data, uint8_t component);
-    void on_data(std::function<void(ice::io_buffer_ptr, uint8_t)> callback) {
+    void on_data(std::function<void(asioice::io_buffer_ptr, uint8_t)> callback) {
         _on_data = std::move(callback);
     }
 
   private:
-    struct stun_receiver : ice::datagram_receiver {
-        stun_receiver(const ice::any_transport &transport,
+    struct stun_receiver : asioice::datagram_receiver {
+        stun_receiver(const asioice::any_transport &transport,
                       agent_datagram_impl *agent, uint8_t component) noexcept
-            : ice::datagram_receiver(), _transport(transport), _agent(agent),
+            : asioice::datagram_receiver(), _transport(transport), _agent(agent),
               _component(component) {
             _transport.add_receiver(*this);
         }
         const auto &transport() const noexcept { return _transport; }
         bool datagram_received(io_buffer_ptr &buffer,
-                               const ice::endpoint &endpoint) override;
+                               const asioice::endpoint &endpoint) override;
 
       private:
-        ice::any_transport _transport;
+        asioice::any_transport _transport;
         agent_datagram_impl *_agent;
         uint8_t _component;
     };
 
     struct check_task {
-        std::shared_ptr<ice::candidate_pair> pair;
-        std::shared_ptr<ice::candidate_pair> triggered_by{nullptr};
+        std::shared_ptr<asioice::candidate_pair> pair;
+        std::shared_ptr<asioice::candidate_pair> triggered_by{nullptr};
         bool use_candidate{false};
         uint64_t priority{0};
     };
 
     struct valid_pair {
-        std::shared_ptr<ice::candidate_pair> pair;
-        std::shared_ptr<ice::candidate_pair> source;
+        std::shared_ptr<asioice::candidate_pair> pair;
+        std::shared_ptr<asioice::candidate_pair> source;
         bool nominated = false;
     };
 
     struct transaction_state
         : boost::intrusive::set_base_hook<
               boost::intrusive::link_mode<boost::intrusive::auto_unlink>> {
-        transaction_state(ice::candidate_pair &p, stun::transaction &t) noexcept
+        transaction_state(asioice::candidate_pair &p, stun::transaction &t) noexcept
             : pair{&p}, transaction{&t} {}
 
         struct key_type {
-            using type = ice::candidate_pair *;
+            using type = asioice::candidate_pair *;
             type operator()(const transaction_state &s) const noexcept {
                 return s.pair;
             }
         };
-        ice::candidate_pair *pair;
+        asioice::candidate_pair *pair;
         stun::transaction *transaction;
     };
 
@@ -217,44 +216,44 @@ struct agent_datagram_impl
 
     enum struct request_result : char { succeed, failed, canceled };
 
-    ice::task<void> do_gather_candidates();
+    asioice::task<void> do_gather_candidates();
 
-    ice::task<void> get_component_candidates(
-        std::vector<ice::candidate> &component_candidates, uint8_t component,
+    asioice::task<void> get_component_candidates(
+        std::vector<asioice::candidate> &component_candidates, uint8_t component,
         const std::vector<net::ip::address> &addresses, auto... self);
 
-    ice::task<void>
-    server_reflexive_candidate(std::vector<ice::candidate> &srflx_candidates,
-                               const ice::candidate &local_candidate,
+    asioice::task<void>
+    server_reflexive_candidate(std::vector<asioice::candidate> &srflx_candidates,
+                               const asioice::candidate &local_candidate,
                                stun::transaction_set &transactions,
-                               const ice::endpoint &stun_server) noexcept;
+                               const asioice::endpoint &stun_server) noexcept;
 
-    ice::task<void> server_reflexive_candidate(
-        std::vector<ice::candidate> &srflx_candidates,
-        const std::vector<ice::candidate> &local_candidates,
-        const std::vector<ice::endpoint> &stun_servers) noexcept;
+    asioice::task<void> server_reflexive_candidate(
+        std::vector<asioice::candidate> &srflx_candidates,
+        const std::vector<asioice::candidate> &local_candidates,
+        const std::vector<asioice::endpoint> &stun_servers) noexcept;
 
-    ice::task<void>
-    create_relayed_candidate(std::vector<ice::candidate> &component_candidates,
+    asioice::task<void>
+    create_relayed_candidate(std::vector<asioice::candidate> &component_candidates,
                              std::shared_ptr<turn_client_type> client,
                              raw_transport_ptr host_transport,
                              uint8_t component) noexcept;
 
-    void pair_local_candidate(const ice::candidate &c);
-    void pair_remote_candidate(const ice::candidate &c);
-    void init_pair_state(ice::candidate_pair &pair) const noexcept;
+    void pair_local_candidate(const asioice::candidate &c);
+    void pair_remote_candidate(const asioice::candidate &c);
+    void init_pair_state(asioice::candidate_pair &pair) const noexcept;
     auto generate_gathering_end_indication() noexcept;
     void sort_check_list() noexcept;
 
-    ice::candidate_pair *
-    find_pair(const ice::any_transport &transport,
-              const ice::candidate &remote_candidate) const noexcept;
+    asioice::candidate_pair *
+    find_pair(const asioice::any_transport &transport,
+              const asioice::candidate &remote_candidate) const noexcept;
 
     check_task pick_next_pair() noexcept;
 
     void unfreeze_initial() noexcept;
 
-    ice::task<request_result> request(ice::candidate_pair &pair,
+    asioice::task<request_result> request(asioice::candidate_pair &pair,
                                       const stun::message &req,
                                       stun::message &resp) noexcept;
 
@@ -264,51 +263,51 @@ struct agent_datagram_impl
         _check_list_state = s;
     }
 
-    std::shared_ptr<ice::candidate_pair>
+    std::shared_ptr<asioice::candidate_pair>
     construct_valid_pair(const stun::message &req, const stun::message &resp,
                          check_task &ct);
 
-    void build_request(stun::message &req, ice::candidate_pair &pair) noexcept;
+    void build_request(stun::message &req, asioice::candidate_pair &pair) noexcept;
 
-    bool in_triggered_check_queue(const ice::candidate_pair &p) const noexcept;
+    bool in_triggered_check_queue(const asioice::candidate_pair &p) const noexcept;
 
-    ice::task<void> check(check_task ct);
-    ice::task<void> do_check(check_task ct);
+    asioice::task<void> check(check_task ct);
+    asioice::task<void> do_check(check_task ct);
 
     bool verify_username(std::string_view name) const noexcept;
 
-    ice::task<void> do_handle_request(ice::any_transport transport,
-                                      ice::endpoint source,
-                                      ice::io_buffer_ptr buf);
+    asioice::task<void> do_handle_request(asioice::any_transport transport,
+                                      asioice::endpoint source,
+                                      asioice::io_buffer_ptr buf);
 
-    ice::task<bool> do_connect(auto... self) noexcept;
+    asioice::task<bool> do_connect(auto... self) noexcept;
 
     template <class Transport>
     auto send_stun(Transport &transport, const stun::message &msg,
-                   const ice::endpoint &ep);
+                   const asioice::endpoint &ep);
 
-    void check_complete(ice::candidate_pair &pair) noexcept;
+    void check_complete(asioice::candidate_pair &pair) noexcept;
 
-    void request_handler(ice::any_transport &transport,
-                         const ice::endpoint &source, ice::io_buffer_ptr buf);
+    void request_handler(asioice::any_transport &transport,
+                         const asioice::endpoint &source, asioice::io_buffer_ptr buf);
 
-    void create_stun_receiver(const ice::any_transport &transport,
+    void create_stun_receiver(const asioice::any_transport &transport,
                               uint8_t component) noexcept;
     void create_turn_permission(const net::ip::address &ip);
 
-    bool set_nominated(ice::candidate_pair &pair) noexcept;
+    bool set_nominated(asioice::candidate_pair &pair) noexcept;
     void default_nominate();
 
-    ice::task<void> free_candidates();
+    asioice::task<void> free_candidates();
 
     void create_channel_for_valid_pair();
 
-    using check_list_type = std::vector<std::shared_ptr<ice::candidate_pair>>;
+    using check_list_type = std::vector<std::shared_ptr<asioice::candidate_pair>>;
 
     using valid_list_type = std::vector<valid_pair>;
 
     net::io_context &_ctx;
-    ice::shared_promise<void> _promise{};  // use for some detached work
+    asioice::shared_promise<void> _promise{};  // use for some detached work
     stun::transaction_set _transactions{}; // use for connectivity checks
     transaction_state_set _transaction_states{};
     config_type _config;
@@ -317,28 +316,28 @@ struct agent_datagram_impl
     std::string _remote_username;
     std::string _remote_password;
     uint64_t _tie_breaker = 0;
-    std::vector<ice::candidate> _local_candidates{};
-    std::vector<ice::candidate> _remote_candidates{};
+    std::vector<asioice::candidate> _local_candidates{};
+    std::vector<asioice::candidate> _remote_candidates{};
     bool _local_candidates_end = false;
     bool _remote_candidates_end = false;
     check_list_type _check_list{};
-    ice::utils::property<check_list_state_t> _check_list_state{
+    asioice::utils::property<check_list_state_t> _check_list_state{
         check_list_state_t::RUNNING};
     valid_list_type _valid_list{};
     std::deque<check_task> _triggered_check_queue{};
     std::size_t _pending_check_count{0};
-    ice::shared_promise<void> _check_complete_notifier{};
-    ice::shared_promise<void> _request_handler_promise{};
+    asioice::shared_promise<void> _check_complete_notifier{};
+    asioice::shared_promise<void> _request_handler_promise{};
     std::size_t _outgoing_request_handler_count{0};
-    std::function<void(ice::io_buffer_ptr, uint8_t)> _on_data{};
+    std::function<void(asioice::io_buffer_ptr, uint8_t)> _on_data{};
     std::list<stun_receiver> _stun_receivers{};
-    ice::utils::property<agent_state_t> _state{agent_state_t::INIT};
+    asioice::utils::property<agent_state_t> _state{agent_state_t::INIT};
 
     // callbacks
-    utils::async_function<void(const ice::candidate *, std::size_t)>
+    utils::async_function<void(const asioice::candidate *, std::size_t)>
         _on_local_candidates{};
 };
 
-} // namespace ice::impl
+} // namespace asioice::impl
 
 #include "impl/ice_impl.ipp"

@@ -25,7 +25,7 @@
 #include <boost/asio/io_context.hpp>
 #include <boost/asio/ip/tcp.hpp>
 #include <boost/asio/ip/udp.hpp>
-namespace ice {
+namespace asioice {
 namespace net = boost::asio;
 }
 #else
@@ -33,7 +33,7 @@ namespace net = boost::asio;
 #include <asio/io_context.hpp>
 #include <asio/ip/tcp.hpp>
 #include <asio/ip/udp.hpp>
-namespace ice {
+namespace asioice {
 namespace net = asio;
 }
 #endif
@@ -47,18 +47,18 @@ namespace net = asio;
 #include <ranges>
 #include <stdexcept>
 
-namespace ice::turn::impl {
+namespace asioice::turn::impl {
 
 template <class NextLayer>
 struct datagram_client
-    : ice::datagram_receiver,
+    : asioice::datagram_receiver,
       std::enable_shared_from_this<datagram_client<NextLayer>> {
-    using base_type = ice::datagram_receiver;
+    using base_type = asioice::datagram_receiver;
     using next_layer_type = NextLayer;
-    using buffer_sequence_type = ice::buffer_wrapper;
+    using buffer_sequence_type = asioice::buffer_wrapper;
 
     datagram_client(std::shared_ptr<next_layer_type> transport,
-                    const ice::endpoint &server, std::string username,
+                    const asioice::endpoint &server, std::string username,
                     std::string password)
         : base_type(std::move(transport)),
           _next_layer(base_type::transport<next_layer_type>()), _server(server),
@@ -92,39 +92,39 @@ struct datagram_client
     const auto &channel_to_peer() const noexcept { return _channel_to_peer; }
     const auto &peer_to_channel() const noexcept { return _peer_to_channel; }
 
-    const std::optional<ice::endpoint> &relayed_address() const noexcept {
+    const std::optional<asioice::endpoint> &relayed_address() const noexcept {
         return _relayed_address;
     }
-    const std::optional<ice::endpoint> &reflex_address() const noexcept {
+    const std::optional<asioice::endpoint> &reflex_address() const noexcept {
         return _reflex_address;
     }
 
-    ice::task<bool> request(const stun::message &msg, ice::endpoint &from,
+    asioice::task<bool> request(const stun::message &msg, asioice::endpoint &from,
                             stun::message &resp, std::size_t retries,
                             auto... self) noexcept;
 
     /*
         Only support UDP between server and peer
     */
-    ice::task<std::optional<ice::endpoint>> create_allocation(auto lifetime,
+    asioice::task<std::optional<asioice::endpoint>> create_allocation(auto lifetime,
                                                               auto... self);
 
     uint16_t generate_channel_number() const;
 
-    ice::task<bool> channel_bind(net::ip::udp::endpoint peer, uint16_t channel,
+    asioice::task<bool> channel_bind(net::ip::udp::endpoint peer, uint16_t channel,
                                  auto... self);
 
-    ice::task<void> delete_allocation(auto... self);
+    asioice::task<void> delete_allocation(auto... self);
 
-    ice::task<bool> refresh(auto time_to_expiry, auto... self);
+    asioice::task<bool> refresh(auto time_to_expiry, auto... self);
 
-    ice::task<bool> create_permission(net::ip::address peer, auto... self) {
+    asioice::task<bool> create_permission(net::ip::address peer, auto... self) {
         return create_permission(
             std::ranges::owning_view(std::array<net::ip::address, 1>{peer}),
             std::move(self)...);
     }
 
-    ice::task<bool> create_permission(std::ranges::view auto peers,
+    asioice::task<bool> create_permission(std::ranges::view auto peers,
                                       auto... self);
 
     void delete_permission(const net::ip::address &peer);
@@ -135,7 +135,7 @@ struct datagram_client
         }
     }
 
-    ice::task<std::tuple<std::error_code, std::size_t>>
+    asioice::task<std::tuple<std::error_code, std::size_t>>
     async_send_to(buffer_sequence_type buffers,
                   net::ip::udp::endpoint destination, auto... self);
 
@@ -147,7 +147,7 @@ struct datagram_client
     const auto &expired_channel() const noexcept { return _expired_channel; }
 
     bool datagram_received(io_buffer_ptr &buffer,
-                           const ice::endpoint &endpoint) override;
+                           const asioice::endpoint &endpoint) override;
 
     auto &receivers() noexcept { return _receivers; }
 
@@ -159,10 +159,10 @@ struct datagram_client
 
   private:
     void do_delete_allocation();
-    ice::task<bool> request_with_retry(stun::message &req, stun::message &resp,
+    asioice::task<bool> request_with_retry(stun::message &req, stun::message &resp,
                                        std::size_t retries);
 
-    ice::task<void> refresh_allocation_task();
+    asioice::task<void> refresh_allocation_task();
     void start_refresh_allocation_task();
 
     struct permission_state;
@@ -253,14 +253,14 @@ struct datagram_client
       private:
         enum struct state_t : char { normal, expired, stopped };
 
-        ice::task<void> refresh_task();
+        asioice::task<void> refresh_task();
 
         std::shared_ptr<datagram_client<NextLayer>> _client;
         std::shared_ptr<permission_state> _permission{nullptr};
         uint16_t _channel;
         net::ip::udp::endpoint _peer;
         state_t _state{state_t::normal};
-        ice::shared_promise<void> _stop{};
+        asioice::shared_promise<void> _stop{};
     };
 
     using channel_list_type = boost::intrusive::list<
@@ -319,12 +319,12 @@ struct datagram_client
         };
 
       private:
-        ice::task<void> refresh_task();
+        asioice::task<void> refresh_task();
 
         std::shared_ptr<datagram_client<NextLayer>> _client;
         net::ip::address _ip;
         channel_list_type _channels;
-        ice::shared_promise<void> _stop;
+        asioice::shared_promise<void> _stop;
     };
 
     using permission_set_type = boost::intrusive::set<
@@ -338,7 +338,7 @@ struct datagram_client
 
     next_layer_type &_next_layer;
     stun::transaction_set _transactions{};
-    ice::endpoint _server;
+    asioice::endpoint _server;
     std::string _nonce{};
     std::string _realm{};
     const std::string _username{};
@@ -348,19 +348,19 @@ struct datagram_client
     std::optional<stun::message::password_algorithm> _used_pwd_algo{};
     stun::message::integrity _integrity{stun::message::integrity::SHA1};
     uint32_t _lifetime{0};
-    std::optional<ice::endpoint> _relayed_address{};
-    std::optional<ice::endpoint> _reflex_address{};
+    std::optional<asioice::endpoint> _relayed_address{};
+    std::optional<asioice::endpoint> _reflex_address{};
     receiver_list_t _receivers;
-    ice::shared_promise<void> _stop_refresh_allocation_task{};
+    asioice::shared_promise<void> _stop_refresh_allocation_task{};
     permission_set_type _permissions{};
     boost::container::flat_set<net::ip::address> _creating_permissions{};
-    ice::shared_promise<void> _new_permissions_created{};
+    asioice::shared_promise<void> _new_permissions_created{};
     channel_to_peer_type _channel_to_peer{};
     peer_to_channel_type _peer_to_channel{};
     channel_to_peer_type _expired_channel{};
     bool _is_running{true};
 };
 
-} // namespace ice::turn::impl
+} // namespace asioice::turn::impl
 
 #include "impl/datagram_turn_client.ipp"

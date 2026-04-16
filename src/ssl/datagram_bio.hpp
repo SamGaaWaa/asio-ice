@@ -8,7 +8,7 @@
 #include <deque>
 #include <memory>
 
-namespace ice::ssl::impl {
+namespace asioice::ssl::impl {
 
 struct datagram_bio {
     datagram_bio() noexcept = default;
@@ -24,10 +24,10 @@ struct datagram_bio {
     bool last_io_failed() const noexcept { return _last_io_failed; }
 
     std::vector<uint8_t> out{};
-    ice::io_buffer_ptr in{};
+    asioice::io_buffer_ptr in{};
 
   private:
     bool _last_io_failed{false};
 };
 
-} // namespace ice::ssl::impl
+} // namespace asioice::ssl::impl

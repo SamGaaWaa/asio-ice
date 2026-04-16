@@ -9,21 +9,21 @@
 #include "asio2exec.hpp"
 #include <boost/asio/io_context.hpp>
 #include <boost/asio/steady_timer.hpp>
-namespace ice {
+namespace asioice {
 namespace net = boost::asio;
 }
 #else
 #include "asio2exec.hpp"
 #include <asio/io_context.hpp>
 #include <asio/steady_timer.hpp>
-namespace ice {
+namespace asioice {
 namespace net = asio;
 }
 #endif
 
 #include <cassert>
 
-namespace ice {
+namespace asioice {
 
 void candidate_pair::set_state(state_t state) noexcept {
     if (state == _state)
@@ -33,7 +33,7 @@ void candidate_pair::set_state(state_t state) noexcept {
 }
 
 bool candidate_pair::datagram_received(io_buffer_ptr &buffer,
-                                       const ice::endpoint &endpoint) {
+                                       const asioice::endpoint &endpoint) {
     if (!buffer) [[unlikely]] // ignore empty buffers
         return true;
     const uint8_t first_byte = *buffer->begin();
@@ -57,8 +57,8 @@ void candidate_pair::set_priority(bool ice_controlling) noexcept {
                                        ice_controlling);
 }
 
-uint64_t candidate_pair::compute_priority(const ice::candidate &local,
-                                          const ice::candidate &remote,
+uint64_t candidate_pair::compute_priority(const asioice::candidate &local,
+                                          const asioice::candidate &remote,
                                           bool ice_controlling) noexcept {
     uint64_t G = ice_controlling ? local.priority : remote.priority;
     uint64_t D = ice_controlling ? remote.priority : local.priority;
@@ -73,7 +73,7 @@ std::string candidate_pair::to_string(int indent) const {
     local["transport"] = this->local_candidate().transport_type;
     local["priority"] = this->local_candidate().priority;
     local["endpoint"] = this->local_candidate().endpoint.to_string();
-    local["type"] = ice::type_to_string(this->local_candidate().type);
+    local["type"] = asioice::type_to_string(this->local_candidate().type);
 
     if (this->local_candidate().related) {
         local["related"] = this->local_candidate().related->to_string();
@@ -90,7 +90,7 @@ std::string candidate_pair::to_string(int indent) const {
     remote["transport"] = this->remote_candidate().transport_type;
     remote["priority"] = this->remote_candidate().priority;
     remote["endpoint"] = this->remote_candidate().endpoint.to_string();
-    remote["type"] = ice::type_to_string(this->remote_candidate().type);
+    remote["type"] = asioice::type_to_string(this->remote_candidate().type);
 
     if (!this->remote_candidate().tcptype.empty()) {
         remote["tcptype"] = this->remote_candidate().tcptype;
@@ -122,7 +122,7 @@ std::string candidate_pair::to_string(int indent) const {
     return res.dump(indent);
 }
 
-ice::task<void>
+asioice::task<void>
 candidate_pair::keepalive_task(std::chrono::milliseconds ms,
                                std::weak_ptr<candidate_pair> self) {
     net::io_context *ctx = nullptr;
@@ -183,4 +183,4 @@ candidate_pair::keepalive_task(std::chrono::milliseconds ms,
     }
 }
 
-} // namespace ice
+} // namespace asioice

@@ -18,23 +18,23 @@
 #if ASIOICE_USE_BOOST_ASIO > 0
 #define ASIO_TO_EXEC_USE_BOOST 1
 #include <boost/asio/buffer.hpp>
-namespace ice {
+namespace asioice {
 namespace net = boost::asio;
 }
 #else
 #include <asio/buffer.hpp>
-namespace ice {
+namespace asioice {
 namespace net = asio;
 }
 #endif
 
 #include "asio2exec.hpp"
 
-namespace ice {
+namespace asioice {
 
 struct candidate_pair final
     : datagram_receiver,
-      std::enable_shared_from_this<ice::candidate_pair> {
+      std::enable_shared_from_this<asioice::candidate_pair> {
 
     enum struct state_t {
         FROZEN = 0,
@@ -45,11 +45,11 @@ struct candidate_pair final
     };
 
     using request_handler_type =
-        std::function<void(const ice::endpoint &from, const ice::endpoint &to,
-                           ice::io_buffer_ptr)>;
+        std::function<void(const asioice::endpoint &from, const asioice::endpoint &to,
+                           asioice::io_buffer_ptr)>;
 
-    candidate_pair(ice::candidate local_candidate,
-                   ice::candidate remote_candidate)
+    candidate_pair(asioice::candidate local_candidate,
+                   asioice::candidate remote_candidate)
         : datagram_receiver(), _local_candidate(std::move(local_candidate)),
           _remote_candidate(std::move(remote_candidate)) {
         if (!_local_candidate.transport)
@@ -72,7 +72,7 @@ struct candidate_pair final
     }
 
     bool datagram_received(io_buffer_ptr &buffer,
-                           const ice::endpoint &endpoint) override;
+                           const asioice::endpoint &endpoint) override;
 
     const auto &local_candidate() const noexcept { return _local_candidate; }
     const auto &remote_candidate() const noexcept { return _remote_candidate; }
@@ -82,8 +82,8 @@ struct candidate_pair final
     void set_priority(uint64_t priority) noexcept {
         this->_priority = priority;
     }
-    static uint64_t compute_priority(const ice::candidate &local,
-                                     const ice::candidate &remote,
+    static uint64_t compute_priority(const asioice::candidate &local,
+                                     const asioice::candidate &remote,
                                      bool ice_controlling) noexcept;
 
     state_t state() const noexcept { return _state; }
@@ -99,19 +99,19 @@ struct candidate_pair final
     }
 
     template <class BufferSequence>
-    ice::task<std::tuple<std::error_code, std::size_t>>
+    asioice::task<std::tuple<std::error_code, std::size_t>>
     send(const BufferSequence &data) {
         return _local_candidate.transport.send_to(data,
                                                   _remote_candidate.endpoint);
     }
 
-    ice::task<std::tuple<std::error_code, std::size_t>> send(const void *data,
+    asioice::task<std::tuple<std::error_code, std::size_t>> send(const void *data,
                                                              std::size_t size) {
         return _local_candidate.transport.send_to(data, size,
                                                   _remote_candidate.endpoint);
     }
 
-    ice::task<std::tuple<std::error_code, std::size_t>>
+    asioice::task<std::tuple<std::error_code, std::size_t>>
     send(const net::const_buffer &data) {
         return send(data.data(), data.size());
     }
@@ -126,14 +126,14 @@ struct candidate_pair final
         _last_keepalive_time = std::chrono::steady_clock::now();
     }
 
-    ice::task<void> keepalive_task(std::chrono::milliseconds ms, std::weak_ptr<candidate_pair> self);
+    asioice::task<void> keepalive_task(std::chrono::milliseconds ms, std::weak_ptr<candidate_pair> self);
   private:
     using receiver_list_t =
         boost::intrusive::list<datagram_receiver,
                                boost::intrusive::constant_time_size<false>>;
 
-    ice::candidate _local_candidate;
-    ice::candidate _remote_candidate;
+    asioice::candidate _local_candidate;
+    asioice::candidate _remote_candidate;
     std::string _foundation;
     uint64_t _priority{};
     state_t _state = state_t::FROZEN;
@@ -143,4 +143,4 @@ struct candidate_pair final
     std::chrono::steady_clock::time_point _last_keepalive_time{};
 };
 
-} // namespace ice
+} // namespace asioice

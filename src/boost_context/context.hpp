@@ -2,7 +2,7 @@
 
 #include <boost/context/fiber.hpp>
 
-namespace ice::boost_context {
+namespace asioice::boost_context {
 
 struct context {
     context() noexcept = default;
@@ -55,4 +55,4 @@ inline context *make_context(Func &&func, Args &&...args) {
     return new context(std::forward<Func>(func), std::forward<Args>(args)...);
 }
 
-} // namespace ice::boost_context
+} // namespace asioice::boost_context

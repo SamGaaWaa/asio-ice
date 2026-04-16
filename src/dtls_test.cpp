@@ -9,13 +9,13 @@
 #if ASIOICE_USE_BOOST_ASIO > 0
 #include <boost/asio/steady_timer.hpp>
 #include <boost/asio/ip/udp.hpp>
-namespace ice {
+namespace asioice {
 namespace net = boost::asio;
 }
 #else
 #include <asio/steady_timer.hpp>
 #include <asio/udp.hpp>
-namespace ice {
+namespace asioice {
 namespace net = asio;
 }
 #endif
@@ -129,9 +129,9 @@ err:
     return 0;
 }
 
-ice::task<void> server_coro(ice::net::io_context &io_ctx, const char *crt,
+asioice::task<void> server_coro(asioice::net::io_context &io_ctx, const char *crt,
                             const char *key) {
-    using namespace ice;
+    using namespace asioice;
     using DtlsTransport =
         ssl::dtls_transport<datagram_transport<net::ip::udp::socket>>;
 
@@ -212,7 +212,7 @@ ice::task<void> server_coro(ice::net::io_context &io_ctx, const char *crt,
 }
 
 int main() {
-    using namespace ice;
+    using namespace asioice;
     using DtlsTransport =
         ssl::dtls_transport<datagram_transport<net::ip::udp::socket>>;
 
@@ -258,7 +258,7 @@ int main() {
     DtlsTransport dtls_client{sock_transport, server_ep, ssl};
     ssl_guard.dismiss();
 
-    auto work = [&]() -> ice::task<void> {
+    auto work = [&]() -> asioice::task<void> {
         sock_transport->start();
         auto ec = co_await dtls_client.async_handshake(
             DtlsTransport::handshake_type::client);

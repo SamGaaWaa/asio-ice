@@ -6,7 +6,7 @@
 #include <algorithm>
 #include <iostream>
 
-namespace ice::ssl::impl {
+namespace asioice::ssl::impl {
 
 static int __write(::BIO *b, const char *buf, int num) noexcept;
 static int __read(::BIO *b, char *buf, int size) noexcept;
@@ -124,4 +124,4 @@ static int __free(::BIO *b) noexcept {
     return 1;
 }
 
-} // namespace ice::ssl::impl
+} // namespace asioice::ssl::impl

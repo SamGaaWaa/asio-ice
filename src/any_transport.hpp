@@ -9,13 +9,13 @@
 #if ASIOICE_USE_BOOST_ASIO > 0
 #include <boost/asio/buffer.hpp>
 #include <boost/asio/ip/udp.hpp>
-namespace ice {
+namespace asioice {
 namespace net = boost::asio;
 }
 #else
 #include <asio/buffer.hpp>
 #include <asio/ip/udp.hpp>
-namespace ice {
+namespace asioice {
 namespace net = asio;
 }
 #endif
@@ -24,21 +24,21 @@ namespace net = asio;
 #include <type_traits>
 #include <span>
 
-namespace ice {
+namespace asioice {
 
 namespace __any_transport_detail {
 
 struct interface {
-    virtual ice::task<std::tuple<std::error_code, std::size_t>>
-    send_to(ice::buffer_wrapper data, ice::endpoint dst) = 0;
+    virtual asioice::task<std::tuple<std::error_code, std::size_t>>
+    send_to(asioice::buffer_wrapper data, asioice::endpoint dst) = 0;
 
-    virtual ice::task<std::tuple<std::error_code, std::size_t>>
-    send_to(const void *data, std::size_t size, ice::endpoint dst) = 0;
+    virtual asioice::task<std::tuple<std::error_code, std::size_t>>
+    send_to(const void *data, std::size_t size, asioice::endpoint dst) = 0;
 
-    virtual ice::task<std::tuple<std::error_code, std::size_t>>
-    send(ice::buffer_wrapper data) = 0;
+    virtual asioice::task<std::tuple<std::error_code, std::size_t>>
+    send(asioice::buffer_wrapper data) = 0;
 
-    virtual ice::task<std::tuple<std::error_code, std::size_t>>
+    virtual asioice::task<std::tuple<std::error_code, std::size_t>>
     send(const void *data, std::size_t size) = 0;
 
     virtual const void *data() const noexcept = 0;
@@ -47,13 +47,13 @@ struct interface {
     virtual const net::io_context &context() const noexcept = 0;
     virtual net::io_context &context() noexcept = 0;
 
-    virtual void connect(const ice::endpoint &endpoint) = 0;
+    virtual void connect(const asioice::endpoint &endpoint) = 0;
 
-    virtual void add_receiver(ice::datagram_receiver &receiver) = 0;
+    virtual void add_receiver(asioice::datagram_receiver &receiver) = 0;
 
     virtual void clear_early_data() noexcept = 0;
 
-    virtual ice::endpoint local_endpoint() const = 0;
+    virtual asioice::endpoint local_endpoint() const = 0;
 
     virtual bool equal_to(const interface &other) const noexcept = 0;
 };
@@ -79,8 +79,8 @@ template <class Transport> struct transport_impl final : public interface {
         return _transport;
     }
 
-    ice::task<std::tuple<std::error_code, std::size_t>>
-    send_to(ice::buffer_wrapper data, ice::endpoint dst) override {
+    asioice::task<std::tuple<std::error_code, std::size_t>>
+    send_to(asioice::buffer_wrapper data, asioice::endpoint dst) override {
         if constexpr (is_datagram) {
             co_return co_await _transport->async_send_to(data, dst);
         } else {
@@ -89,8 +89,8 @@ template <class Transport> struct transport_impl final : public interface {
         }
     }
 
-    ice::task<std::tuple<std::error_code, std::size_t>>
-    send_to(const void *data, std::size_t size, ice::endpoint dst) override {
+    asioice::task<std::tuple<std::error_code, std::size_t>>
+    send_to(const void *data, std::size_t size, asioice::endpoint dst) override {
         if constexpr (is_datagram) {
             co_return co_await _transport->async_send_to(
                 net::const_buffer(data, size), dst);
@@ -100,8 +100,8 @@ template <class Transport> struct transport_impl final : public interface {
         }
     }
 
-    ice::task<std::tuple<std::error_code, std::size_t>>
-    send(ice::buffer_wrapper data) override {
+    asioice::task<std::tuple<std::error_code, std::size_t>>
+    send(asioice::buffer_wrapper data) override {
         // TODO: Uses concept
         if constexpr (is_datagram) {
             co_return co_await _transport->async_send_to(data, _remote);
@@ -111,7 +111,7 @@ template <class Transport> struct transport_impl final : public interface {
         }
     }
 
-    ice::task<std::tuple<std::error_code, std::size_t>>
+    asioice::task<std::tuple<std::error_code, std::size_t>>
     send(const void *data, std::size_t size) override {
         if constexpr (is_datagram) {
             co_return co_await _transport->async_send_to(
@@ -134,9 +134,9 @@ template <class Transport> struct transport_impl final : public interface {
         return _transport->context();
     }
 
-    void connect(const ice::endpoint &endpoint) override { _remote = endpoint; }
+    void connect(const asioice::endpoint &endpoint) override { _remote = endpoint; }
 
-    void add_receiver(ice::datagram_receiver &receiver) override {
+    void add_receiver(asioice::datagram_receiver &receiver) override {
         _transport->add_receiver(receiver);
     }
 
@@ -146,7 +146,7 @@ template <class Transport> struct transport_impl final : public interface {
         }
     }
 
-    ice::endpoint local_endpoint() const override {
+    asioice::endpoint local_endpoint() const override {
         return _transport->local_endpoint();
     }
 
@@ -156,7 +156,7 @@ template <class Transport> struct transport_impl final : public interface {
 
   private:
     std::shared_ptr<Transport> _transport;
-    ice::endpoint _remote{};
+    asioice::endpoint _remote{};
 };
 
 } // namespace __any_transport_detail
@@ -231,43 +231,43 @@ struct any_transport {
         return impl->get_shared();
     }
 
-    ice::task<std::tuple<std::error_code, std::size_t>>
-    send_to(ice::buffer_wrapper data, const ice::endpoint &dst) {
+    asioice::task<std::tuple<std::error_code, std::size_t>>
+    send_to(asioice::buffer_wrapper data, const asioice::endpoint &dst) {
         return get_interface()->send_to(data, dst);
     }
 
-    ice::task<std::tuple<std::error_code, std::size_t>>
-    send_to(const void *data, std::size_t size, const ice::endpoint &dst) {
+    asioice::task<std::tuple<std::error_code, std::size_t>>
+    send_to(const void *data, std::size_t size, const asioice::endpoint &dst) {
         return get_interface()->send_to(data, size, dst);
     }
 
-    ice::task<std::tuple<std::error_code, std::size_t>>
-    send(ice::buffer_wrapper data) {
+    asioice::task<std::tuple<std::error_code, std::size_t>>
+    send(asioice::buffer_wrapper data) {
         return get_interface()->send(data);
     }
 
-    ice::task<std::tuple<std::error_code, std::size_t>> send(const void *data,
+    asioice::task<std::tuple<std::error_code, std::size_t>> send(const void *data,
                                                              std::size_t size) {
         return get_interface()->send(data, size);
     }
 
     template <class BufferSequence, class Endpoint>
-    ice::task<std::tuple<std::error_code, std::size_t>>
+    asioice::task<std::tuple<std::error_code, std::size_t>>
     async_send_to(const BufferSequence &buffers, const Endpoint &destination,
                   auto... self) {
         return get_interface()->send_to(
-            buffers, ice::endpoint{destination.address(), destination.port()});
+            buffers, asioice::endpoint{destination.address(), destination.port()});
     }
 
-    void connect(const ice::endpoint &endpoint) {
+    void connect(const asioice::endpoint &endpoint) {
         get_interface()->connect(endpoint);
     }
 
-    ice::endpoint local_endpoint() const {
+    asioice::endpoint local_endpoint() const {
         return get_interface()->local_endpoint();
     }
 
-    void add_receiver(ice::datagram_receiver &receiver) {
+    void add_receiver(asioice::datagram_receiver &receiver) {
         get_interface()->add_receiver(receiver);
     }
 
@@ -284,7 +284,7 @@ struct any_transport {
 
   private:
     using udp_transport = __any_transport_detail::transport_impl<
-        ice::datagram_transport<net::ip::udp::socket>>;
+        asioice::datagram_transport<net::ip::udp::socket>>;
 
     __any_transport_detail::interface *get_interface() noexcept {
         return boost::anys::unsafe_any_cast<__any_transport_detail::interface>(
@@ -299,4 +299,4 @@ struct any_transport {
     boost::anys::basic_any<sizeof(udp_transport), alignof(udp_transport)> _any;
 };
 
-} // namespace ice
+} // namespace asioice

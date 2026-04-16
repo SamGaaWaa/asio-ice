@@ -12,7 +12,7 @@
 #include <boost/hash2/sha2.hpp>
 #include <boost/hash2/hmac.hpp>
 
-namespace ice::hash {
+namespace asioice::hash {
 
 struct md5 {
     static constexpr std::size_t digest_size = 16;
@@ -180,4 +180,4 @@ std::string to_hex(const void *data, std::size_t size);
 
 void random_bytes(void *out, std::size_t size);
 
-} // namespace ice::hash
+} // namespace asioice::hash

@@ -1,4 +1,4 @@
-namespace ice::impl {
+namespace asioice::impl {
 
 template <class Socket> void datagram_transport_impl<Socket>::start() {
     if (this->_running)
@@ -14,7 +14,7 @@ template <class Socket> void datagram_transport_impl<Socket>::start() {
 }
 
 template <class Socket>
-ice::task<void> datagram_transport_impl<Socket>::recv_loop() {
+asioice::task<void> datagram_transport_impl<Socket>::recv_loop() {
     utils::scope_guard on_exit([this]() noexcept { this->_running = false; });
     while (true) {
         io_buffer_ptr buf(&this->_pool, 64, this->max_buffer_size());
@@ -49,4 +49,4 @@ void datagram_transport_impl<Socket>::add_receiver(
     this->receivers().push_back(receiver);
 }
 
-} // namespace ice::impl
+} // namespace asioice::impl

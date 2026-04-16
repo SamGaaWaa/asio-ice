@@ -9,7 +9,7 @@
 #include <ranges>
 #include <algorithm>
 
-namespace ice::impl {
+namespace asioice::impl {
 
 struct early_data_cache {
     early_data_cache(std::size_t max_bytes = 16 * 1024) noexcept
@@ -20,7 +20,7 @@ struct early_data_cache {
     early_data_cache &operator=(const early_data_cache &) = delete;
     early_data_cache &operator=(early_data_cache &&) = delete;
 
-    bool put(ice::io_buffer_ptr &data, const ice::endpoint &source) {
+    bool put(asioice::io_buffer_ptr &data, const asioice::endpoint &source) {
         if (!data)
             return false;
         if (data->size() + _bytes > _max_bytes)
@@ -30,7 +30,7 @@ struct early_data_cache {
         return true;
     }
 
-    void dispatch_receiver(ice::datagram_receiver &receiver) {
+    void dispatch_receiver(asioice::datagram_receiver &receiver) {
         if (this->_early_data.empty())
             return;
         std::vector<early_data_t> early_data{};
@@ -53,7 +53,7 @@ struct early_data_cache {
             }
         });
         for (auto &data : early_data) {
-            ice::dispatch_receivers(tmp, data.data, data.source);
+            asioice::dispatch_receivers(tmp, data.data, data.source);
         }
         std::erase_if(early_data,
                       [](const auto &data) noexcept { return !data.data; });
@@ -70,8 +70,8 @@ struct early_data_cache {
                                boost::intrusive::constant_time_size<false>>;
 
     struct early_data_t {
-        ice::io_buffer_ptr data;
-        ice::endpoint source;
+        asioice::io_buffer_ptr data;
+        asioice::endpoint source;
     };
 
     std::vector<early_data_t> _early_data{};
@@ -79,4 +79,4 @@ struct early_data_cache {
     const std::size_t _max_bytes;
 };
 
-} // namespace ice::impl
+} // namespace asioice::impl

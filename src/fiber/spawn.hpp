@@ -4,7 +4,7 @@
 
 #include <optional>
 
-namespace ice::fiber {
+namespace asioice::fiber {
 
 namespace __fiber_detail {
 
@@ -176,4 +176,4 @@ inline stdexec::sender auto spawn(Scheduler sched, Func &&f, Args &&...args) {
            });
 }
 
-} // namespace ice::fiber
+} // namespace asioice::fiber

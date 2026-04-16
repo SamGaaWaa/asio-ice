@@ -4,7 +4,7 @@
 #include <stdexcept>
 #include <stdexec/execution.hpp>
 
-namespace ice::fiber {
+namespace asioice::fiber {
 
 template <class Func, class... Args> struct sender_base {
     using completion_signatures = stdexec::completion_signatures<
@@ -148,4 +148,4 @@ template <class F, class... Args>
 sender(ASYNC_JOB **, ASYNC_WAIT_CTX *, int *, F &&,
        Args &&...) -> sender<std::decay_t<F>, std::decay_t<Args>...>;
 
-} // namespace ice::fiber
+} // namespace asioice::fiber

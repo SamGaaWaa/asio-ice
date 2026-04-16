@@ -15,7 +15,7 @@
 #include <variant>
 // #include <iostream>
 
-namespace ice {
+namespace asioice {
 
 namespace __inline_task {
 namespace __detail {
@@ -492,4 +492,4 @@ template <> class inline_task<void> {
 
 using __inline_task::inline_task;
 
-} // namespace ice
+} // namespace asioice

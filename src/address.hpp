@@ -9,18 +9,18 @@
 #if ASIOICE_USE_BOOST_ASIO > 0
 #include <boost/asio/ip/udp.hpp>
 #include <boost/asio/ip/tcp.hpp>
-namespace ice {
+namespace asioice {
 namespace net = boost::asio;
 }
 #else
 #include <asio/ip/udp.hpp>
 #include <asio/ip/tcp.hpp>
-namespace ice {
+namespace asioice {
 namespace net = asio;
 }
 #endif
 
-namespace ice {
+namespace asioice {
 
 struct endpoint {
     endpoint() noexcept = default;
@@ -97,4 +97,4 @@ struct endpoint {
 std::vector<net::ip::address> get_local_addresses(bool use_ipv4 = true,
                                                   bool use_ipv6 = true);
 
-} // namespace ice
+} // namespace asioice

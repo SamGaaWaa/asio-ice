@@ -4,12 +4,12 @@
 
 #if ASIOICE_USE_BOOST_ASIO > 0
 #include <boost/asio/buffer.hpp>
-namespace ice {
+namespace asioice {
 namespace net = boost::asio;
 }
 #else
 #include <asio/buffer.hpp>
-namespace ice {
+namespace asioice {
 namespace net = asio;
 }
 #endif
@@ -21,7 +21,7 @@ namespace net = asio;
 #include <memory>
 #include <stdexcept>
 
-namespace ice {
+namespace asioice {
 
 struct io_buffer_pool;
 
@@ -363,4 +363,4 @@ struct io_buffer_ptr {
     io_buffer *_buffer{nullptr};
 };
 
-} // namespace ice
+} // namespace asioice

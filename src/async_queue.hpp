@@ -14,7 +14,7 @@
 #include <optional>
 #include <type_traits>
 
-namespace ice {
+namespace asioice {
 
 template <class T, class C = std::deque<T>>
     requires std::is_nothrow_move_constructible_v<T>
@@ -228,7 +228,7 @@ class async_queue {
     bool _closed{false};
 };
 
-} // namespace ice
+} // namespace asioice
 
 // #include <stdexec/execution.hpp>
 // #include <exec/async_scope.hpp>

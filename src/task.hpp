@@ -2,9 +2,9 @@
 
 #include <exec/task.hpp>
 
-namespace ice {
+namespace asioice {
 
 template <class T>
-using task = exec::basic_task<T, exec::__task::__raw_task_context<T>>;
+using task = exec::basic_task<T, exec::__task::inline_task_context<T>>;
 
-} // namespace ice
+} // namespace asioice

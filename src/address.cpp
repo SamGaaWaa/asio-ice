@@ -14,7 +14,7 @@
 #include <sys/types.h>
 #endif
 
-namespace ice {
+namespace asioice {
 
 std::vector<net::ip::address> get_local_addresses(bool use_ipv4,
                                                   bool use_ipv6) {
@@ -101,4 +101,4 @@ std::string endpoint::to_string() const {
         _data);
 }
 
-} // namespace ice
+} // namespace asioice

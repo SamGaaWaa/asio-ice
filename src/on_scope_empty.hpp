@@ -3,7 +3,7 @@
 #include <exec/async_scope.hpp>
 #include <optional>
 
-namespace ice::utils {
+namespace asioice::utils {
 
 namespace __on_scope_empty_detail {
 
@@ -78,4 +78,4 @@ inline auto on_scope_empty(exec::async_scope &scope) {
            });
 }
 
-} // namespace ice::utils
+} // namespace asioice::utils

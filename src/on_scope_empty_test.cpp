@@ -9,14 +9,14 @@
 #include <boost/asio/io_context.hpp>
 #include <boost/asio/steady_timer.hpp>
 #include <boost/asio/signal_set.hpp>
-namespace ice {
+namespace asioice {
 namespace net = boost::asio;
 }
 #else
 #include <asio/io_context.hpp>
 #include <asio/steady_timer.hpp>
 #include <asio/signal_set.hpp>
-namespace ice {
+namespace asioice {
 namespace net = asio;
 }
 #endif
@@ -27,10 +27,10 @@ namespace net = asio;
 
 #include <exec/start_detached.hpp>
 
-ice::task<void> timeout(ice::net::io_context &ctx) {
-    ice::net::steady_timer timer(ctx, std::chrono::seconds(60));
+asioice::task<void> timeout(asioice::net::io_context &ctx) {
+    asioice::net::steady_timer timer(ctx, std::chrono::seconds(60));
     std::cout << "Waiting...\n";
-    ice::utils::scope_guard on_stop(
+    asioice::utils::scope_guard on_stop(
         []() noexcept { std::cout << "Canceled\n"; });
     auto ec = co_await timer.async_wait(asio2exec::use_sender);
     if (ec)
@@ -40,7 +40,7 @@ ice::task<void> timeout(ice::net::io_context &ctx) {
 }
 
 void test() {
-    using namespace ice;
+    using namespace asioice;
 
     net::io_context ctx;
     exec::async_scope scope;

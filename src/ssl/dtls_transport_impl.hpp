@@ -4,12 +4,12 @@
 #if ASIOICE_USE_BOOST_ASIO > 0
 #define ASIO_TO_EXEC_USE_BOOST 1
 #include <boost/asio/io_context.hpp>
-namespace ice {
+namespace asioice {
 namespace net = boost::asio;
 }
 #else
 #include <asio/io_context.hpp>
-namespace ice {
+namespace asioice {
 namespace net = asio;
 }
 #endif
@@ -34,7 +34,7 @@ namespace net = asio;
 #include <type_traits>
 #include <iostream>
 
-namespace ice::ssl::impl {
+namespace asioice::ssl::impl {
 
 template <class Op>
 concept OpenSSLOperation = std::is_nothrow_invocable_v<Op> && requires(Op &op) {
@@ -44,15 +44,15 @@ concept OpenSSLOperation = std::is_nothrow_invocable_v<Op> && requires(Op &op) {
 };
 
 template <class NextLayer>
-struct dtls_impl : ice::datagram_receiver,
+struct dtls_impl : asioice::datagram_receiver,
                    std::enable_shared_from_this<dtls_impl<NextLayer>> {
     using next_layer_type = NextLayer;
     enum handshake_type { server, client };
 
     dtls_impl(std::shared_ptr<next_layer_type> transport,
-              const ice::endpoint &remote, ::SSL *ssl)
-        : ice::datagram_receiver{std::move(transport)},
-          _next_layer{ice::datagram_receiver::transport<next_layer_type>()},
+              const asioice::endpoint &remote, ::SSL *ssl)
+        : asioice::datagram_receiver{std::move(transport)},
+          _next_layer{asioice::datagram_receiver::transport<next_layer_type>()},
           _remote{remote}, _ssl{ssl} {
         if (!_ssl)
             throw std::runtime_error{"ssl == nullptr"};
@@ -87,7 +87,7 @@ struct dtls_impl : ice::datagram_receiver,
     const auto &remote_endpoint() const noexcept { return _remote; }
 
     template <class ConstBufferSequence>
-    ice::task<std::tuple<std::error_code, std::size_t>>
+    asioice::task<std::tuple<std::error_code, std::size_t>>
     async_send(const ConstBufferSequence &buf, auto... self);
 
     template <class ConstBufferSequence, class Endpoint, class... Args>
@@ -97,7 +97,7 @@ struct dtls_impl : ice::datagram_receiver,
     }
 
     template <class MutableBufferSequence>
-    ice::task<std::tuple<std::error_code, std::size_t>>
+    asioice::task<std::tuple<std::error_code, std::size_t>>
     async_receive(const MutableBufferSequence &buf, auto... self);
 
     template <class MutableBufferSequence, class Endpoint, class... Args>
@@ -121,25 +121,25 @@ struct dtls_impl : ice::datagram_receiver,
     struct shutdown_op;
 
     bool datagram_received(io_buffer_ptr &buffer,
-                           const ice::endpoint &endpoint) override;
+                           const asioice::endpoint &endpoint) override;
 
     template <OpenSSLOperation Op>
-    ice::task<std::tuple<std::error_code, std::size_t>> perform(Op op,
+    asioice::task<std::tuple<std::error_code, std::size_t>> perform(Op op,
                                                                 auto... self);
 
     void handle_timeout();
-    ice::task<void> timeout_handler();
+    asioice::task<void> timeout_handler();
 
     using receiver_list_t =
         boost::intrusive::list<datagram_receiver,
                                boost::intrusive::constant_time_size<false>>;
 
     next_layer_type &_next_layer;
-    ice::endpoint _remote;
+    asioice::endpoint _remote;
     std::vector<std::byte> _gather_buf{};
-    std::deque<ice::io_buffer_ptr> _recv_q{};
+    std::deque<asioice::io_buffer_ptr> _recv_q{};
     std::size_t _max_recv_q_size{64};
-    ice::shared_promise<void> _recv_promise{};
+    asioice::shared_promise<void> _recv_promise{};
     datagram_bio _bio{};
     ::SSL *_ssl;
     utils::async_mutex _ssl_mutex{};
@@ -147,9 +147,9 @@ struct dtls_impl : ice::datagram_receiver,
     bool _closed{false};
     bool _peer_closed{false};
     bool _handing_timeout{false};
-    ice::shared_promise<void> _timeout_handler_promise{};
+    asioice::shared_promise<void> _timeout_handler_promise{};
 };
 
-} // namespace ice::ssl::impl
+} // namespace asioice::ssl::impl
 
 #include "ssl/dtls_transport_impl.ipp"

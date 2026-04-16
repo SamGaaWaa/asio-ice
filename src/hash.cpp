@@ -4,7 +4,7 @@
 
 #include <stdexcept>
 
-namespace ice::hash {
+namespace asioice::hash {
 
 void to_hex(const void *data, std::size_t size, char *out) noexcept {
     const uint8_t *begin = (const uint8_t *)data;
@@ -31,4 +31,4 @@ void random_bytes(void *out, std::size_t size) {
         throw std::runtime_error("RAND_bytes failed");
 }
 
-} // namespace ice::hash
+} // namespace asioice::hash

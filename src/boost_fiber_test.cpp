@@ -3,7 +3,7 @@
 #include <iostream>
 #include <chrono>
 
-namespace bctx = ice::boost_context;
+namespace bctx = asioice::boost_context;
 
 void test(int n) {
     auto ctx = bctx::make_context([n] {

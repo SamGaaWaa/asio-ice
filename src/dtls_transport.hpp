@@ -3,16 +3,16 @@
 #include "config.hpp"
 #include "ssl/dtls_transport_impl.hpp"
 
-namespace ice::ssl {
+namespace asioice::ssl {
 
 template <class NextLayer> class dtls_transport {
   public:
     using next_layer_type = NextLayer;
-    using impl_type = ice::ssl::impl::dtls_impl<next_layer_type>;
+    using impl_type = asioice::ssl::impl::dtls_impl<next_layer_type>;
     using handshake_type = impl_type::handshake_type;
 
     dtls_transport(std::shared_ptr<next_layer_type> transport,
-                   const ice::endpoint &remote, ::SSL *ssl)
+                   const asioice::endpoint &remote, ::SSL *ssl)
         : _impl{
               std::make_shared<impl_type>(std::move(transport), remote, ssl)} {}
 
@@ -53,7 +53,7 @@ template <class NextLayer> class dtls_transport {
     }
 
     template <class ConstBufferSequence, class... Args>
-    ice::task<std::tuple<std::error_code, std::size_t>>
+    asioice::task<std::tuple<std::error_code, std::size_t>>
     async_send(const ConstBufferSequence &buf, Args &&...self) {
         return _impl->async_send(buf, std::forward<Args>(self)...);
     }
@@ -65,7 +65,7 @@ template <class NextLayer> class dtls_transport {
     }
 
     template <class MutableBufferSequence, class... Args>
-    ice::task<std::tuple<std::error_code, std::size_t>>
+    asioice::task<std::tuple<std::error_code, std::size_t>>
     async_receive(const MutableBufferSequence &buf, Args &&...self) {
         return _impl->async_receive(buf, std::forward<Args>(self)...);
     }
@@ -92,4 +92,4 @@ template <class NextLayer> class dtls_transport {
     std::shared_ptr<impl_type> _impl;
 };
 
-} // namespace ice::ssl
+} // namespace asioice::ssl

@@ -4,12 +4,12 @@
 #if ASIOICE_USE_BOOST_ASIO > 0
 #define ASIO_TO_EXEC_USE_BOOST 1
 #include <boost/asio/io_context.hpp>
-namespace ice {
+namespace asioice {
 namespace net = boost::asio;
 }
 #else
 #include <asio/io_context.hpp>
-namespace ice {
+namespace asioice {
 namespace net = asio;
 }
 #endif
@@ -25,7 +25,7 @@ namespace net = asio;
 
 #include <memory>
 
-namespace ice::impl {
+namespace asioice::impl {
 
 template <class Socket>
 struct datagram_transport_impl
@@ -80,7 +80,7 @@ struct datagram_transport_impl
     void clear_early_data() noexcept;
 
   private:
-    ice::task<void> recv_loop();
+    asioice::task<void> recv_loop();
 
     net::io_context &_ctx;
     Socket _sock;
@@ -91,9 +91,9 @@ struct datagram_transport_impl
     receiver_list_t _receivers{};
     std::size_t _max_buffer_size{4096};
     bool _running{false};
-    ice::shared_promise<void> _stop{};
+    asioice::shared_promise<void> _stop{};
 };
 
-} // namespace ice::impl
+} // namespace asioice::impl
 
 #include "datagram_transport_impl.ipp"

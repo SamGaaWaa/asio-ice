@@ -15,7 +15,7 @@
 #include <span>
 #include <sstream>
 
-namespace ice::stun {
+namespace asioice::stun {
 
 #pragma pack(push, 1)
 /*
@@ -914,7 +914,7 @@ bool message::parse(const void *data, std::size_t buf_size,
             break;
         }
         case attr_type_t::STUN_ATTR_XOR_PEER_ADDRESS: {
-            ice::endpoint peer_addr;
+            asioice::endpoint peer_addr;
             if ((attr_len != 8 && attr_len != 20) ||
                 parse_xor_address(attr.value(), end.data() - attr.value(),
                                   header, peer_addr) != attr_len)
@@ -1678,7 +1678,7 @@ std::size_t message::serialized_size() const noexcept {
         total += 4 + 8;
     }
 
-    total += align_size(4 + std::string_view{"asio-ice"}.size());
+    total += align_size(4 + std::string_view{"asio-asioice"}.size());
 
     for (const auto &algo : integrities) {
         switch (algo.algo()) {
@@ -1974,4 +1974,4 @@ std::string message::to_string() {
     return obj.dump(2);
 }
 
-} // namespace ice::stun
+} // namespace asioice::stun

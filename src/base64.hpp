@@ -15,7 +15,7 @@
 #include <string_view>
 #include <utility>
 
-namespace ice {
+namespace asioice {
 namespace base64 {
 
 char const *get_alphabet();
@@ -62,6 +62,6 @@ std::pair<std::size_t, std::size_t> decode(void *dest, char const *src,
 
 } // namespace base64
 
-} // namespace ice
+} // namespace asioice
 
 #endif

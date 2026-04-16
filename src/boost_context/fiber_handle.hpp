@@ -3,8 +3,8 @@
 #include <utility>
 #include <cassert>
 
-namespace ice::boost_context {
+namespace asioice::boost_context {
 
 class fiber {};
 
-} // namespace ice::boost_context
+} // namespace asioice::boost_context

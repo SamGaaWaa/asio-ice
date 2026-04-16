@@ -2,7 +2,7 @@
 
 #include <stdexcept>
 
-namespace ice::boost_context {
+namespace asioice::boost_context {
 
 struct context_initializer {
     static thread_local context *active;
@@ -70,4 +70,4 @@ void context::set_active(context *ctx) {
     context_initializer::active = ctx;
 }
 
-} // namespace ice::boost_context
+} // namespace asioice::boost_context

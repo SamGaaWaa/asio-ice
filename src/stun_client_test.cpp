@@ -7,14 +7,14 @@
 #include <boost/asio/buffer.hpp>
 #include <boost/asio/steady_timer.hpp>
 #include <boost/asio/ip/udp.hpp>
-namespace ice {
+namespace asioice {
 namespace net = boost::asio;
 }
 #else
 #include <asio/buffer.hpp>
 #include <asio/steady_timer.hpp>
 #include <asio/ip/udp.hpp>
-namespace ice {
+namespace asioice {
 namespace net = asio;
 }
 #endif
@@ -27,7 +27,7 @@ namespace net = asio;
 #include <vector>
 
 void udp_request_test() {
-    using namespace ice;
+    using namespace asioice;
 
     asio2exec::asio_context asio_thread;
     asio_thread.start();
@@ -55,7 +55,7 @@ void udp_request_test() {
 
     stun::transaction_set transactions;
 
-    auto request_coro = [&]() -> ice::task<void> {
+    auto request_coro = [&]() -> asioice::task<void> {
         stun::message req;
         req.method = stun::method_t::STUN_METHOD_BINDING;
         req.cls = stun::class_t::STUN_CLASS_REQUEST;
@@ -63,7 +63,7 @@ void udp_request_test() {
         req.fill_random_transaction_id();
 
         stun::message resp;
-        ice::endpoint resp_source;
+        asioice::endpoint resp_source;
         auto success = co_await stun::basic_request(
             *transport, transactions, req, server_ep, resp, resp_source, 3);
         if (!success) {
@@ -90,7 +90,7 @@ void udp_request_test() {
 }
 
 void tcp_request_test() {
-    // using namespace ice;
+    // using namespace asioice;
 
     // asio2exec::asio_context asio_thread;
     // asio_thread.start();
@@ -112,7 +112,7 @@ void tcp_request_test() {
     // sock.connect(server_ep);
     // stun::client<net::ip::tcp::socket> client(ctx, sock);
 
-    // auto recv_coro = [&]() -> ice::task<void> {
+    // auto recv_coro = [&]() -> asioice::task<void> {
     //     char buf[8];
     //     std::vector<char> tmp_buf;
     //     while (true) {
@@ -140,7 +140,7 @@ void tcp_request_test() {
     //     }
     // };
 
-    // auto request_coro = [&]() -> ice::task<void> {
+    // auto request_coro = [&]() -> asioice::task<void> {
     //     stun::message req;
     //     req.method = stun::method_t::STUN_METHOD_BINDING;
     //     req.cls = stun::class_t::STUN_CLASS_REQUEST;

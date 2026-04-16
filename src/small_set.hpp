@@ -7,7 +7,7 @@
 #include <boost/container/flat_set.hpp>
 #endif
 
-namespace ice {
+namespace asioice {
 
 #if __cpp_lib_flat_set > 202207L
 template <class Key, std::size_t N = 16, class Compare = std::less<Key>>
@@ -18,4 +18,4 @@ template <class Key, std::size_t N = 16, class Compare = std::less<Key>>
 using small_set = boost::container::flat_set<Key, Compare>;
 #endif
 
-} // namespace ice
+} // namespace asioice

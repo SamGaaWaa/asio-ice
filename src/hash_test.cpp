@@ -6,7 +6,7 @@
 #include <thread>
 #include <vector>
 
-using namespace ice;
+using namespace asioice;
 
 void md5_test() {
     const char *str = "hello world";

@@ -1,7 +1,7 @@
 #include "string_utils.hpp"
 #include "hash.hpp"
 
-namespace ice::utils {
+namespace asioice::utils {
 
 bool case_insensitive_equal(std::string_view a, std::string_view b) noexcept {
     if (a.size() != b.size())
@@ -37,8 +37,8 @@ std::string random_string(std::size_t n) {
             while (it < end) {
                 std::size_t byte_size = (end - it) / 2;
                 byte_size = byte_size > sizeof(buf) ? sizeof(buf) : byte_size;
-                ice::hash::random_bytes(buf, byte_size);
-                ice::hash::to_hex(buf, byte_size, it);
+                asioice::hash::random_bytes(buf, byte_size);
+                asioice::hash::to_hex(buf, byte_size, it);
                 it += (byte_size * 2);
             }
             return n;
@@ -46,4 +46,4 @@ std::string random_string(std::size_t n) {
     return res;
 }
 
-} // namespace ice::utils
+} // namespace asioice::utils

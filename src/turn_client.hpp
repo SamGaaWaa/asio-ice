@@ -4,7 +4,7 @@
 
 #include <memory>
 
-namespace ice::turn {
+namespace asioice::turn {
 
 constexpr bool is_channel_data(const void *data, std::size_t size) noexcept {
     return (static_cast<const uint8_t *>(data)[0] & 0xC0) == 0x40;
@@ -18,7 +18,7 @@ template <class NextLayer> class client<NextLayer, true> {
     using next_layer_type = typename impl_type::next_layer_type;
 
     client(std::shared_ptr<next_layer_type> transport,
-           const ice::endpoint &server, std::string username,
+           const asioice::endpoint &server, std::string username,
            std::string password)
         : _impl(std::make_shared<impl_type>(std::move(transport), server,
                                             std::move(username),
@@ -53,25 +53,25 @@ template <class NextLayer> class client<NextLayer, true> {
     const auto &impl() const noexcept { return *_impl; }
     auto &impl() noexcept { return *_impl; }
 
-    ice::endpoint local_endpoint() const noexcept {
+    asioice::endpoint local_endpoint() const noexcept {
         return _impl->local_endpoint();
     }
 
-    ice::endpoint remote_endpoint() const noexcept {
+    asioice::endpoint remote_endpoint() const noexcept {
         return _impl->remote_endpoint();
     }
 
     const std::string &username() const noexcept { return _impl->username(); }
     const std::string &password() const noexcept { return _impl->password(); }
 
-    const std::optional<ice::endpoint> &relayed_address() const noexcept {
+    const std::optional<asioice::endpoint> &relayed_address() const noexcept {
         return _impl->relayed_address();
     }
-    const std::optional<ice::endpoint> &reflex_address() const noexcept {
+    const std::optional<asioice::endpoint> &reflex_address() const noexcept {
         return _impl->reflex_address();
     }
 
-    ice::task<bool> request(const stun::message &msg, ice::endpoint &from,
+    asioice::task<bool> request(const stun::message &msg, asioice::endpoint &from,
                             stun::message &resp, std::size_t retries,
                             auto... self) {
         return _impl->request(msg, from, resp, retries, std::move(self)...);
@@ -80,7 +80,7 @@ template <class NextLayer> class client<NextLayer, true> {
     /*
         Only support UDP between server and peer
     */
-    ice::task<std::optional<ice::endpoint>> create_allocation(auto lifetime,
+    asioice::task<std::optional<asioice::endpoint>> create_allocation(auto lifetime,
                                                               auto... self) {
         return _impl->create_allocation(lifetime, std::move(self)...);
     }
@@ -89,16 +89,16 @@ template <class NextLayer> class client<NextLayer, true> {
         return _impl->generate_channel_number();
     }
 
-    ice::task<bool> channel_bind(net::ip::udp::endpoint peer, uint16_t channel,
+    asioice::task<bool> channel_bind(net::ip::udp::endpoint peer, uint16_t channel,
                                  auto... self) {
         return _impl->channel_bind(peer, channel, std::move(self)...);
     }
 
-    ice::task<void> delete_allocation(auto... self) {
+    asioice::task<void> delete_allocation(auto... self) {
         return _impl->delete_allocation(std::move(self)...);
     }
 
-    ice::task<bool> refresh(auto time_to_expiry, auto... self) {
+    asioice::task<bool> refresh(auto time_to_expiry, auto... self) {
         return _impl->refresh(time_to_expiry, std::move(self)...);
     }
 
@@ -106,11 +106,11 @@ template <class NextLayer> class client<NextLayer, true> {
         return _impl->permissions().find(ip) != _impl->permissions().end();
     }
 
-    ice::task<bool> create_permission(net::ip::address peer, auto... self) {
+    asioice::task<bool> create_permission(net::ip::address peer, auto... self) {
         return _impl->create_permission(peer, std::move(self)...);
     }
 
-    ice::task<bool> create_permission(std::ranges::view auto peers,
+    asioice::task<bool> create_permission(std::ranges::view auto peers,
                                       auto... self) {
         return _impl->create_permission(std::move(peers), std::move(self)...);
     }
@@ -124,9 +124,9 @@ template <class NextLayer> class client<NextLayer, true> {
     }
 
     template <class ConstBufferSequence>
-    ice::task<std::tuple<std::error_code, std::size_t>>
+    asioice::task<std::tuple<std::error_code, std::size_t>>
     async_send_to(const ConstBufferSequence &buffers,
-                  const ice::endpoint &destination, auto... self) {
+                  const asioice::endpoint &destination, auto... self) {
         return _impl->async_send_to(buffers, destination, std::move(self)...);
     }
 
@@ -144,4 +144,4 @@ template <class NextLayer> class client<NextLayer, true> {
     std::shared_ptr<impl_type> _impl;
 }; // client
 
-} // namespace ice::turn
+} // namespace asioice::turn

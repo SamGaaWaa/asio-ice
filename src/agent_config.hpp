@@ -5,12 +5,12 @@
 
 #if ASIOICE_USE_BOOST_ASIO > 0
 #include <boost/asio/ip/udp.hpp>
-namespace ice {
+namespace asioice {
 namespace net = boost::asio;
 }
 #else
 #include <asio/ip/udp.hpp>
-namespace ice {
+namespace asioice {
 namespace net = asio;
 }
 #endif
@@ -20,12 +20,12 @@ namespace net = asio;
 #include <optional>
 #include <chrono>
 
-namespace ice {
+namespace asioice {
 
 enum struct transport_policy { ALL, RELAY };
 
 struct turn_credentials {
-    ice::endpoint address;
+    asioice::endpoint address;
     std::string username;
     std::string password;
 };
@@ -38,10 +38,10 @@ struct agent_config {
     bool use_ipv4 = true;
     bool use_ipv6 = false;
     std::string transport = "udp";
-    std::vector<ice::endpoint> stun_servers;
+    std::vector<asioice::endpoint> stun_servers;
     std::vector<turn_credentials> turn_servers;
     uint8_t component_count = 1;
-    ice::transport_policy transport_policy = ice::transport_policy::ALL;
+    asioice::transport_policy transport_policy = asioice::transport_policy::ALL;
     bool trickle_ice = true;
     std::size_t max_pending_check_count = 100;
     std::chrono::milliseconds connectivity_check_timeout{5000};
@@ -49,4 +49,4 @@ struct agent_config {
     std::chrono::milliseconds keepalive_interval{15000};
 };
 
-} // namespace ice
+} // namespace asioice

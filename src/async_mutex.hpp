@@ -5,7 +5,7 @@
 
 #include <cassert>
 
-namespace ice::utils {
+namespace asioice::utils {
 
 struct async_mutex {
     struct guard {
@@ -51,7 +51,7 @@ struct async_mutex {
     async_mutex &operator=(async_mutex &&) = delete;
 
     auto lock() noexcept {
-        return ice::utils::if_else(
+        return asioice::utils::if_else(
             stdexec::just(_used),
             [this] {
                 return _waiters.get_future() |
@@ -64,7 +64,7 @@ struct async_mutex {
 
   private:
     bool _used{false};
-    ice::shared_promise<void> _waiters{};
+    asioice::shared_promise<void> _waiters{};
 };
 
-} // namespace ice::utils
+} // namespace asioice::utils

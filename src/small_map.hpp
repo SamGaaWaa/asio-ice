@@ -7,7 +7,7 @@
 #include <boost/container/flat_map.hpp>
 #endif
 
-namespace ice {
+namespace asioice {
 
 #if __cpp_lib_flat_map > 202207L
 template <class Key, class T, std::size_t N = 16,
@@ -21,4 +21,4 @@ template <class Key, class T, std::size_t N = 16,
 using small_map = boost::container::flat_map<Key, T, Compare>;
 #endif
 
-} // namespace ice
+} // namespace asioice

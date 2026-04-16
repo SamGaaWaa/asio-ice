@@ -3,7 +3,7 @@
 #include <stdexec/execution.hpp>
 #include <exec/variant_sender.hpp>
 
-namespace ice::utils {
+namespace asioice::utils {
 
 template <class Func>
 concept sender_generator =
@@ -25,4 +25,4 @@ inline auto if_else(Cond &&cond, Func1 &&func1, Func2 &&func2) noexcept(
            });
 }
 
-} // namespace ice::utils
+} // namespace asioice::utils

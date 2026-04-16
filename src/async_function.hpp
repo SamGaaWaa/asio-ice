@@ -10,7 +10,7 @@
 
 #include "task.hpp"
 
-namespace ice::utils {
+namespace asioice::utils {
 
 template <class Ret, class... Args> struct async_function;
 
@@ -62,14 +62,14 @@ template <class Ret, class... Args> struct async_function<Ret(Args...)> {
         return std::get<0>(_func)(std::forward<Args1>(args)...);
     }
 
-    template <class... Args1> ice::task<Ret> invoke_async(Args1 &&...args) {
+    template <class... Args1> asioice::task<Ret> invoke_async(Args1 &&...args) {
         return std::get<1>(_func)(std::forward<Args1>(args)...);
     }
 
     template <class... Args1> auto invoke(Args1 &&...args) {
         using sync_sender_t = std::decay_t<decltype(stdexec::just(
             invoke_sync(std::forward<Args1>(args)...)))>;
-        using return_type = exec::variant_sender<sync_sender_t, ice::task<Ret>>;
+        using return_type = exec::variant_sender<sync_sender_t, asioice::task<Ret>>;
         if (_func.index() == 0)
             return return_type{
                 stdexec::just(invoke_sync(std::forward<Args1>(args)...))};
@@ -87,23 +87,23 @@ template <class Ret, class... Args> struct async_function<Ret(Args...)> {
   private:
     template <class SenderFunc> struct wrap {
         SenderFunc func;
-        ice::task<Ret> operator()(Args... args) {
+        asioice::task<Ret> operator()(Args... args) {
             co_return co_await func(std::move(args)...);
         }
     };
 
     template <class SenderFunc>
         requires std::is_same_v<std::invoke_result_t<SenderFunc, Args...>,
-                                ice::task<Ret>>
+                                asioice::task<Ret>>
     struct wrap<SenderFunc> {
         SenderFunc func;
-        template <class... Args1> ice::task<Ret> operator()(Args1 &&...args) {
+        template <class... Args1> asioice::task<Ret> operator()(Args1 &&...args) {
             return func(std::forward<Args1>(args)...);
         }
     };
 
     std::variant<std::function<Ret(Args...)>,
-                 std::function<ice::task<Ret>(Args...)>>
+                 std::function<asioice::task<Ret>(Args...)>>
         _func;
 };
 
@@ -155,14 +155,14 @@ template <class... Args> struct async_function<void(Args...)> {
         std::get<0>(_func)(std::forward<Args1>(args)...);
     }
 
-    template <class... Args1> ice::task<void> invoke_async(Args1 &&...args) {
+    template <class... Args1> asioice::task<void> invoke_async(Args1 &&...args) {
         return std::get<1>(_func)(std::forward<Args1>(args)...);
     }
 
     template <class... Args1> auto invoke(Args1 &&...args) {
         using sync_sender_t = std::decay_t<decltype(stdexec::just())>;
         using return_type =
-            exec::variant_sender<sync_sender_t, ice::task<void>>;
+            exec::variant_sender<sync_sender_t, asioice::task<void>>;
         if (_func.index() == 0) {
             invoke_sync(std::forward<Args1>(args)...);
             return return_type{stdexec::just()};
@@ -181,24 +181,24 @@ template <class... Args> struct async_function<void(Args...)> {
   private:
     template <class SenderFunc> struct wrap {
         SenderFunc func;
-        ice::task<void> operator()(Args... args) {
+        asioice::task<void> operator()(Args... args) {
             co_await func(std::move(args)...);
         }
     };
 
     template <class SenderFunc>
         requires std::is_same_v<std::invoke_result_t<SenderFunc, Args...>,
-                                ice::task<void>>
+                                asioice::task<void>>
     struct wrap<SenderFunc> {
         SenderFunc func;
-        template <class... Args1> ice::task<void> operator()(Args1 &&...args) {
+        template <class... Args1> asioice::task<void> operator()(Args1 &&...args) {
             return func(std::forward<Args1>(args)...);
         }
     };
 
     std::variant<std::function<void(Args...)>,
-                 std::function<ice::task<void>(Args...)>>
+                 std::function<asioice::task<void>(Args...)>>
         _func;
 };
 
-} // namespace ice::utils
+} // namespace asioice::utils

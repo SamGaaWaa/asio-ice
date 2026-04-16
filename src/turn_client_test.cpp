@@ -10,11 +10,11 @@
 
 #include <exec/start_detached.hpp>
 
-using Transport = ice::datagram_transport<ice::net::ip::udp::socket>;
-using TurnClient = ice::turn::client<Transport, true>;
+using Transport = asioice::datagram_transport<asioice::net::ip::udp::socket>;
+using TurnClient = asioice::turn::client<Transport, true>;
 
 void allocate_test(std::size_t epoch_count) {
-    using namespace ice;
+    using namespace asioice;
     // debug::leak_detector_start();
     // utils::scope_guard stop_leak_detector([]()noexcept {
     // debug::leak_detector_stop(); });
@@ -42,15 +42,15 @@ void allocate_test(std::size_t epoch_count) {
         net::ip::udp::endpoint(net::ip::make_address("127.0.0.1"), 0));
 
     auto peer = remote_peer.local_endpoint();
-    ice::candidate remote_c{.endpoint =
-                                ice::endpoint(peer.address(), peer.port())};
+    asioice::candidate remote_c{.endpoint =
+                                asioice::endpoint(peer.address(), peer.port())};
 
-    ice::candidate local_c;
+    asioice::candidate local_c;
     local_c.transport = client.impl().shared_from_this();
-    auto cpair = std::make_shared<ice::candidate_pair>(local_c, remote_c);
+    auto cpair = std::make_shared<asioice::candidate_pair>(local_c, remote_c);
     queue_datagram_receiver data_queue(cpair, 16);
 
-    auto allocate_coro = [&]() -> ice::task<void> {
+    auto allocate_coro = [&]() -> asioice::task<void> {
         auto relayed =
             co_await client.create_allocation(std::chrono::seconds(60 * 10));
         if (!relayed) {
@@ -103,7 +103,7 @@ void allocate_test(std::size_t epoch_count) {
             co_await timer.async_wait(asio2exec::use_sender);
         }
     };
-    auto peer_recv_coro = [&]() -> ice::task<void> {
+    auto peer_recv_coro = [&]() -> asioice::task<void> {
         for (int i = 0; i < epoch_count; ++i) {
             char buf[4096];
             net::ip::udp::endpoint relayed;

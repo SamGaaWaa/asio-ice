@@ -1,8 +1,8 @@
-namespace ice::turn::impl {
+namespace asioice::turn::impl {
 
 template <class NextLayer>
-ice::task<bool> datagram_client<NextLayer>::request(const stun::message &req,
-                                                    ice::endpoint &from,
+asioice::task<bool> datagram_client<NextLayer>::request(const stun::message &req,
+                                                    asioice::endpoint &from,
                                                     stun::message &resp,
                                                     std::size_t retries,
                                                     auto... self) noexcept {
@@ -102,9 +102,9 @@ END:
 }
 
 template <class NextLayer>
-ice::task<bool> datagram_client<NextLayer>::request_with_retry(
+asioice::task<bool> datagram_client<NextLayer>::request_with_retry(
     stun::message &req, stun::message &resp, std::size_t retries) {
-    ice::endpoint resp_source;
+    asioice::endpoint resp_source;
     if (!this->_nonce.empty()) {
         // Once a request/response transaction has completed, the client will
         // have been presented a realm and nonce by the server and selected a
@@ -277,7 +277,7 @@ template <class NextLayer> void datagram_client<NextLayer>::stop() noexcept {
 }
 
 template <class NextLayer>
-ice::task<void> datagram_client<NextLayer>::refresh_allocation_task() {
+asioice::task<void> datagram_client<NextLayer>::refresh_allocation_task() {
     if (!this->is_running())
         co_return;
     utils::scope_guard on_exit(
@@ -316,7 +316,7 @@ void datagram_client<NextLayer>::start_refresh_allocation_task() {
 }
 
 template <class NextLayer>
-ice::task<std::optional<ice::endpoint>>
+asioice::task<std::optional<asioice::endpoint>>
 datagram_client<NextLayer>::create_allocation(auto lifetime, auto... self) {
     if (!this->is_running())
         co_return std::nullopt;
@@ -351,7 +351,7 @@ datagram_client<NextLayer>::create_allocation(auto lifetime, auto... self) {
 }
 
 template <class NextLayer>
-ice::task<bool> datagram_client<NextLayer>::refresh(auto time_to_expiry,
+asioice::task<bool> datagram_client<NextLayer>::refresh(auto time_to_expiry,
                                                     auto... self) {
     if (!this->is_running())
         co_return false;
@@ -411,7 +411,7 @@ void datagram_client<NextLayer>::do_delete_allocation() {
 }
 
 template <class NextLayer>
-ice::task<void> datagram_client<NextLayer>::delete_allocation(auto... self) {
+asioice::task<void> datagram_client<NextLayer>::delete_allocation(auto... self) {
     if (!this->_relayed_address)
         co_return;
     stun::message req;
@@ -464,7 +464,7 @@ uint16_t datagram_client<NextLayer>::generate_channel_number() const {
 }
 
 template <class NextLayer>
-ice::task<void> datagram_client<NextLayer>::permission_state::refresh_task() {
+asioice::task<void> datagram_client<NextLayer>::permission_state::refresh_task() {
     utils::scope_guard on_exit([this]() noexcept {
         ICE_IN_DEBUG { std::cout << "permission_state::refresh_task exit\n"; }
         if (this->is_linked())
@@ -520,7 +520,7 @@ void datagram_client<NextLayer>::permission_state::start() {
 }
 
 template <class NextLayer>
-ice::task<bool>
+asioice::task<bool>
 datagram_client<NextLayer>::create_permission(std::ranges::view auto peers,
                                               auto... self) {
     if (!this->is_running() || peers.empty() || !this->_relayed_address)
@@ -539,7 +539,7 @@ datagram_client<NextLayer>::create_permission(std::ranges::view auto peers,
     req.method = stun::method_t::STUN_METHOD_CREATE_PERMISSION;
     req.use_fingerprint(true);
 
-    ice::small_set<net::ip::address> creating;
+    asioice::small_set<net::ip::address> creating;
     for (const auto &peer : peers) {
         if (this->_permissions.find(peer) != this->_permissions.end())
             continue;
@@ -637,7 +637,7 @@ void datagram_client<NextLayer>::delete_permission(
 }
 
 template <class NextLayer>
-ice::task<std::tuple<std::error_code, std::size_t>>
+asioice::task<std::tuple<std::error_code, std::size_t>>
 datagram_client<NextLayer>::async_send_to(
     typename datagram_client<NextLayer>::buffer_sequence_type buffers,
     net::ip::udp::endpoint destination, auto... self) {
@@ -706,7 +706,7 @@ auto datagram_client<NextLayer>::send_channel_data(
 }
 
 template <class NextLayer>
-ice::task<bool>
+asioice::task<bool>
 datagram_client<NextLayer>::channel_bind(net::ip::udp::endpoint peer,
                                          uint16_t channel, auto... self) {
     if (!this->is_running())
@@ -799,7 +799,7 @@ void datagram_client<NextLayer>::channel_state::start() {
 }
 
 template <class NextLayer>
-ice::task<void> datagram_client<NextLayer>::channel_state::refresh_task() {
+asioice::task<void> datagram_client<NextLayer>::channel_state::refresh_task() {
     utils::scope_guard on_error([this]() noexcept {
         ICE_IN_DEBUG {
             std::cout << "refresh_task stopped, channel: " << this->channel()
@@ -854,7 +854,7 @@ ice::task<void> datagram_client<NextLayer>::channel_state::refresh_task() {
                               this->_stop.get_future());
 }
 
-inline bool validate_turn_channel(const ice::io_buffer_ptr &buf,
+inline bool validate_turn_channel(const asioice::io_buffer_ptr &buf,
                                   uint16_t &channel_number,
                                   uint16_t &len) noexcept {
     if (buf->size() < 4) {
@@ -881,7 +881,7 @@ inline bool validate_turn_channel(const ice::io_buffer_ptr &buf,
 
 template <class NextLayer>
 bool datagram_client<NextLayer>::datagram_received(
-    io_buffer_ptr &buffer, const ice::endpoint &endpoint) {
+    io_buffer_ptr &buffer, const asioice::endpoint &endpoint) {
     if (!buffer || buffer->size() < 4 || endpoint != this->_server)
         return false;
     uint8_t first_byte = *buffer->begin();
@@ -907,12 +907,12 @@ bool datagram_client<NextLayer>::datagram_received(
         return true;
     } else if (first_byte <= 3) {
         // STUN message
-        if (buffer->size() < ice::stun::HEADER_SIZE) {
+        if (buffer->size() < asioice::stun::HEADER_SIZE) {
             // ignore
             return true;
         }
         auto cls =
-            ice::stun::message::get_class(buffer->data(), buffer->size());
+            asioice::stun::message::get_class(buffer->data(), buffer->size());
         if (cls == stun::class_t::STUN_CLASS_RESP_SUCCESS ||
             cls == stun::class_t::STUN_CLASS_RESP_ERROR) {
             dispatch_stun_response(this->_transactions, endpoint,
@@ -944,4 +944,4 @@ bool datagram_client<NextLayer>::datagram_received(
     return true;
 }
 
-} // namespace ice::turn::impl
+} // namespace asioice::turn::impl

@@ -8,7 +8,7 @@
 #include <limits>
 #include <utility>
 
-namespace ice {
+namespace asioice {
 
 struct io_buffer;
 struct io_buffer_pool;
@@ -396,4 +396,4 @@ struct io_buffer_ptr {
     io_buffer *_buffer{nullptr};
 };
 
-} // namespace ice
+} // namespace asioice

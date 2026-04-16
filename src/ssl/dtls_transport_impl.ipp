@@ -1,4 +1,4 @@
-namespace ice::ssl::impl {
+namespace asioice::ssl::impl {
 
 template <class NextLayer> struct dtls_impl<NextLayer>::send_op {
     template <class ConstBufferSequence>
@@ -38,7 +38,7 @@ template <class NextLayer> struct dtls_impl<NextLayer>::send_op {
     }
 
   private:
-    ice::buffer_wrapper _buf_seq;
+    asioice::buffer_wrapper _buf_seq;
     dtls_impl<NextLayer> *_impl;
     bool _first_call = true;
     int _ret = 0;
@@ -177,7 +177,7 @@ template <class NextLayer> struct dtls_impl<NextLayer>::shutdown_op {
 
 template <class NextLayer>
 template <class ConstBufferSequence>
-ice::task<std::tuple<std::error_code, std::size_t>>
+asioice::task<std::tuple<std::error_code, std::size_t>>
 dtls_impl<NextLayer>::async_send(const ConstBufferSequence &buf, auto... self) {
     return this->perform(dtls_impl<NextLayer>::send_op{buf, this},
                          std::move(self)...);
@@ -185,7 +185,7 @@ dtls_impl<NextLayer>::async_send(const ConstBufferSequence &buf, auto... self) {
 
 template <class NextLayer>
 template <class MutableBufferSequence>
-ice::task<std::tuple<std::error_code, std::size_t>>
+asioice::task<std::tuple<std::error_code, std::size_t>>
 dtls_impl<NextLayer>::async_receive(const MutableBufferSequence &buf_seq,
                                     auto... self) {
     net::mutable_buffer buf = *net::buffer_sequence_begin(buf_seq);
@@ -231,11 +231,11 @@ template <class NextLayer> void dtls_impl<NextLayer>::handle_timeout() {
 }
 
 template <class NextLayer>
-ice::task<void> dtls_impl<NextLayer>::timeout_handler() {
+asioice::task<void> dtls_impl<NextLayer>::timeout_handler() {
     if (this->_handing_timeout || this->_closed)
         co_return;
     this->_handing_timeout = true;
-    ice::utils::scope_guard on_exit(
+    asioice::utils::scope_guard on_exit(
         [this]() noexcept { this->_handing_timeout = false; });
     net::steady_timer timer{this->context()};
     while (true) {
@@ -264,7 +264,7 @@ ice::task<void> dtls_impl<NextLayer>::timeout_handler() {
 
 template <class NextLayer>
 template <OpenSSLOperation Op>
-ice::task<std::tuple<std::error_code, std::size_t>>
+asioice::task<std::tuple<std::error_code, std::size_t>>
 dtls_impl<NextLayer>::perform(Op op, auto... self) {
     auto ssl_lk = co_await this->_ssl_mutex.lock();
     assert(this->_bio.out.empty());
@@ -355,7 +355,7 @@ dtls_impl<NextLayer>::perform(Op op, auto... self) {
 
 template <class NextLayer>
 bool dtls_impl<NextLayer>::datagram_received(io_buffer_ptr &buffer,
-                                             const ice::endpoint &endpoint) {
+                                             const asioice::endpoint &endpoint) {
     if (!buffer || endpoint != this->_remote || buffer->size() < 1)
         return false;
     uint8_t first_b = *buffer->begin();
@@ -372,4 +372,4 @@ bool dtls_impl<NextLayer>::datagram_received(io_buffer_ptr &buffer,
     return true;
 }
 
-} // namespace ice::ssl::impl
+} // namespace asioice::ssl::impl

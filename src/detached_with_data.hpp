@@ -3,7 +3,7 @@
 #include <stdexec/execution.hpp>
 #include <exec/start_detached.hpp>
 
-namespace ice::utils {
+namespace asioice::utils {
 
 template <stdexec::sender S, class... Data>
 inline void detached_with_data(S &&s, Data... data) {
@@ -14,4 +14,4 @@ inline void detached_with_data(S &&s, Data... data) {
         }));
 }
 
-} // namespace ice::utils
+} // namespace asioice::utils

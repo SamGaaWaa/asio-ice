@@ -2,7 +2,7 @@
 
 #include <stdexec/execution.hpp>
 
-namespace ice::utils {
+namespace asioice::utils {
 
 inline auto ignore() noexcept {
     return stdexec::then([](auto &&...) {});
@@ -12,4 +12,4 @@ template <stdexec::sender S> inline auto ignore(S &&s) noexcept {
     return stdexec::then(std::forward<S>(s), [](auto &&...) {});
 }
 
-} // namespace ice::utils
+} // namespace asioice::utils

@@ -44,7 +44,7 @@
 #include <string>
 #include <utility>
 
-namespace ice {
+namespace asioice {
 
 namespace base64 {
 
@@ -203,6 +203,6 @@ std::string encode(void const *src, std::size_t len) {
 
 } // namespace base64
 
-} // namespace ice
+} // namespace asioice
 
 #endif

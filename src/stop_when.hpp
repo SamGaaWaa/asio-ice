@@ -3,7 +3,7 @@
 #include <exec/when_any.hpp>
 #include <stdexec/execution.hpp>
 
-namespace ice::utils {
+namespace asioice::utils {
 
 template <stdexec::sender Sender, stdexec::sender... Trigger>
 constexpr stdexec::sender auto stop_when(Sender &&snd, Trigger &&...trigger) {
@@ -29,4 +29,4 @@ constexpr stdexec::sender auto stop_when(Sender &&snd, Trigger &&...trigger) {
            stdexec::stopped_as_optional();
 }
 
-} // namespace ice::utils
+} // namespace asioice::utils
