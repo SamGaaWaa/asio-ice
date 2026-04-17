@@ -94,6 +94,10 @@ struct message {
     struct error_code {
         uint16_t code;
         std::string reason;
+
+        static std::optional<error_code> parse(const void *data,
+                                               size_t len) noexcept;
+        int write_to(void *data, size_t len) const noexcept;
     };
 
     struct integrity {

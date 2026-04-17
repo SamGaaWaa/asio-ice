@@ -725,7 +725,7 @@ datagram_client<NextLayer>::channel_bind(net::ip::udp::endpoint peer,
         }
         co_return false;
     }
-    uint8_t channel = 0;
+    uint16_t channel = 0;
     if (auto it = this->_peer_to_channel.find(peer);
         it != this->_peer_to_channel.end()) {
         // refresh

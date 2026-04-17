@@ -169,32 +169,65 @@ struct address_family_t {
  * |      Reason Phrase (variable)                               ...
  * +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
  */
-struct value_error_code_t {
-#ifdef __ICE_LITTLE_ENDIAN__
-    uint16_t reserved{0};
-    uint8_t code_class : 3 {0};
-    uint8_t zero : 5 {0};
-    uint8_t code_number{0};
-#else
-    uint16_t reserved{0};
-    uint8_t zero : 5 {0};
-    uint8_t code_class : 3 {0};
-    uint8_t code_number{0};
-#endif
+// struct value_error_code_t {
+// #ifdef __ICE_LITTLE_ENDIAN__
+//     uint16_t reserved{0};
+//     uint8_t code_class : 3 {0};
+//     uint8_t zero : 5 {0};
+//     uint8_t code_number{0};
+// #else
+//     uint16_t reserved{0};
+//     uint8_t zero : 5 {0};
+//     uint8_t code_class : 3 {0};
+//     uint8_t code_number{0};
+// #endif
 
-    const char *reason() const noexcept {
-        return reinterpret_cast<const char *>(this) + 4;
-    }
+//     const char *reason() const noexcept {
+//         return reinterpret_cast<const char *>(this) + 4;
+//     }
 
-    char *reason() noexcept { return reinterpret_cast<char *>(this) + 4; }
+//     char *reason() noexcept { return reinterpret_cast<char *>(this) + 4; }
 
-    char operator[](size_t i) const noexcept { return reason()[i]; }
+//     char operator[](size_t i) const noexcept { return reason()[i]; }
 
-    char &operator[](size_t i) noexcept { return reason()[i]; }
-};
+//     char &operator[](size_t i) noexcept { return reason()[i]; }
+// };
 
-static_assert(sizeof(value_error_code_t) == 4,
-              "value_error_code_t size must be 4 bytes");
+// static_assert(sizeof(value_error_code_t) == 4,
+//               "value_error_code_t size must be 4 bytes");
+
+std::optional<struct message::error_code>
+message::error_code::parse(const void *data, size_t len) noexcept {
+    if (len < 4)
+        return {};
+    if (len > 4 + 762)
+        return {};
+    uint32_t host = binary::read_big<uint32_t>(data);
+    uint16_t number = host & 0b11111111;
+    uint16_t cls = (host >> 8) & 0b111;
+
+    struct message::error_code res;
+    res.code = cls * 100 + number;
+    res.reason = std::string_view{(const char *)data + 4, len - 4};
+    return res;
+}
+
+int message::error_code::write_to(void *data, size_t len) const noexcept {
+    if (len < this->reason.size() + 4)
+        return -1;
+    auto r = std::div(this->code, 100);
+    uint16_t cls = r.quot & 0x07;
+    uint16_t number = r.rem & 0xff;
+
+    uint32_t res = 0;
+    res |= number;
+    res |= cls << 8;
+    binary::write_big<uint32_t>(data, res);
+
+    memcpy((char *)data + 4, this->reason.data(), this->reason.size());
+
+    return 4 + this->reason.size();
+}
 
 #define STUN_ERROR_INTERNAL_VALIDATION_FAILED 599
 
@@ -225,13 +258,7 @@ static_assert(sizeof(value_channel_number_t) == 4,
  * +-+-+-+-+-+-+-+-+
  */
 struct value_even_port_t {
-#ifdef __ICE_BIG_ENDIAN__
-    uint8_t r : 1 {0};
-    uint8_t reserved : 7 {0};
-#else
-    uint8_t reserved : 7 {0};
-    uint8_t r : 1 {0};
-#endif
+    uint8_t r;
 };
 
 static_assert(sizeof(value_even_port_t) == 1,
@@ -696,17 +723,9 @@ bool message::parse(const void *data, std::size_t buf_size,
             break;
         }
         case attr_type_t::STUN_ATTR_ERROR_CODE: {
-            if (attr_len < sizeof(value_error_code_t))
+            this->error_code = error_code::parse(attr.value(), attr_len);
+            if (!this->error_code)
                 return false;
-            this->error_code.emplace();
-            auto *ec =
-                reinterpret_cast<const value_error_code_t *>(attr.value());
-            this->error_code->code = ec->code_class * 100 + ec->code_number;
-            if (attr_len > sizeof(value_error_code_t) + 762)
-                return false;
-            if (attr_len > sizeof(value_error_code_t))
-                this->error_code->reason = std::string_view{
-                    ec->reason(), static_cast<std::size_t>(attr_len - 4)};
             break;
         }
         case attr_type_t::STUN_ATTR_UNKNOWN_ATTRIBUTES: {
@@ -940,8 +959,6 @@ bool message::parse(const void *data, std::size_t buf_size,
                 return false;
             const value_even_port_t *e =
                 reinterpret_cast<const value_even_port_t *>(attr.value());
-            if (e->reserved != 0)
-                return false;
             this->even_port = e->r & 0x80;
             break;
         }
@@ -1081,20 +1098,12 @@ int message::write_to(void *buf, size_t length) const noexcept {
     if (this->error_code) {
         if (iter == end)
             goto overflow;
-        uint16_t attr_size =
-            sizeof(value_error_code_t) + this->error_code->reason.size();
+        uint16_t attr_size = 4 + this->error_code->reason.size();
         if (iter->value() + attr_size > buf_end)
             goto overflow;
         iter->type = binary::hton<uint16_t>(attr_type_t::STUN_ATTR_ERROR_CODE);
         iter->length = binary::hton<uint16_t>(attr_size);
-
-        value_error_code_t *ec =
-            reinterpret_cast<value_error_code_t *>(iter->value());
-        ec->reserved = 0;
-        auto r = std::div(this->error_code->code, 100);
-        ec->code_class = r.quot & 0x07;
-        ec->code_number = r.rem;
-        std::ranges::copy(this->error_code->reason, ec->reason());
+        this->error_code->write_to(iter->value(), buf_end - iter->value());
         ++iter;
     }
 
@@ -1329,7 +1338,8 @@ int message::write_to(void *buf, size_t length) const noexcept {
         iter->length = binary::hton<uint16_t>(sizeof(value_even_port_t));
 
         auto *ep = reinterpret_cast<value_even_port_t *>(iter->value());
-        // TODO
+        ep->r = 0x80;
+        ++iter;
     }
 
     if (this->requested_transport) {
@@ -1578,8 +1588,7 @@ std::size_t message::serialized_size() const noexcept {
 
     std::size_t total = sizeof(header_t);
     if (this->error_code) {
-        total += align_size(4 + sizeof(value_error_code_t) +
-                            this->error_code->reason.size());
+        total += align_size(4 + 4 + this->error_code->reason.size());
     }
 
     if (this->mapped_address) {
