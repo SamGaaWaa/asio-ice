@@ -169,33 +169,6 @@ struct address_family_t {
  * |      Reason Phrase (variable)                               ...
  * +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
  */
-// struct value_error_code_t {
-// #ifdef __ICE_LITTLE_ENDIAN__
-//     uint16_t reserved{0};
-//     uint8_t code_class : 3 {0};
-//     uint8_t zero : 5 {0};
-//     uint8_t code_number{0};
-// #else
-//     uint16_t reserved{0};
-//     uint8_t zero : 5 {0};
-//     uint8_t code_class : 3 {0};
-//     uint8_t code_number{0};
-// #endif
-
-//     const char *reason() const noexcept {
-//         return reinterpret_cast<const char *>(this) + 4;
-//     }
-
-//     char *reason() noexcept { return reinterpret_cast<char *>(this) + 4; }
-
-//     char operator[](size_t i) const noexcept { return reason()[i]; }
-
-//     char &operator[](size_t i) noexcept { return reason()[i]; }
-// };
-
-// static_assert(sizeof(value_error_code_t) == 4,
-//               "value_error_code_t size must be 4 bytes");
-
 std::optional<struct message::error_code>
 message::error_code::parse(const void *data, size_t len) noexcept {
     if (len < 4)
