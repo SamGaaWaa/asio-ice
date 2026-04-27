@@ -3,7 +3,7 @@
 #include <iostream>
 
 void test_transport_compile() {
-    sctp::transport t;
+    exsctp::transport t;
 }
 
 int main() {

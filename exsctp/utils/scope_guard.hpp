@@ -2,7 +2,7 @@
 
 #include <type_traits>
 
-namespace sctp::utils {
+namespace exsctp::utils {
 template <class F>
     requires std::is_nothrow_invocable_v<F> &&
              std::is_nothrow_move_constructible_v<F>
@@ -25,4 +25,4 @@ struct scope_guard {
 };
 
 template <class F> scope_guard(F) -> scope_guard<F>;
-} // namespace sctp::utils
+} // namespace exsctp::utils

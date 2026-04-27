@@ -1,16 +1,20 @@
 #pragma once
 
-#include "./interface.hpp"
+#include "interface.hpp"
+#include "impl/transport_impl.hpp"
 
 #include <memory>
 
-namespace sctp {
+namespace exsctp {
 
 template <IOInterface Interface = any_io_interface>
 struct basic_transport {
+    using impl_type = impl::transport_impl<Interface>;
 
+private:
+    std::shared_ptr<impl_type> _impl;
 };
 
 using transport = basic_transport<>;
 
-} // namespace sctp
+} // namespace exsctp

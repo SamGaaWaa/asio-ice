@@ -2,6 +2,8 @@
 
 #include "./task.hpp"
 
+#include <exec/any_sender_of.hpp>
+
 #include <system_error>
 #include <cstddef>
 #include <cstdint>
@@ -9,13 +11,19 @@
 #include <concepts>
 #include <chrono>
 
-namespace sctp {
+namespace exsctp {
 
 struct any_io_interface {
-    virtual sctp::task<std::tuple<std::error_code, std::size_t>>
+    using completions_t        = stdexec::completion_signatures<stdexec::set_value_t()>;
+    using any_sender_t         = exec::any_sender<exec::any_receiver<completions_t>>;
+    using fwd_progress_query_t = stdexec::forward_progress_guarantee(
+      stdexec::get_forward_progress_guarantee_t) noexcept;
+    using scheduler_type = exec::any_scheduler<any_sender_t, exec::queries<fwd_progress_query_t>>;
+
+    virtual exsctp::task<std::tuple<std::error_code, std::size_t>>
     send(std::span<const uint8_t> data) = 0;
 
-    virtual sctp::task<std::tuple<std::error_code, std::size_t>>
+    virtual exsctp::task<std::tuple<std::error_code, std::size_t>>
     send(std::span<std::span<const uint8_t>> data_array) {
         std::size_t total = 0;
         for (const auto& data: data_array) {
@@ -27,10 +35,20 @@ struct any_io_interface {
         co_return std::make_tuple(std::error_code{}, total);
     }
 
-    virtual sctp::task<void> schedule_at(std::chrono::steady_clock::time_point) = 0;
-    virtual sctp::task<void> schedule_after(std::chrono::milliseconds ms) = 0;
-    virtual sctp::task<void> schedule_after(std::chrono::seconds s) {
+    virtual scheduler_type scheduler() const noexcept {
+        return scheduler_type{stdexec::inline_scheduler{}};
+    }
+
+    virtual exsctp::task<void> schedule_at(std::chrono::steady_clock::time_point) = 0;
+    virtual exsctp::task<void> schedule_after(std::chrono::milliseconds ms) = 0;
+    virtual exsctp::task<void> schedule_after(std::chrono::seconds s) {
         return schedule_after(std::chrono::duration_cast<std::chrono::milliseconds>(s));
+    }
+
+    template<class Duration>
+        requires (!std::same_as<Duration, std::chrono::milliseconds> && !std::same_as<Duration, std::chrono::seconds>)
+    auto schedule_after(Duration d) {
+        return schedule_after(std::chrono::duration_cast<std::chrono::milliseconds>(d));
     }
 
     virtual std::size_t mtu() const noexcept {
@@ -62,6 +80,7 @@ concept IOInterface = requires (
     std::chrono::milliseconds ms,
     std::chrono::seconds sec
 ) {
+    { const_interface->scheduler() } -> stdexec::scheduler;
     stdexec::connect(stdexec::starts_on(stdexec::inline_scheduler{}, interface->send(data)), __send_receiver{});
     stdexec::connect(stdexec::starts_on(stdexec::inline_scheduler{}, interface->send(data_array)), __send_receiver{});
     stdexec::connect(stdexec::starts_on(stdexec::inline_scheduler{}, interface->schedule_at(steady_time)), __timeout_receiver{});
@@ -72,4 +91,4 @@ concept IOInterface = requires (
 
 static_assert(IOInterface<any_io_interface>);
 
-} // namespace sctp
+} // namespace exsctp
