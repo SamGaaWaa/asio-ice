@@ -1,5 +1,6 @@
 #pragma once
 
+#include "config.hpp"
 #include "utils/async_mutex.hpp"
 #include "utils/async_queue.hpp"
 #include "utils/shared_promise.hpp"
@@ -39,7 +40,10 @@ struct transport_impl: std::enable_shared_from_this<transport_impl<Interface>> {
 
     void start() noexcept {
         start_t3_timer();
+        start_send_loop();
     }
+
+    void stop() noexcept;
 
     exsctp::inline_task<std::tuple<std::error_code, std::size_t>>
     send_message(const exsctp::message& msg, const exsctp::send_options& options);
@@ -79,9 +83,20 @@ private:
 
         ~send_item() {
             if (this->state() == sent)
-                impl._flight_size -= this->data.size();
+                impl._flight_size -= this->binary_size();
             impl._send_queue_total_bytes -= this->data.size() + sizeof(send_item);
             impl._on_send_queue_has_space.set_value();
+        }
+
+        uint32_t fsn() const noexcept {
+            return this->data.fsn.value();
+        }
+
+        std::size_t binary_size() const noexcept {
+            std::size_t res = this->data.size() + 16; // 16 bytes for DATA chunk header
+            if (res % 4 != 0)
+                res += 4 - (res % 4);
+            return res;
         }
 
         state_t state() const noexcept {
@@ -118,15 +133,17 @@ private:
             boost::intrusive::constant_time_size<false>>;
 
     exsctp::inline_task<void> bundled_send(const dcsctp::Data& data, bool delay = true);
-    exsctp::inline_task<void> send_task();
-    void send_new_data();
+    exsctp::inline_task<void> send_loop();
+    void start_send_loop();
+    void wakeup_send_loop() { _wakeup_send_loop.set_value(); }
     exsctp::inline_task<void> retransmission_loop();
     void start_t3_timer();
     void restart_t3_timer() noexcept { _on_sack.set_value(); }
     std::chrono::milliseconds calculate_rto() const noexcept;
-    void get_retransmissions(std::vector<std::shared_ptr<send_item>>& result) const;
+    void get_retransmissions(std::vector<std::shared_ptr<send_item>>& result, bool is_timeout = false) const;
 
     void handle_sack(std::span<const uint8_t> data);
+    void handle_cum_tsn_ack(uint32_t cum_tsn_ack) noexcept;
     void handle_gap_ack_blocks(dcsctp::TSN cum_tsn, std::span<const dcsctp::SackChunk::GapAckBlock>) noexcept;
     void adjust_rwnd(const dcsctp::SackChunk& sack) noexcept;
 
@@ -138,16 +155,19 @@ private:
 
     // sender side state
     utils::async_mutex _mutex{};
+    exsctp::async_queue<std::shared_ptr<send_item>> _ready_queue{};
     send_queue_type _send_queue{};
     fsn_set_type _fsn_to_item{};
+    uint32_t _max_sent_fsn{0};
     std::size_t _send_queue_total_bytes{0};
     std::size_t _flight_size{0};
     std::size_t _cwnd{0};
     std::size_t _a_rwnd{0};
     exsctp::shared_promise<void> _on_send_queue_has_space{};
     exsctp::shared_promise<void> _on_sack{};
-    bool _send_task_running{false};
-    exsctp::shared_promise<void> _stop_send_task{};
+    bool _send_loop_running{false};
+    exsctp::shared_promise<void> _wakeup_send_loop{};
+    exsctp::shared_promise<void> _stop_send_loop{};
     bool _retransmission_loop_running{false};
     exsctp::shared_promise<void> _stop_retransmission_loop{};
 };
