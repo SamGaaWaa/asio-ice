@@ -47,7 +47,8 @@ struct transaction
     };
 
     transaction(net::io_context &ctx, const stun::message &req,
-                const asioice::endpoint &stun_server, stun::message &resp) noexcept
+                const asioice::endpoint &stun_server,
+                stun::message &resp) noexcept
         : _ctx{ctx}, request{req}, server{stun_server}, response{resp},
           _timer{ctx} {}
 
@@ -77,7 +78,7 @@ struct transaction
         _max_retries = max_retries;
     }
 
-    bool is_retring() const noexcept { return _retring; }
+    bool is_retring() const noexcept { return !_stop_retry.empty(); }
 
     void stop_retring() noexcept { _stop_retry.set_value(); }
 
@@ -92,13 +93,6 @@ struct transaction
   private:
     template <class Transport>
     asioice::task<void> retry(Transport &transport) noexcept try {
-        if (_retring) {
-            ICE_IN_DEBUG { std::cerr << "Already retring\n"; }
-            co_return;
-        }
-        _retring = true;
-        utils::scope_guard on_exit([this]() noexcept { _retring = false; });
-
         boost::container::small_vector<std::byte, 1024> buf;
         std::chrono::milliseconds retry_rto{500};
 
@@ -147,7 +141,6 @@ struct transaction
     net::io_context &_ctx;
     net::steady_timer _timer;
     std::size_t _max_retries{7};
-    bool _retring{false};
     asioice::shared_promise<void> _stop_retry;
     asioice::shared_promise<state_t> _done;
     state_t _state{INIT};
@@ -189,8 +182,8 @@ struct basic_request_t {
     asioice::task<bool>
     operator()(Transport &transport, transaction_set &transactions,
                const stun::message &req, const asioice::endpoint &server,
-               stun::message &resp, asioice::endpoint &from, std::size_t retries,
-               auto... self) const noexcept {
+               stun::message &resp, asioice::endpoint &from,
+               std::size_t retries, auto... self) const noexcept {
         auto it = transactions.lower_bound(req.transaction_id);
         if (it != transactions.end() &&
             it->request.transaction_id == req.transaction_id) {

@@ -130,7 +130,6 @@ struct dtls_impl : asioice::datagram_receiver,
     receiver_list_t _receivers{};
     bool _closed{false};
     bool _peer_closed{false};
-    bool _handing_timeout{false};
     asioice::shared_promise<void> _timeout_handler_promise{};
 };
 

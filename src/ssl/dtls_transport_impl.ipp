@@ -217,7 +217,7 @@ auto dtls_impl<NextLayer>::async_shutdown(bool fast_shutdown, Args &&...self) {
 }
 
 template <class NextLayer> void dtls_impl<NextLayer>::handle_timeout() {
-    if (this->_handing_timeout || this->_closed)
+    if (!this->_timeout_handler_promise.empty() || this->_closed)
         return;
     ::timeval tv;
     if (!::DTLSv1_get_timeout(this->_ssl, &tv))
@@ -232,11 +232,8 @@ template <class NextLayer> void dtls_impl<NextLayer>::handle_timeout() {
 
 template <class NextLayer>
 asioice::task<void> dtls_impl<NextLayer>::timeout_handler() {
-    if (this->_handing_timeout || this->_closed)
+    if (this->_closed)
         co_return;
-    this->_handing_timeout = true;
-    asioice::utils::scope_guard on_exit(
-        [this]() noexcept { this->_handing_timeout = false; });
     net::steady_timer timer{this->context()};
     while (true) {
         ::timeval tv;
@@ -251,14 +248,9 @@ asioice::task<void> dtls_impl<NextLayer>::timeout_handler() {
         }
         if (timeout > std::chrono::milliseconds{1}) {
             timer.expires_after(timeout);
-            auto ec = co_await timer.async_wait(asio2exec::use_sender);
-            if (ec)
-                co_return;
+            co_await timer.async_wait(asio2exec::use_sender);
         }
-        auto [ec, n] = co_await this->perform(
-            dtls_impl<NextLayer>::retransmission_op{this});
-        if (ec)
-            co_return;
+        co_await this->perform(dtls_impl<NextLayer>::retransmission_op{this});
     }
 }
 
