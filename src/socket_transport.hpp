@@ -67,6 +67,11 @@ template <class Socket> struct datagram_transport {
                                     std::forward<Args>(args)...);
     }
 
+    template <class ConstBufferSequence, class... Args>
+    auto async_send(const ConstBufferSequence &buffers, Args &&...args) {
+        return _impl->async_send(buffers, std::forward<Args>(args)...);
+    }
+
     void add_receiver(datagram_receiver &receiver) noexcept {
         _impl->add_receiver(receiver);
     }

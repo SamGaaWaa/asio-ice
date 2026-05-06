@@ -17,6 +17,7 @@ namespace net = asio;
 #include <openssl/err.h>
 #include <openssl/ssl.h>
 
+#include "concepts.hpp"
 #include "asio2exec.hpp"
 #include "receiver.hpp"
 #include "scope_guard.hpp"
@@ -49,11 +50,10 @@ struct dtls_impl : asioice::datagram_receiver,
     using next_layer_type = NextLayer;
     enum handshake_type { server, client };
 
-    dtls_impl(std::shared_ptr<next_layer_type> transport,
-              const asioice::endpoint &remote, ::SSL *ssl)
+    dtls_impl(std::shared_ptr<next_layer_type> transport, ::SSL *ssl)
         : asioice::datagram_receiver{std::move(transport)},
           _next_layer{asioice::datagram_receiver::transport<next_layer_type>()},
-          _remote{remote}, _ssl{ssl} {
+          _ssl{ssl} {
         if (!_ssl)
             throw std::runtime_error{"ssl == nullptr"};
         auto b = _bio.new_bio();
@@ -84,28 +84,13 @@ struct dtls_impl : asioice::datagram_receiver,
 
     const auto &next_layer() const noexcept { return _next_layer; }
 
-    const auto &remote_endpoint() const noexcept { return _remote; }
-
     template <class ConstBufferSequence>
     asioice::task<std::tuple<std::error_code, std::size_t>>
     async_send(const ConstBufferSequence &buf, auto... self);
 
-    template <class ConstBufferSequence, class Endpoint, class... Args>
-    auto async_send_to(const ConstBufferSequence &buf, const Endpoint &ep,
-                       Args &&...self) {
-        return async_send(buf, std::forward<Args>(self)...);
-    }
-
     template <class MutableBufferSequence>
     asioice::task<std::tuple<std::error_code, std::size_t>>
     async_receive(const MutableBufferSequence &buf, auto... self);
-
-    template <class MutableBufferSequence, class Endpoint, class... Args>
-    auto async_receive_from(const MutableBufferSequence &buf, Endpoint &source,
-                            Args &&...self) {
-        source = _remote;
-        return async_receive(buf, std::forward<Args>(self)...);
-    }
 
     template <class... Args>
     auto async_handshake(handshake_type type, Args &&...self);
@@ -124,8 +109,8 @@ struct dtls_impl : asioice::datagram_receiver,
                            const asioice::endpoint &endpoint) override;
 
     template <OpenSSLOperation Op>
-    asioice::task<std::tuple<std::error_code, std::size_t>> perform(Op op,
-                                                                auto... self);
+    asioice::task<std::tuple<std::error_code, std::size_t>>
+    perform(Op op, auto... self);
 
     void handle_timeout();
     asioice::task<void> timeout_handler();
@@ -135,7 +120,6 @@ struct dtls_impl : asioice::datagram_receiver,
                                boost::intrusive::constant_time_size<false>>;
 
     next_layer_type &_next_layer;
-    asioice::endpoint _remote;
     std::vector<std::byte> _gather_buf{};
     std::deque<asioice::io_buffer_ptr> _recv_q{};
     std::size_t _max_recv_q_size{64};

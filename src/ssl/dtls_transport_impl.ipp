@@ -294,8 +294,7 @@ dtls_impl<NextLayer>::perform(Op op, auto... self) {
             }};
             while (!this->_bio.out.empty()) {
                 auto packet = this->_bio.out.peek();
-                auto [ec, n] = co_await this->next_layer().async_send_to(
-                    packet, this->remote_endpoint());
+                auto [ec, n] = co_await this->next_layer().async_send(packet);
                 if (ec) {
                     ICE_IN_DEBUG {
                         std::cout << "next_layer().async_send_to failed: "
@@ -356,9 +355,9 @@ dtls_impl<NextLayer>::perform(Op op, auto... self) {
 }
 
 template <class NextLayer>
-bool dtls_impl<NextLayer>::datagram_received(
-    io_buffer_ptr &buffer, const asioice::endpoint &endpoint) {
-    if (!buffer || endpoint != this->_remote || buffer->size() < 1)
+bool dtls_impl<NextLayer>::datagram_received(io_buffer_ptr &buffer,
+                                             const asioice::endpoint &) {
+    if (!buffer || buffer->size() < 1)
         return false;
     uint8_t first_b = *buffer->begin();
     if (first_b < 20 || first_b > 63)

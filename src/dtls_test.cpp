@@ -129,8 +129,8 @@ err:
     return 0;
 }
 
-asioice::task<void> server_coro(asioice::net::io_context &io_ctx, const char *crt,
-                            const char *key) {
+asioice::task<void> server_coro(asioice::net::io_context &io_ctx,
+                                const char *crt, const char *key) {
     using namespace asioice;
     using DtlsTransport =
         ssl::dtls_transport<datagram_transport<net::ip::udp::socket>>;
@@ -151,12 +151,14 @@ asioice::task<void> server_coro(asioice::net::io_context &io_ctx, const char *cr
     sock.open(net::ip::udp::v4());
     sock.bind(net::ip::udp::endpoint(net::ip::make_address("127.0.0.1"),
                                      SERVER_PORT));
-    auto sock_transport =
-        std::make_shared<datagram_transport<net::ip::udp::socket>>(
-            io_ctx, std::move(sock));
 
     net::ip::udp::endpoint client_ep{net::ip::make_address("127.0.0.1"),
                                      CLIENT_PORT};
+    sock.connect(client_ep);
+
+    auto sock_transport =
+        std::make_shared<datagram_transport<net::ip::udp::socket>>(
+            io_ctx, std::move(sock));
 
     SSL *ssl = SSL_new(ctx);
     if (!ssl) {
@@ -167,7 +169,7 @@ asioice::task<void> server_coro(asioice::net::io_context &io_ctx, const char *cr
 
     SSL_set_accept_state(ssl);
 
-    DtlsTransport dtls_server{sock_transport, client_ep, ssl};
+    DtlsTransport dtls_server{sock_transport, ssl};
     ssl_guard.dismiss();
 
     sock_transport->start();
@@ -232,6 +234,11 @@ int main() {
     sock.open(net::ip::udp::v4());
     sock.bind(net::ip::udp::endpoint(net::ip::make_address("127.0.0.1"),
                                      CLIENT_PORT));
+
+    net::ip::udp::endpoint server_ep{net::ip::make_address("127.0.0.1"),
+                                     SERVER_PORT};
+    sock.connect(server_ep);
+
     auto sock_transport =
         std::make_shared<datagram_transport<net::ip::udp::socket>>(
             io_ctx, std::move(sock));
@@ -243,9 +250,6 @@ int main() {
     }
     utils::scope_guard ctx_guard([&]() noexcept { SSL_CTX_free(ctx); });
 
-    net::ip::udp::endpoint server_ep{net::ip::make_address("127.0.0.1"),
-                                     SERVER_PORT};
-
     ssl = SSL_new(ctx);
     if (!ssl) {
         ERR_print_errors_fp(stderr);
@@ -255,7 +259,7 @@ int main() {
 
     SSL_set_connect_state(ssl);
 
-    DtlsTransport dtls_client{sock_transport, server_ep, ssl};
+    DtlsTransport dtls_client{sock_transport, ssl};
     ssl_guard.dismiss();
 
     auto work = [&]() -> asioice::task<void> {

@@ -72,6 +72,11 @@ struct datagram_transport_impl
         return _sock.async_send_to(buffers, destination, asio2exec::use_sender);
     }
 
+    template <class ConstBufferSequence, class... Args>
+    auto async_send(const ConstBufferSequence &buffers, Args &&...args) {
+        return _sock.async_send(buffers, asio2exec::use_sender);
+    }
+
     void add_receiver(datagram_receiver &receiver) noexcept;
 
     auto &receivers() noexcept { return _receivers; }

@@ -5,16 +5,15 @@
 
 namespace asioice::ssl {
 
-template <class NextLayer> class dtls_transport {
+template <asioice::AsyncPacketConnectionTransport NextLayer>
+class dtls_transport {
   public:
     using next_layer_type = NextLayer;
     using impl_type = asioice::ssl::impl::dtls_impl<next_layer_type>;
     using handshake_type = impl_type::handshake_type;
 
-    dtls_transport(std::shared_ptr<next_layer_type> transport,
-                   const asioice::endpoint &remote, ::SSL *ssl)
-        : _impl{
-              std::make_shared<impl_type>(std::move(transport), remote, ssl)} {}
+    dtls_transport(std::shared_ptr<next_layer_type> transport, ::SSL *ssl)
+        : _impl{std::make_shared<impl_type>(std::move(transport), ssl)} {}
 
     dtls_transport(const dtls_transport &) = delete;
 
@@ -48,33 +47,16 @@ template <class NextLayer> class dtls_transport {
 
     const auto &next_layer() const noexcept { return _impl->next_layer(); }
 
-    const auto &remote_endpoint() const noexcept {
-        return _impl->remote_endpoint();
-    }
-
     template <class ConstBufferSequence, class... Args>
     asioice::task<std::tuple<std::error_code, std::size_t>>
     async_send(const ConstBufferSequence &buf, Args &&...self) {
         return _impl->async_send(buf, std::forward<Args>(self)...);
     }
 
-    template <class ConstBufferSequence, class Endpoint, class... Args>
-    auto async_send_to(const ConstBufferSequence &buf, const Endpoint &ep,
-                       Args &&...self) {
-        return _impl->async_send_to(buf, ep, std::forward<Args>(self)...);
-    }
-
     template <class MutableBufferSequence, class... Args>
     asioice::task<std::tuple<std::error_code, std::size_t>>
     async_receive(const MutableBufferSequence &buf, Args &&...self) {
         return _impl->async_receive(buf, std::forward<Args>(self)...);
-    }
-
-    template <class MutableBufferSequence, class Endpoint, class... Args>
-    auto async_receive_from(const MutableBufferSequence &buf, Endpoint &source,
-                            Args &&...self) {
-        return _impl->async_receive_from(buf, source,
-                                         std::forward<Args>(self)...);
     }
 
     template <class... Args>
