@@ -53,12 +53,12 @@ static int __write(::BIO *b, const char *buf, int num) noexcept {
     if (self->last_io_failed()) {
         return -1;
     }
-    if (!self->out.empty()) {
+
+    if (!self->out.write({(const uint8_t *)buf, (std::size_t)num})) {
         ::BIO_set_retry_write(b);
         return -1;
     }
-    self->out.resize(num);
-    std::copy(buf, buf + num, (char *)self->out.data());
+
     return num;
 }
 
@@ -93,7 +93,7 @@ static long __ctrl(::BIO *b, int cmd, long arg1, void *arg2) noexcept {
     assert(self);
     switch (cmd) {
     case BIO_CTRL_RESET:
-        std::vector<uint8_t>{}.swap(self->out);
+        self->out.clear();
         self->in.reset();
         return 0;
     case BIO_CTRL_EOF:

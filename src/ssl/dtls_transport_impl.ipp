@@ -292,23 +292,25 @@ dtls_impl<NextLayer>::perform(Op op, auto... self) {
                 this->_bio.last_io_failed(true);
                 op();
             }};
-            auto [ec, n] = co_await this->next_layer().async_send_to(
-                net::const_buffer{this->_bio.out.data(), this->_bio.out.size()},
-                this->remote_endpoint());
-            if (ec) {
-                ICE_IN_DEBUG {
-                    std::cout
-                        << "next_layer().async_send_to failed: " << ec.message()
-                        << '\n';
+            while (!this->_bio.out.empty()) {
+                auto packet = this->_bio.out.peek();
+                auto [ec, n] = co_await this->next_layer().async_send_to(
+                    packet, this->remote_endpoint());
+                if (ec) {
+                    ICE_IN_DEBUG {
+                        std::cout << "next_layer().async_send_to failed: "
+                                  << ec.message() << '\n';
+                    }
+                    co_return std::make_tuple(ec, 0);
                 }
-                co_return std::make_tuple(ec, 0);
+                ICE_IN_DEBUG {
+                    if (n < packet.size())
+                        std::cout << "dtls_impl::async_send: short write drop "
+                                  << packet.size() - n << " bytes\n";
+                }
+                this->_bio.out.pop();
             }
             reset_guard.dismiss();
-            ICE_IN_DEBUG {
-                if (n < this->_bio.out.size())
-                    std::cout << "dtls_impl::async_send: short write drop "
-                              << this->_bio.out.size() - n << " bytes\n";
-            }
         }
         if (op.success())
             co_return std::make_tuple(std::error_code{},
@@ -354,8 +356,8 @@ dtls_impl<NextLayer>::perform(Op op, auto... self) {
 }
 
 template <class NextLayer>
-bool dtls_impl<NextLayer>::datagram_received(io_buffer_ptr &buffer,
-                                             const asioice::endpoint &endpoint) {
+bool dtls_impl<NextLayer>::datagram_received(
+    io_buffer_ptr &buffer, const asioice::endpoint &endpoint) {
     if (!buffer || endpoint != this->_remote || buffer->size() < 1)
         return false;
     uint8_t first_b = *buffer->begin();

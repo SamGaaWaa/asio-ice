@@ -1,6 +1,7 @@
 #pragma once
 
 #include "io_buffer2.hpp"
+#include "packet_queue.hpp"
 
 #include <openssl/bio.h>
 
@@ -11,7 +12,9 @@
 namespace asioice::ssl::impl {
 
 struct datagram_bio {
-    datagram_bio() noexcept = default;
+    datagram_bio(std::size_t max_send_buf_size = 16 * 1024) noexcept
+        : out{max_send_buf_size} {}
+
     datagram_bio(const datagram_bio &) = delete;
     datagram_bio(datagram_bio &&) = delete;
     datagram_bio &operator=(const datagram_bio &) = delete;
@@ -23,7 +26,7 @@ struct datagram_bio {
 
     bool last_io_failed() const noexcept { return _last_io_failed; }
 
-    std::vector<uint8_t> out{};
+    asioice::utils::packet_queue out{};
     asioice::io_buffer_ptr in{};
 
   private:
