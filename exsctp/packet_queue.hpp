@@ -67,6 +67,10 @@ struct packet_queue {
         _bytes = 0;
     }
 
+    std::size_t buffered_bytes() const noexcept { return _bytes; }
+
+    std::size_t max_buffered_bytes() const noexcept { return _max_bytes; }
+
   private:
     void write_frame(std::span<const uint8_t> data) noexcept {
         assert(data.size() <= std::numeric_limits<uint16_t>::max());

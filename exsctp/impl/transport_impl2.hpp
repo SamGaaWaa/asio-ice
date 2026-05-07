@@ -13,25 +13,28 @@
 #include "config.hpp"
 #include "utils/async_mutex.hpp"
 #include "utils/async_queue.hpp"
+#include "utils/if_else.hpp"
 #include "utils/shared_promise.hpp"
 #include "utils/detached_with_data.hpp"
 #include "utils/stop_when.hpp"
 #include "utils/scope_guard.hpp"
 #include "packet_queue.hpp"
+#include "message.hpp"
+
+#include <exec/repeat_until.hpp>
 
 namespace exsctp::impl {
 
 template <class Interface>
-struct transport_impl final: std::enable_shared_from_this<transport_impl<Interface>>,
-                        dcsctp::DcSctpSocketCallbacks {
-    transport_impl(
-        std::shared_ptr<Interface> interface,
-        const dcsctp::DcSctpOptions& options
-    ):
-        _interface{std::move(interface)},
-        _send_q(options.max_send_buffer_size)
-    {
-        _dcsctp = dcsctp::DcSctpSocketFactory::Create("exsctp", *this, nullptr, options);
+struct transport_impl final
+    : std::enable_shared_from_this<transport_impl<Interface>>,
+      dcsctp::DcSctpSocketCallbacks {
+    transport_impl(std::shared_ptr<Interface> interface,
+                   const dcsctp::DcSctpOptions &options)
+        : _interface{std::move(interface)},
+          _send_q(options.max_send_buffer_size) {
+        _dcsctp = dcsctp::DcSctpSocketFactory{}.Create("exsctp", *this, nullptr,
+                                                       options);
         if (!_interface || !_dcsctp)
             throw std::runtime_error("!_interface || !_dcsctp");
     }
@@ -43,25 +46,22 @@ struct transport_impl final: std::enable_shared_from_this<transport_impl<Interfa
 
     void start() {
         utils::detached_with_data(
-            stdexec::starts_on(
-                this->_interface->scheduler(),
-                this->timeout_handler()
-            ),
-            this->shared_from_this()
-        );
+            utils::stop_when(stdexec::starts_on(this->_interface->scheduler(),
+                                                this->timeout_handler()),
+                             _stop.get_future()),
+            this->shared_from_this());
         utils::detached_with_data(
-            stdexec::starts_on(
-                this->_interface->scheduler(),
-                this->packet_sender()
-            ),
-            this->shared_from_this()
-        );
+            utils::stop_when(stdexec::starts_on(this->_interface->scheduler(),
+                                                this->packet_sender()),
+                             _stop.get_future()),
+            this->shared_from_this());
     }
 
     void stop() noexcept {
         if (!_is_open)
             return;
         _is_open = false;
+        _stop.set_value();
         _notify_timeout_set_changed.set_value();
         _dcsctp.reset();
         assert(_timeout_set.empty());
@@ -73,48 +73,46 @@ struct transport_impl final: std::enable_shared_from_this<transport_impl<Interfa
         _dcsctp->ReceivePacket(data);
     }
 
-    auto Send(dcsctp::DcSctpMessage message, const dcsctp::SendOptions& send_options) {
-        
-    }
-private:
-    struct timeout_impl final:
-        dcsctp::Timeout,
-        boost::intrusive::set_base_hook<
-            boost::intrusive::link_mode<boost::intrusive::auto_unlink>
-        >
-    {
-        timeout_impl(transport_impl& t) noexcept:
-            _impl{&t}
-        {}
+    exsctp::inline_task<dcsctp::SendStatus>
+    send(exsctp::message msg, dcsctp::SendOptions send_options);
 
-        timeout_impl(const timeout_impl&) = delete;
-        timeout_impl(timeout_impl&&) = delete;
-        timeout_impl& operator=(const timeout_impl&) = delete;
-        timeout_impl& operator=(timeout_impl&&) = delete;
+    auto read() noexcept;
+
+  private:
+    struct timeout_impl final
+        : dcsctp::Timeout,
+          boost::intrusive::set_base_hook<
+              boost::intrusive::link_mode<boost::intrusive::auto_unlink>> {
+        timeout_impl(transport_impl &t) noexcept : _impl{&t} {}
+
+        timeout_impl(const timeout_impl &) = delete;
+        timeout_impl(timeout_impl &&) = delete;
+        timeout_impl &operator=(const timeout_impl &) = delete;
+        timeout_impl &operator=(timeout_impl &&) = delete;
 
         // Called to start time timeout, with the duration in milliseconds as
-        // `duration` and with the timeout identifier as `timeout_id`, which - if
-        // the timeout expires - shall be provided to `DcSctpSocket::HandleTimeout`.
+        // `duration` and with the timeout identifier as `timeout_id`, which -
+        // if the timeout expires - shall be provided to
+        // `DcSctpSocket::HandleTimeout`.
         //
-        // `Start` and `Stop` will always be called in pairs. In other words will
-        // ´Start` never be called twice, without a call to `Stop` in between.
-        void Start(dcsctp::DurationMs duration, dcsctp::TimeoutID timeout_id) override;
+        // `Start` and `Stop` will always be called in pairs. In other words
+        // will ´Start` never be called twice, without a call to `Stop` in
+        // between.
+        void Start(dcsctp::DurationMs duration,
+                   dcsctp::TimeoutID timeout_id) override;
 
         // Called to stop the running timeout.
         //
-        // `Start` and `Stop` will always be called in pairs. In other words will
-        // ´Start` never be called twice, without a call to `Stop` in between.
+        // `Start` and `Stop` will always be called in pairs. In other words
+        // will ´Start` never be called twice, without a call to `Stop` in
+        // between.
         //
         // `Stop` will always be called prior to releasing this object.
         void Stop() override;
 
-        dcsctp::TimeoutID id() const noexcept {
-            return _id;
-        }
+        dcsctp::TimeoutID id() const noexcept { return _id; }
 
-        auto expiry() const noexcept {
-            return _expire_time;
-        }
+        auto expiry() const noexcept { return _expire_time; }
 
         struct key {
             using type = std::chrono::steady_clock::time_point;
@@ -122,36 +120,45 @@ private:
                 return t._expire_time;
             }
         };
-    private:
+
+      private:
         dcsctp::TimeoutID _id{};
-        std::chrono::steady_clock::time_point _expire_time{}; 
+        std::chrono::steady_clock::time_point _expire_time{};
         transport_impl *_impl;
     };
 
     using timeout_set_type = boost::intrusive::set<
         timeout_impl,
         boost::intrusive::key_of_value<typename timeout_impl::key>,
-        boost::intrusive::constant_time_size<false>
-    >;
+        boost::intrusive::constant_time_size<false>>;
 
     exsctp::task<void> timeout_handler();
     exsctp::task<void> packet_sender();
 
+    bool send_queue_buffered_high() const noexcept {
+        return _send_q.buffered_bytes() >=
+               (_send_q.max_buffered_bytes() * 3 / 4);
+    }
+
     bool _is_open{true};
     std::shared_ptr<Interface> _interface;
+    exsctp::shared_promise<void> _stop;
 
     timeout_set_type _timeout_set{};
     exsctp::shared_promise<void> _notify_timeout_set_changed{};
 
+    utils::async_mutex _send_mtx{};
     exsctp::packet_queue _send_q;
     exsctp::shared_promise<void> _notify_sender{};
-    exsctp::shared_promise<void> _notify_user{};
+    exsctp::shared_promise<void> _notify_send_queue_buffered_low{};
+    exsctp::shared_promise<void> _notify_total_buffered_amount_low{};
 
+    utils::async_mutex _read_mtx{};
     exsctp::shared_promise<void> _notify_reader{};
 
     std::unique_ptr<dcsctp::DcSctpSocketInterface> _dcsctp{};
 
-private:
+  private:
     // Called when the library wants the packet serialized as `data` to be sent.
     //
     // TODO(bugs.webrtc.org/12943): This method is deprecated, see
@@ -178,7 +185,11 @@ private:
     //
     // Note that it's NOT ALLOWED to call into this library from within this
     // callback.
-    dcsctp::TimeMs TimeMillis() override { return dcsctp::TimeMs(std::chrono::steady_clock::now().time_since_epoch() / std::chrono::milliseconds(1)); }
+    dcsctp::TimeMs TimeMillis() override {
+        return dcsctp::TimeMs(
+            std::chrono::steady_clock::now().time_since_epoch() /
+            std::chrono::milliseconds(1));
+    }
 
     // Called when the library needs a random number uniformly distributed
     // between `low` (inclusive) and `high` (exclusive). The random numbers used
@@ -201,7 +212,7 @@ private:
     // `DcSctpSocket::GetNextMessage()`.
     //
     // It is allowed to call into this library from within this callback.
-    void OnMessageReady() override;
+    void OnMessageReady() override { _notify_reader.set_one_value(); }
 
     // Triggered when an non-fatal error is reported by either this library or
     // from the other peer (by sending an ERROR command). These should be
@@ -217,7 +228,8 @@ private:
     // callback, unless reconnecting.
     //
     // It is allowed to call into this library from within this callback.
-    void OnAborted(dcsctp::ErrorKind error, std::string_view message) override {}
+    void OnAborted(dcsctp::ErrorKind error, std::string_view message) override {
+    }
 
     // Called when calling `Connect` succeeds, but also for incoming successful
     // connection attempts.
@@ -248,15 +260,22 @@ private:
     // Indicates that a stream reset request has been performed.
     //
     // It is allowed to call into this library from within this callback.
-    void
-    OnStreamsResetPerformed(std::span<const dcsctp::StreamID> outgoing_streams) override {}
+    void OnStreamsResetPerformed(
+        std::span<const dcsctp::StreamID> outgoing_streams) override {}
 
     // When a peer has reset some of its outgoing streams, this will be called.
     // An empty list indicates that all streams have been reset.
     //
     // It is allowed to call into this library from within this callback.
-    void
-    OnIncomingStreamsReset(std::span<const dcsctp::StreamID> incoming_streams) override {}
+    void OnIncomingStreamsReset(
+        std::span<const dcsctp::StreamID> incoming_streams) override {}
+
+    // Will be called when the total amount of data buffered (in the entire send
+    // buffer, for all streams) falls to or below the threshold specified in
+    // `DcSctpOptions::total_buffered_amount_low_threshold`.
+    void OnTotalBufferedAmountLow() override {
+        _notify_total_buffered_amount_low.set_value();
+    }
 };
 
 } // namespace exsctp::impl

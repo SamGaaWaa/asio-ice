@@ -3,7 +3,17 @@
 #include <iostream>
 
 void test_transport_compile() {
-    exsctp::transport t;
+    exsctp::transport t(std::shared_ptr<exsctp::any_io_interface>{nullptr}, {});
+
+    {
+        exsctp::message msg{0, 0, std::span<uint8_t>{}};
+        std::optional<std::tuple<dcsctp::SendStatus>> status =
+            stdexec::sync_wait(t.send(msg, {}));
+    }
+    {
+        std::optional<std::tuple<dcsctp::DcSctpMessage>> msg =
+            stdexec::sync_wait(t.read());
+    }
 }
 
 int main() {
