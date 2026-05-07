@@ -11,6 +11,7 @@ cmake .. \
         -DCMAKE_BUILD_TYPE=Debug \
  	-DCMAKE_C_COMPILER=clang-20 \
 	-DCMAKE_CXX_FLAGS="-stdlib=libc++ -O0 -g3 -fsanitize=address" \
-	-DCMAKE_CXX_COMPILER=clang++-20
+	-DCMAKE_CXX_COMPILER=clang++-20 \
+        -DCMAKE_EXE_LINKER_FLAGS="-L/usr/lib/llvm-20/lib -Wl,-rpath,/usr/lib/llvm-20/lib"
 make -j8
 popd

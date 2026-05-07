@@ -1,0 +1,3 @@
+[submodule "exsctp/dcsctp"]
+	path = exsctp/dcsctp
+	url = https://github.com/samgaawaa/dcsctp
