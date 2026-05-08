@@ -58,9 +58,10 @@ struct transport_impl final
     }
 
     void stop() noexcept {
-        if (!_is_open)
+        if (!_running)
             return;
-        _is_open = false;
+        _running = false;
+        close();
         _stop.set_value();
         _notify_timeout_set_changed.set_value();
         _dcsctp.reset();
@@ -77,6 +78,27 @@ struct transport_impl final
     send(exsctp::message msg, dcsctp::SendOptions send_options);
 
     auto read() noexcept;
+
+    bool connected() const noexcept {
+        return _dcsctp->state() == dcsctp::SocketState::kConnected;
+    }
+    auto connect() noexcept;
+
+    auto accept() noexcept;
+
+    bool closed() const noexcept {
+        return _dcsctp->state() == dcsctp::SocketState::kClosed;
+    }
+
+    // Gracefully shutdowns the socket and sends all outstanding data.
+    auto shutdown() noexcept;
+
+    // Closes the connection non-gracefully. Will send ABORT if the connection
+    // is not already closed.
+    void close() noexcept {
+        if (!closed())
+            _dcsctp->Close();
+    }
 
   private:
     struct timeout_impl final
@@ -140,21 +162,26 @@ struct transport_impl final
                (_send_q.max_buffered_bytes() * 3 / 4);
     }
 
-    bool _is_open{true};
+    bool _running{true};
     std::shared_ptr<Interface> _interface;
     exsctp::shared_promise<void> _stop;
 
     timeout_set_type _timeout_set{};
     exsctp::shared_promise<void> _notify_timeout_set_changed{};
 
+    // sending
     utils::async_mutex _send_mtx{};
     exsctp::packet_queue _send_q;
     exsctp::shared_promise<void> _notify_sender{};
     exsctp::shared_promise<void> _notify_send_queue_buffered_low{};
     exsctp::shared_promise<void> _notify_total_buffered_amount_low{};
 
+    // reading
     utils::async_mutex _read_mtx{};
     exsctp::shared_promise<void> _notify_reader{};
+
+    // state changed
+    exsctp::shared_promise<void> _on_state_changed{};
 
     std::unique_ptr<dcsctp::DcSctpSocketInterface> _dcsctp{};
 
@@ -229,19 +256,20 @@ struct transport_impl final
     //
     // It is allowed to call into this library from within this callback.
     void OnAborted(dcsctp::ErrorKind error, std::string_view message) override {
+        _on_state_changed.set_value();
     }
 
     // Called when calling `Connect` succeeds, but also for incoming successful
     // connection attempts.
     //
     // It is allowed to call into this library from within this callback.
-    void OnConnected() override {}
+    void OnConnected() override { _on_state_changed.set_value(); }
 
     // Called when the socket is closed in a controlled way. No other
     // callbacks will be done after this callback, unless reconnecting.
     //
     // It is allowed to call into this library from within this callback.
-    void OnClosed() override {}
+    void OnClosed() override { _on_state_changed.set_value(); }
 
     // On connection restarted (by peer). This is just a notification, and the
     // association is expected to work fine after this call, but there could

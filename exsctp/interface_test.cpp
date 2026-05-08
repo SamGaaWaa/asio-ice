@@ -14,6 +14,19 @@ void test_transport_compile() {
         std::optional<std::tuple<dcsctp::DcSctpMessage>> msg =
             stdexec::sync_wait(t.read());
     }
+    {
+        std::optional<std::tuple<bool>> connected =
+            stdexec::sync_wait(t.connect());
+    }
+    {
+        std::optional<std::tuple<bool>> connected =
+            stdexec::sync_wait(t.accept());
+    }
+    {
+        std::optional<std::tuple<bool>> closed =
+            stdexec::sync_wait(t.shutdown());
+    }
+    t.close();
 }
 
 int main() {

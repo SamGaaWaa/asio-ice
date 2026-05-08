@@ -27,7 +27,7 @@ void transport_impl<Interface>::timeout_impl::Stop() {
 
 template <class Interface>
 exsctp::task<void> transport_impl<Interface>::timeout_handler() {
-    while (this->_is_open) {
+    while (this->_running) {
         auto now = std::chrono::steady_clock::now();
         if (this->_timeout_set.empty())
             goto LONG_SLEEP;
@@ -40,14 +40,14 @@ exsctp::task<void> transport_impl<Interface>::timeout_handler() {
         }
         if (this->_timeout_set.empty())
             goto LONG_SLEEP;
-        if (!this->_is_open)
+        if (!this->_running)
             break;
         co_await utils::stop_when(
             this->_interface->schedule_at(this->_timeout_set.begin()->expiry()),
             this->_notify_timeout_set_changed.get_future());
         continue;
     LONG_SLEEP:
-        if (!this->_is_open)
+        if (!this->_running)
             break;
         co_await utils::stop_when(
             this->_interface->schedule_after(std::chrono::seconds(3600)),
@@ -57,7 +57,7 @@ exsctp::task<void> transport_impl<Interface>::timeout_handler() {
 
 template <class Interface>
 exsctp::task<void> transport_impl<Interface>::packet_sender() {
-    while (this->_is_open) {
+    while (this->_running) {
         if (this->_send_q.empty()) {
             co_await (this->_notify_sender.get_future() |
                       stdexec::continues_on(this->_interface->scheduler()));
@@ -152,6 +152,40 @@ template <class Interface> auto transport_impl<Interface>::read() noexcept {
            stdexec::let_value([work = std::move(work)](auto &lk) mutable {
                return std::move(work);
            });
+}
+
+template <class Interface> auto transport_impl<Interface>::connect() noexcept {
+    if (!this->connected())
+        this->_dcsctp->Connect();
+    return utils::if_else(
+        stdexec::just(this->connected()), [] { return stdexec::just(true); },
+        [this] {
+            return this->_on_state_changed.get_future() |
+                   stdexec::continues_on(this->_interface->scheduler()) |
+                   stdexec::then([this] { return this->connected(); });
+        });
+}
+
+template <class Interface> auto transport_impl<Interface>::accept() noexcept {
+    return utils::if_else(
+        stdexec::just(this->connected()), [] { return stdexec::just(true); },
+        [this] {
+            return this->_on_state_changed.get_future() |
+                   stdexec::continues_on(this->_interface->scheduler()) |
+                   stdexec::then([this] { return this->connected(); });
+        });
+}
+
+template <class Interface> auto transport_impl<Interface>::shutdown() noexcept {
+    if (!this->closed())
+        this->_dcsctp->Shutdown();
+    return utils::if_else(
+        stdexec::just(this->closed()), [] { return stdexec::just(true); },
+        [this] {
+            return this->_on_state_changed.get_future() |
+                   stdexec::continues_on(this->_interface->scheduler()) |
+                   stdexec::then([this] { return this->closed(); });
+        });
 }
 
 } // namespace exsctp::impl

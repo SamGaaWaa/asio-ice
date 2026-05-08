@@ -33,6 +33,10 @@ template <IOInterface Interface = any_io_interface> struct basic_transport {
 
     ~basic_transport() { stop(); }
 
+    void swap(basic_transport &other) noexcept {
+        std::exchange(_impl, other._impl);
+    }
+
     void start() { _impl->start(); }
 
     void stop() noexcept {
@@ -52,6 +56,20 @@ template <IOInterface Interface = any_io_interface> struct basic_transport {
     }
 
     auto read() noexcept { return _impl->read(); }
+
+    bool connected() const noexcept { return _impl->connected(); }
+    auto connect() noexcept { return _impl->connect(); }
+
+    auto accept() noexcept { return _impl->accept(); }
+
+    bool closed() const noexcept { return _impl->closed(); }
+
+    // Gracefully shutdowns the socket and sends all outstanding data.
+    auto shutdown() noexcept { return _impl->shutdown(); }
+
+    // Closes the connection non-gracefully. Will send ABORT if the connection
+    // is not already closed.
+    void close() noexcept { _impl->close(); }
 
   private:
     std::shared_ptr<impl_type> _impl;
