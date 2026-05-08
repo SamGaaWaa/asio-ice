@@ -87,7 +87,7 @@ target_compile_options(asioice_compile_flags INTERFACE
                        $<$<COMPILE_LANG_AND_ID:CXX,MSVC>:/Zc:__cplusplus /Zc:preprocessor /D_WIN32_WINNT=0x0601 /Zm200 /bigobj /W4 /wd4100 /wd4101 /wd4127 /wd4324 /wd4456 /wd4459>
                        )
 
-target_link_libraries(asioice PRIVATE ${OPENSSL_SSL_LIB} ${OPENSSL_CRYPTO_LIB} Boost::boost Boost::context asioice_compile_flags)
+target_link_libraries(asioice PRIVATE exsctp ${OPENSSL_SSL_LIB} ${OPENSSL_CRYPTO_LIB} Boost::boost Boost::context asioice_compile_flags)
 if(NOT ASIOICE_USE_BOOST_ASIO)
     target_include_directories(asioice PUBLIC ${STANDALONE_ASIO_DIR}/asio/include)
 endif()
@@ -102,7 +102,7 @@ target_link_libraries(asioice_test_flags INTERFACE ${OPENSSL_SSL_LIB} ${OPENSSL_
 if(NOT ASIOICE_USE_BOOST_ASIO)
     target_include_directories(asioice_test_flags INTERFACE ${STANDALONE_ASIO_DIR}/asio/include)
 endif()
-target_link_libraries(asioice_test_flags INTERFACE asioice asioice_compile_flags)
+target_link_libraries(asioice_test_flags INTERFACE asioice asioice_compile_flags exsctp)
 target_include_directories(asioice_test_flags INTERFACE ${STDEXEC_DIR})
 target_include_directories(asioice_test_flags INTERFACE ${CMAKE_CURRENT_SOURCE_DIR}/include)
 target_include_directories(asioice_test_flags INTERFACE ${CMAKE_CURRENT_SOURCE_DIR}/src)

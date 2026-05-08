@@ -8,7 +8,7 @@ set(CMAKE_CXX_STANDARD 23)
 
 set(Boost_DEBUG ON)
 set(Boost_USE_STATIC_LIBS ON)
-find_package(Boost 1.89 CONFIG REQUIRED COMPONENTS json context)
+find_package(Boost 1.89 CONFIG REQUIRED)
 if(Boost_FOUND)
     message(STATUS "Boost found")
 endif()

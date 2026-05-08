@@ -1,0 +1,75 @@
+#pragma once
+
+#include "config.hpp"
+#include "impl/sctp_impl.hpp"
+#include "concepts.hpp"
+
+namespace asioice::sctp {
+
+template <AsyncPacketConnectionTransport Layer> struct transport {
+    using next_layer_type = Layer;
+    using impl_type = asioice::sctp::impl::sctp_impl<next_layer_type>;
+
+    transport(std::shared_ptr<next_layer_type> next_layer,
+              exsctp::sctp_options options = {}) {
+        auto &ctx = next_layer->context();
+        _impl =
+            std::make_unique<impl_type>(ctx, std::move(next_layer), options);
+    }
+
+    transport(const transport &) = delete;
+    transport &operator=(const transport &) = delete;
+
+    transport(transport &&other) noexcept : _impl{std::move(other._impl)} {}
+
+    transport &operator=(transport &&other) noexcept {
+        if (&other != this) {
+            stop();
+            _impl = std::move(other._impl);
+        }
+        return *this;
+    }
+
+    ~transport() { stop(); }
+
+    void swap(transport &other) noexcept { std::swap(_impl, other._impl); }
+
+    const auto &context() const noexcept { return _impl->context(); }
+
+    auto &context() noexcept { return _impl->context(); }
+
+    void start() { _impl->start(); }
+
+    void stop() {
+        if (_impl) {
+            _impl->stop();
+            _impl = nullptr;
+        }
+    }
+
+    auto send(const exsctp::message &msg,
+              const exsctp::send_options &send_options) noexcept {
+        return _impl->send(msg, send_options);
+    }
+
+    auto read() noexcept { return _impl->read(); }
+
+    bool connected() const noexcept { return _impl->connected(); }
+    auto connect() noexcept { return _impl->connect(); }
+
+    auto accept() noexcept { return _impl->accept(); }
+
+    bool closed() const noexcept { return _impl->closed(); }
+
+    // Gracefully shutdowns the socket and sends all outstanding data.
+    auto shutdown() noexcept { return _impl->shutdown(); }
+
+    // Closes the connection non-gracefully. Will send ABORT if the connection
+    // is not already closed.
+    void close() noexcept { _impl->close(); }
+
+  private:
+    std::unique_ptr<impl_type> _impl{};
+};
+
+} // namespace asioice::sctp
