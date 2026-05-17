@@ -70,20 +70,16 @@ struct transport_impl final
         _notify_sender.set_value();
     }
 
-    auto& interface() noexcept {
-        return *_interface;
-    }
+    auto &interface() noexcept { return *_interface; }
 
-    const auto& interface() const noexcept {
-        return *_interface;
-    }
+    const auto &interface() const noexcept { return *_interface; }
 
     void dispatch_packet(std::span<const uint8_t> data) {
         _dcsctp->ReceivePacket(data);
     }
 
-    exsctp::inline_task<dcsctp::SendStatus>
-    send(exsctp::message msg, dcsctp::SendOptions send_options);
+    exsctp::inline_task<bool> send(exsctp::message msg,
+                                   dcsctp::SendOptions send_options);
 
     auto read() noexcept;
 

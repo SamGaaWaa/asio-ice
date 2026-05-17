@@ -17,6 +17,8 @@ namespace net = asio;
 #include <exec/start_detached.hpp>
 
 #include <iostream>
+#include <ranges>
+#include <algorithm>
 
 void ping_pong(size_t n) {
     using namespace asioice;
@@ -62,7 +64,25 @@ void ping_pong(size_t n) {
         std::cout << "Client connected\n";
 
         net::steady_timer timer{client.context()};
+        std::string data = "Hello exsctp.";
         for (size_t i = 0; i < n; ++i) {
+            exsctp::message msg{0, 0,
+                                std::span<const uint8_t>{
+                                    (const uint8_t *)data.data(), data.size()}};
+            bool ret = co_await client.send(msg, exsctp::send_options{});
+            if (!ret) {
+                std::cerr << "Client send failed\n";
+                co_return;
+            }
+            std::cout << "Client sent " << data.size() << " bytes\n";
+            dcsctp::DcSctpMessage echo = co_await client.read();
+            if (!std::ranges::equal(
+                    echo.payload(),
+                    std::span<const uint8_t>{(const uint8_t *)data.data(),
+                                             data.size()})) {
+                std::cerr << "Invalid message\n";
+                co_return;
+            }
             timer.expires_after(std::chrono::seconds(1));
             co_await timer.async_wait(asio2exec::use_sender);
         }
@@ -78,6 +98,14 @@ void ping_pong(size_t n) {
 
         net::steady_timer timer{server.context()};
         for (size_t i = 0; i < n; ++i) {
+            dcsctp::DcSctpMessage data = co_await server.read();
+            std::cout << "Server read " << data.payload().size() << " bytes\n";
+            exsctp::message msg{0, 0, data.payload()};
+            bool ret = co_await server.send(msg, exsctp::send_options{});
+            if (!ret) {
+                std::cerr << "Server send failed\n";
+                co_return;
+            }
             timer.expires_after(std::chrono::seconds(1));
             co_await timer.async_wait(asio2exec::use_sender);
         }

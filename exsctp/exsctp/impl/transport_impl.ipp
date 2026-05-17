@@ -104,7 +104,7 @@ uint32_t transport_impl<Interface>::GetRandomInt(uint32_t low, uint32_t high) {
 }
 
 template <class Interface>
-exsctp::inline_task<dcsctp::SendStatus>
+exsctp::inline_task<bool>
 transport_impl<Interface>::send(exsctp::message msg,
                                 dcsctp::SendOptions send_options) {
     auto lk = co_await this->_send_mtx.lock();
@@ -122,7 +122,7 @@ transport_impl<Interface>::send(exsctp::message msg,
                       stdexec::continues_on(this->_interface->scheduler()));
             continue;
         }
-        co_return ret;
+        co_return ret == dcsctp::SendStatus::kSuccess;
     }
 }
 
