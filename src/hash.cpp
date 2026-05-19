@@ -1,6 +1,7 @@
 #include "hash.hpp"
 
 #if defined(_WIN32)
+    #define NOMINMAX
     #include <windows.h>
     #include <bcrypt.h>
 #elif defined(__APPLE__)

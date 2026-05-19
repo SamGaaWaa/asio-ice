@@ -113,7 +113,7 @@ io_buffer io_buffer::make_shared(std::size_t capacity, const void *data,
     }
     io_buffer buf = make_shared(capacity);
     if (data && size > 0) {
-        std::memcpy(buf._shared->data + offset, data, size);
+        std::memcpy(buf._shared->data() + offset, data, size);
     }
     buf._offset = offset;
     buf._size = size;
@@ -195,7 +195,7 @@ io_buffer io_buffer::clone() const {
     buf._offset = _offset;
     buf._size = _size;
     if (_size > 0) {
-        std::memcpy(buf._shared->data + _offset, data(), _size);
+        std::memcpy(buf._shared->data() + _offset, data(), _size);
     }
     return buf;
 }
@@ -205,11 +205,11 @@ void io_buffer::clear() noexcept { _size = 0; }
 bool io_buffer::empty() const noexcept { return _size == 0; }
 
 std::uint8_t *io_buffer::buffer() noexcept {
-    return _type == buffer_type::raw ? _raw.data() : _shared->data;
+    return _type == buffer_type::raw ? _raw.data() : _shared->data();
 }
 
 const std::uint8_t *io_buffer::buffer() const noexcept {
-    return _type == buffer_type::raw ? _raw.data() : _shared->data;
+    return _type == buffer_type::raw ? _raw.data() : _shared->data();
 }
 
 std::size_t io_buffer::capacity() const noexcept {

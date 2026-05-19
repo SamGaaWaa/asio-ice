@@ -20,7 +20,14 @@ struct shared_block {
     std::size_t capacity;
     shared_block *next{nullptr};
     io_buffer_pool *pool{nullptr};
-    std::uint8_t data[];
+
+    std::uint8_t *data() noexcept {
+        return static_cast<std::uint8_t*>(static_cast<void*>(this)) + sizeof(shared_block);
+    }
+
+    const std::uint8_t *data() const noexcept {
+        return static_cast<const std::uint8_t*>(static_cast<const void*>(this)) + sizeof(shared_block);
+    }
 
     static shared_block *allocate(std::size_t capacity);
     static void destroy(shared_block *block) noexcept;
