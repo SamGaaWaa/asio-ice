@@ -480,6 +480,8 @@ template <class Layer> void agent_datagram_impl<Layer>::close() noexcept {
 
     // TODO: Should hold a shared_ptr to clear the callback
     this->_on_local_candidates.reset();
+
+    this->_on_data = nullptr;
 }
 
 template <class Layer>
