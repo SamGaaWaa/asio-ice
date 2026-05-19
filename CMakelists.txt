@@ -2,7 +2,19 @@ cmake_minimum_required(VERSION 3.22)
 
 project(asio-ice)
 
-option(ICE_TEST "Build test" ON)
+option(ASIOICE_TEST "Build test" ON)
+option(ASIOICE_USE_OPENSSL "Use OpenSSL" OFF)
+option(ASIOICE_ENABLE_DTLS "Enable DTLS" OFF)
+option(ASIOICE_ENABLE_SCTP_OVER_DTLS "Enable SCTP over DTLS" OFF)
+
+if(ASIOICE_ENABLE_SCTP_OVER_DTLS)
+    set(ASIOICE_ENABLE_DTLS ON)
+    set(ASIOICE_USE_OPENSSL ON)
+endif()
+
+if(ASIOICE_ENABLE_DTLS)
+    set(ASIOICE_USE_OPENSSL ON)
+endif()
 
 set(CMAKE_CXX_STANDARD 23)
 set(STANDALONE_ASIO_DIR "E:\\openSource\\asio")
@@ -12,22 +24,11 @@ set(ASIOICE_USE_BOOST_ASIO ON)
 # set(OPENSSL_DIR "E:\\openSource\\openssl-3.1.0\\x64")
 # set(OPENSSL_LIB_DIR ${OPENSSL_DIR}/lib)
 # set(OPENSSL_INCLUDE_DIR ${OPENSSL_DIR}/include)
+# set(OPENSSL_ROOT_DIR "E:\\openSource\\openssl-3.1.0\\x64" CACHE PATH "OpenSSL root directory")
 set(ENABLE_IO_URING OFF)
 
-find_library(
-    OPENSSL_SSL_LIB 
-    NAMES ssl
-    PATHS ${OPENSSL_LIB_DIR}
-)
-find_library(
-    OPENSSL_CRYPTO_LIB 
-    NAMES crypto
-    PATHS ${OPENSSL_LIB_DIR}
-)
-if(NOT OPENSSL_SSL_LIB OR NOT OPENSSL_CRYPTO_LIB)
-    message(FATAL_ERROR "Could not find OpenSSL libraries in ${OPENSSL_LIB_DIR}")
-else()
-    message(STATUS "Found OpenSSL.")
+if(ASIOICE_USE_OPENSSL)
+    find_package(OpenSSL 3 REQUIRED)
 endif()
 
 if(ASIOICE_USE_BOOST_ASIO)
@@ -59,7 +60,9 @@ endif()
 configure_file("${CMAKE_CURRENT_SOURCE_DIR}/include/config.hpp.in" "${CMAKE_CURRENT_SOURCE_DIR}/include/config.hpp")
 
 # add_subdirectory(cppmdns)
-add_subdirectory(exsctp)
+if(ASIOICE_ENABLE_SCTP_OVER_DTLS)
+    add_subdirectory(exsctp)
+endif()
 
 file(GLOB ICE_SRC_FILES 
     src/stun.cpp
@@ -87,33 +90,62 @@ target_compile_options(asioice_compile_flags INTERFACE
                        $<$<COMPILE_LANG_AND_ID:CXX,MSVC>:/Zc:__cplusplus /Zc:preprocessor /D_WIN32_WINNT=0x0601 /Zm200 /bigobj /W4 /wd4100 /wd4101 /wd4127 /wd4324 /wd4456 /wd4459>
                        )
 
-target_link_libraries(asioice PRIVATE exsctp ${OPENSSL_SSL_LIB} ${OPENSSL_CRYPTO_LIB} Boost::boost Boost::context asioice_compile_flags)
+target_link_libraries(asioice PRIVATE Boost::boost Boost::context asioice_compile_flags)
+if(ASIOICE_USE_OPENSSL)
+    target_link_libraries(asioice PRIVATE OpenSSL::SSL OpenSSL::Crypto)
+endif()
+if(ASIOICE_ENABLE_SCTP_OVER_DTLS)
+    target_link_libraries(asioice PRIVATE exsctp)
+endif()
+
 if(NOT ASIOICE_USE_BOOST_ASIO)
     target_include_directories(asioice PUBLIC ${STANDALONE_ASIO_DIR}/asio/include)
 endif()
 target_include_directories(asioice PUBLIC ${STDEXEC_DIR})
 target_include_directories(asioice PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)
 target_include_directories(asioice PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
-target_include_directories(asioice PRIVATE ${OPENSSL_INCLUDE_DIR})
 target_include_directories(asioice PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/third_party)
 
 add_library(asioice_test_flags INTERFACE)
-target_link_libraries(asioice_test_flags INTERFACE ${OPENSSL_SSL_LIB} ${OPENSSL_CRYPTO_LIB} Boost::boost Boost::context)
+target_link_libraries(asioice_test_flags INTERFACE Boost::boost Boost::context)
 if(NOT ASIOICE_USE_BOOST_ASIO)
     target_include_directories(asioice_test_flags INTERFACE ${STANDALONE_ASIO_DIR}/asio/include)
 endif()
-target_link_libraries(asioice_test_flags INTERFACE asioice asioice_compile_flags exsctp)
+target_link_libraries(asioice_test_flags INTERFACE asioice asioice_compile_flags)
 target_include_directories(asioice_test_flags INTERFACE ${STDEXEC_DIR})
 target_include_directories(asioice_test_flags INTERFACE ${CMAKE_CURRENT_SOURCE_DIR}/include)
 target_include_directories(asioice_test_flags INTERFACE ${CMAKE_CURRENT_SOURCE_DIR}/src)
-target_include_directories(asioice_test_flags INTERFACE ${OPENSSL_INCLUDE_DIR})
 target_include_directories(asioice_test_flags INTERFACE ${CMAKE_CURRENT_SOURCE_DIR}/third_party)
 
-file(GLOB TEST_SOURCES "src/*_test.cpp")
-if(ICE_TEST)
+if(ASIOICE_TEST)
+    file(GLOB TEST_SOURCES
+        src/boost_fiber_test.cpp
+        src/io_buffer_test.cpp
+        src/on_scope_empty_test.cpp
+        src/hash_test.cpp
+        src/stun_client_test.cpp
+        src/stun_test.cpp
+        src/io_buffer2_test.cpp
+        src/async_queue_test.cpp
+        src/candidate_test.cpp
+        src/ice_test.cpp
+        src/turn_client_test.cpp
+    )
+    if(ASIOICE_ENABLE_DTLS)
+        list(APPEND TEST_SOURCES src/dtls_test.cpp)
+    endif()
+    if(ASIOICE_ENABLE_SCTP_OVER_DTLS)
+        list(APPEND TEST_SOURCES src/sctp_test.cpp)
+    endif()
     foreach(TEST_FILE ${TEST_SOURCES})
         get_filename_component(EXECUTABLE_NAME ${TEST_FILE} NAME_WE)
         add_executable(${EXECUTABLE_NAME} ${TEST_FILE})
         target_link_libraries(${EXECUTABLE_NAME} PRIVATE asioice_test_flags)
     endforeach()
+    if(ASIOICE_ENABLE_DTLS)
+        target_link_libraries(dtls_test PRIVATE OpenSSL::SSL OpenSSL::Crypto)
+    endif()
+    if(ASIOICE_ENABLE_SCTP_OVER_DTLS)
+        target_link_libraries(sctp_test PRIVATE OpenSSL::SSL OpenSSL::Crypto exsctp)
+    endif()
 endif()

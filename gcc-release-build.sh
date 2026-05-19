@@ -4,13 +4,12 @@ pushd gcc-build
 
 cmake .. \
         -DBoost_DIR=/home/sam/opensource/boost_install/lib/cmake/Boost-1.89.0 \
-        -DSTDEXEC_DIR=/mnt/d/openSource/asio2exec/stdexec \
+        -DSTDEXEC_DIR=/home/sam/opensource/stdexec/include \
         -DASIOICE_USE_BOOST_ASIO=ON \
-        -DOPENSSL_LIB_DIR=/usr/lib/x86_64-linux-gnu/ \
-        -DOPENSSL_INCLUDE_DIR=/usr/include/ \
         -DCMAKE_BUILD_TYPE=Release \
  	-DCMAKE_C_COMPILER=gcc \
-	-DCMAKE_CXX_FLAGS="-O3 -fpermissive" \
-	-DCMAKE_CXX_COMPILER=g++
+	-DCMAKE_CXX_FLAGS="-O3" \
+	-DCMAKE_CXX_COMPILER=g++ \
+        -DASIOICE_ENABLE_SCTP_OVER_DTLS=ON
 make -j8
 popd
