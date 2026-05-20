@@ -41,7 +41,7 @@ endif()
 
 set(Boost_DEBUG ON)
 set(Boost_USE_STATIC_LIBS ON)
-find_package(Boost 1.89 CONFIG REQUIRED COMPONENTS json context)
+find_package(Boost 1.89 CONFIG REQUIRED)
 if(Boost_FOUND)
     message(STATUS "Boost found")
 endif()
@@ -71,11 +71,12 @@ file(GLOB ICE_SRC_FILES
     src/candidate.cpp
     src/hash.cpp
     src/candidate_pair.cpp
-    src/boost_context/context.cpp
-    src/ssl/datagram_bio.cpp
     src/string_utils.cpp
     src/io_buffer2.cpp
 )
+if(ASIOICE_ENABLE_DTLS)
+    list(APPEND ICE_SRC_FILES src/ssl/datagram_bio.cpp)
+endif()
 add_library(asioice STATIC ${ICE_SRC_FILES})
 
 if(ASIOICE_ENABLE_IO_URING)
@@ -90,10 +91,12 @@ target_compile_options(asioice_compile_flags INTERFACE
                        $<$<COMPILE_LANG_AND_ID:CXX,MSVC>:/Zc:__cplusplus /Zc:preprocessor /utf-8 /D_WIN32_WINNT=0x0601 /Zm200 /bigobj /W4 /wd4100 /wd4101 /wd4127 /wd4324 /wd4456 /wd4459>
                        )
 target_link_libraries(asioice_compile_flags INTERFACE
-                      $<$<PLATFORM_ID:Windows>:bcrypt>
+                      $<$<PLATFORM_ID:Windows>:bcrypt;ws2_32;iphlpapi>
                       )
-
-target_link_libraries(asioice PRIVATE Boost::boost Boost::context asioice_compile_flags)
+target_compile_options(asioice_compile_flags INTERFACE
+                       $<$<AND:$<COMPILE_LANG_AND_ID:CXX,GNU>,$<PLATFORM_ID:Windows>>:-Wa,-mbig-obj>
+                       )
+target_link_libraries(asioice PRIVATE Boost::boost asioice_compile_flags)
 if(ASIOICE_USE_OPENSSL)
     target_link_libraries(asioice PRIVATE OpenSSL::SSL OpenSSL::Crypto)
 endif()
@@ -110,7 +113,7 @@ target_include_directories(asioice PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
 target_include_directories(asioice PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/third_party)
 
 add_library(asioice_test_flags INTERFACE)
-target_link_libraries(asioice_test_flags INTERFACE Boost::boost Boost::context)
+target_link_libraries(asioice_test_flags INTERFACE Boost::boost)
 if(NOT ASIOICE_USE_BOOST_ASIO)
     target_include_directories(asioice_test_flags INTERFACE ${STANDALONE_ASIO_DIR}/asio/include)
 endif()

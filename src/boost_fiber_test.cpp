@@ -1,3 +1,6 @@
+#if 1
+int main() { return 0; }
+#else
 #include "boost_context/context.hpp"
 
 #include <iostream>
@@ -29,3 +32,4 @@ void test(int n) {
 }
 
 int main() { test(1000000); }
+#endif

@@ -30,6 +30,7 @@ struct async_mutex {
             if (_m) {
                 _m->_used = false;
                 _m->_waiters.set_one_value();
+                _m = nullptr;
             }
         }
 

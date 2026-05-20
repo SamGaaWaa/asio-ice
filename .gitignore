@@ -9,3 +9,4 @@ aioice_test
 msvc-build
 include/config.hpp
 out
+mingw-build
