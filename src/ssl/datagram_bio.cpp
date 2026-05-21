@@ -72,14 +72,15 @@ static int __read(::BIO *b, char *buf, int size) noexcept {
         ::BIO_set_retry_read(b);
         return -1;
     }
-    std::size_t nread = size > self->in->size() ? self->in->size() : size;
-    std::memcpy(buf, self->in->data(), nread);
+    asioice::io_buffer &input = self->in.peek();
+    std::size_t nread = size > input.size() ? input.size() : size;
+    std::memcpy(buf, input.data(), nread);
     ICE_IN_DEBUG {
-        if (nread < self->in->size())
+        if (nread < input.size())
             std::cout << "BIO_ice_datagram_method::read: drop "
-                      << self->in->size() - nread << " bytes\n";
+                      << input.size() - nread << " bytes\n";
     }
-    self->in.reset();
+    self->in.pop();
     return nread;
 }
 
@@ -94,7 +95,7 @@ static long __ctrl(::BIO *b, int cmd, long arg1, void *arg2) noexcept {
     switch (cmd) {
     case BIO_CTRL_RESET:
         self->out.clear();
-        self->in.reset();
+        self->in.clear();
         return 0;
     case BIO_CTRL_EOF:
         return 0;

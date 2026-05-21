@@ -267,10 +267,6 @@ dtls_impl<NextLayer>::perform(Op op, auto... self) {
         [&]() noexcept { assert(op.error() != SSL_ERROR_WANT_WRITE); });
     while (true) {
         this->handle_timeout();
-        if (this->_bio.in.empty() && !this->_recv_q.empty()) {
-            this->_bio.in = std::move(this->_recv_q.front());
-            this->_recv_q.pop_front();
-        }
         if (!ssl_lk)
             ssl_lk = co_await this->_ssl_mutex.lock();
         utils::scope_guard clear_out_guard(
@@ -327,21 +323,11 @@ dtls_impl<NextLayer>::perform(Op op, auto... self) {
         }
         this->_bio.out.clear();
         clear_out_guard.dismiss();
-        if (!this->_recv_q.empty()) {
-            this->_bio.in = std::move(this->_recv_q.front());
-            this->_recv_q.pop_front();
-            continue;
-        }
 
         ssl_lk.unlock();
         do {
-            co_await this->_recv_promise.get_future();
-        } while (this->_recv_q.empty());
-        if (!this->_bio.in.empty())
-            continue;
-        this->_bio.in = std::move(this->_recv_q.front());
-        this->_recv_q.pop_front();
-        continue;
+            co_await this->_bio.in.wait();
+        } while (this->_bio.in.empty());
     }
     std::unreachable();
 }
@@ -355,13 +341,7 @@ bool dtls_impl<NextLayer>::datagram_received(io_buffer_ptr &buffer,
     if (first_b < 20 || first_b > 63)
         return false;
     auto buf = std::move(buffer);
-    if (this->_recv_q.size() > this->_max_recv_q_size) {
-        ICE_IN_DEBUG { std::cout << "recv queue is full, ignore the packet\n"; }
-        return true;
-    }
-    this->_recv_q.emplace_back(std::move(buf));
-    if (this->_recv_q.size() == 1)
-        this->_recv_promise.set_one_value();
+    this->_bio.in.push(std::move(buf));
     return true;
 }
 

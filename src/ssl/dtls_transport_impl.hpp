@@ -121,9 +121,6 @@ struct dtls_impl : asioice::datagram_receiver,
 
     next_layer_type &_next_layer;
     std::vector<std::byte> _gather_buf{};
-    std::deque<asioice::io_buffer_ptr> _recv_q{};
-    std::size_t _max_recv_q_size{64};
-    asioice::shared_promise<void> _recv_promise{};
     datagram_bio _bio{};
     ::SSL *_ssl;
     utils::async_mutex _ssl_mutex{};
