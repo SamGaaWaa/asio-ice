@@ -12,8 +12,10 @@ class dtls_transport {
     using impl_type = asioice::ssl::impl::dtls_impl<next_layer_type>;
     using handshake_type = impl_type::handshake_type;
 
-    dtls_transport(std::shared_ptr<next_layer_type> transport, ::SSL *ssl)
-        : _impl{std::make_shared<impl_type>(std::move(transport), ssl)} {}
+    dtls_transport(std::shared_ptr<next_layer_type> transport,
+                   dtls_certificate cert)
+        : _impl{std::make_shared<impl_type>(std::move(transport),
+                                            std::move(cert))} {}
 
     dtls_transport(const dtls_transport &) = delete;
 
@@ -68,6 +70,18 @@ class dtls_transport {
     auto async_shutdown(bool fast_shutdown, Args &&...self) {
         return _impl->async_shutdown(fast_shutdown,
                                      std::forward<Args>(self)...);
+    }
+
+    std::string get_remote_fingerprint_sha256() const {
+        return _impl->get_remote_fingerprint_sha256();
+    }
+
+    std::optional<srtp_key_material> export_srtp_key_material() {
+        return _impl->export_srtp_key_material();
+    }
+
+    void set_expected_remote_fingerprint(std::string fp) noexcept {
+        _impl->set_expected_remote_fingerprint(std::move(fp));
     }
 
   private:

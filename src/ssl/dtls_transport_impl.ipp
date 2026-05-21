@@ -325,9 +325,9 @@ dtls_impl<NextLayer>::perform(Op op, auto... self) {
         clear_out_guard.dismiss();
 
         ssl_lk.unlock();
-        do {
+        while (this->_bio.in.empty()) {
             co_await this->_bio.in.wait();
-        } while (this->_bio.in.empty());
+        }
     }
     std::unreachable();
 }
@@ -343,6 +343,119 @@ bool dtls_impl<NextLayer>::datagram_received(io_buffer_ptr &buffer,
     auto buf = std::move(buffer);
     this->_bio.in.push(std::move(buf));
     return true;
+}
+
+template <class NextLayer>
+int dtls_impl<NextLayer>::verify_callback(int preverify_ok,
+                                          X509_STORE_CTX *ctx) {
+    ::SSL *ssl = static_cast<::SSL *>(
+        X509_STORE_CTX_get_ex_data(ctx, SSL_get_ex_data_X509_STORE_CTX_idx()));
+    auto *self = static_cast<dtls_impl *>(::SSL_get_ex_data(ssl, 0));
+    if (!self || self->_expected_remote_fingerprint.empty())
+        return preverify_ok;
+
+    X509 *cert = X509_STORE_CTX_get_current_cert(ctx);
+    if (!cert)
+        return 0;
+
+    unsigned char md[EVP_MAX_MD_SIZE];
+    unsigned int n;
+    if (!::X509_digest(cert, ::EVP_sha256(), md, &n))
+        return 0;
+
+    std::ostringstream oss;
+    for (unsigned int i = 0; i < n; ++i) {
+        if (i != 0)
+            oss << ":";
+        oss << std::hex << std::uppercase << std::setfill('0') << std::setw(2)
+            << static_cast<int>(md[i]);
+    }
+    std::string computed = std::move(oss).str();
+    const std::string &expected = self->_expected_remote_fingerprint;
+    return (computed == expected) ? 1 : 0;
+}
+
+template <class NextLayer>
+void dtls_impl<NextLayer>::set_expected_remote_fingerprint(
+    std::string fingerprint_sha256) noexcept {
+    _expected_remote_fingerprint = fingerprint_sha256;
+    std::transform(_expected_remote_fingerprint.begin(),
+                   _expected_remote_fingerprint.end(),
+                   _expected_remote_fingerprint.begin(),
+                   [](unsigned char c) { return std::toupper(c); });
+}
+
+template <class NextLayer>
+std::string dtls_impl<NextLayer>::get_remote_fingerprint_sha256() const {
+    ::X509 *peer_cert = ::SSL_get_peer_certificate(_ssl);
+    if (!peer_cert)
+        return "";
+    unsigned char md[EVP_MAX_MD_SIZE];
+    unsigned int n;
+    bool ok = ::X509_digest(peer_cert, ::EVP_sha256(), md, &n);
+    ::X509_free(peer_cert);
+    if (!ok)
+        return "";
+    std::ostringstream oss;
+    for (unsigned int i = 0; i < n; ++i) {
+        if (i != 0)
+            oss << ":";
+        oss << std::hex << std::uppercase << std::setfill('0') << std::setw(2)
+            << static_cast<int>(md[i]);
+    }
+    return std::move(oss).str();
+}
+
+template <class NextLayer>
+std::optional<srtp_key_material>
+dtls_impl<NextLayer>::export_srtp_key_material() {
+    srtp_key_material keys;
+
+    ::SRTP_PROTECTION_PROFILE *profile = ::SSL_get_selected_srtp_profile(_ssl);
+    if (!profile)
+        return {};
+
+    std::string profile_name(profile->name);
+    if (profile_name == "SRTP_AES128_CM_SHA1_80")
+        keys.profile = srtp_protection_profile::srtp_aes128_cm_sha1_80;
+    else if (profile_name == "SRTP_AES128_CM_SHA1_32")
+        keys.profile = srtp_protection_profile::srtp_aes128_cm_sha1_32;
+    else if (profile_name == "SRTP_AEAD_AES_128_GCM")
+        keys.profile = srtp_protection_profile::srtp_aead_aes_128_gcm;
+    else if (profile_name == "SRTP_AEAD_AES_256_GCM")
+        keys.profile = srtp_protection_profile::srtp_aead_aes_256_gcm;
+    else
+        return {};
+
+    size_t key_len = 16;
+    size_t salt_len = 14;
+    if (keys.profile == srtp_protection_profile::srtp_aead_aes_256_gcm) {
+        key_len = 32;
+        salt_len = 12;
+    } else if (keys.profile == srtp_protection_profile::srtp_aead_aes_128_gcm) {
+        key_len = 16;
+        salt_len = 12;
+    }
+
+    size_t material_len = (key_len + salt_len) * 2;
+    std::vector<uint8_t> material(material_len);
+
+    int ret =
+        ::SSL_export_keying_material(_ssl, material.data(), material_len,
+                                     "EXTRACTOR-dtls_srtp", 19, nullptr, 0, 0);
+    if (ret != 1)
+        return {};
+
+    const uint8_t *p = material.data();
+    keys.client_write_key.assign(p, p + key_len);
+    p += key_len;
+    keys.server_write_key.assign(p, p + key_len);
+    p += key_len;
+    keys.client_write_salt.assign(p, p + salt_len);
+    p += salt_len;
+    keys.server_write_salt.assign(p, p + salt_len);
+
+    return keys;
 }
 
 } // namespace asioice::ssl::impl

@@ -75,7 +75,7 @@ file(GLOB ICE_SRC_FILES
     src/io_buffer2.cpp
 )
 if(ASIOICE_ENABLE_DTLS)
-    list(APPEND ICE_SRC_FILES src/ssl/datagram_bio.cpp)
+    list(APPEND ICE_SRC_FILES src/ssl/datagram_bio.cpp src/ssl/dtls_certificate.cpp)
 endif()
 add_library(asioice STATIC ${ICE_SRC_FILES})
 
