@@ -831,7 +831,7 @@ struct __sender{
     template<__ex::receiver R>
     __ex::operation_state auto connect(R&& r) &&
     {
-        auto env = __ex::get_env(r);
+        const auto& env = __ex::get_env(r);
         if constexpr(requires { __ex::get_scheduler(env); }){
             return __ex::connect(
                 __ex::continues_on(__transfer_sender{._init{std::move(this->_init)}}, __ex::get_scheduler(env)),

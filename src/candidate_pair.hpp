@@ -44,9 +44,9 @@ struct candidate_pair final
         FAILED = 4
     };
 
-    using request_handler_type =
-        std::function<void(const asioice::endpoint &from, const asioice::endpoint &to,
-                           asioice::io_buffer_ptr)>;
+    using request_handler_type = std::function<void(
+        const asioice::endpoint &from, const asioice::endpoint &to,
+        asioice::io_buffer_ptr)>;
 
     candidate_pair(asioice::candidate local_candidate,
                    asioice::candidate remote_candidate)
@@ -89,44 +89,38 @@ struct candidate_pair final
     state_t state() const noexcept { return _state; }
     void set_state(state_t state) noexcept;
 
-    const std::string &foundation() const noexcept {
-        return _foundation;
-    }
+    const std::string &foundation() const noexcept { return _foundation; }
 
     auto component() const noexcept { return _local_candidate.component; }
     const std::string &transport_type() const noexcept {
         return _local_candidate.transport_type;
     }
 
-    template <class BufferSequence>
-    asioice::task<std::tuple<std::error_code, std::size_t>>
-    send(const BufferSequence &data) {
+    template <class BufferSequence> auto send(const BufferSequence &data) {
         return _local_candidate.transport.send_to(data,
                                                   _remote_candidate.endpoint);
     }
 
-    asioice::task<std::tuple<std::error_code, std::size_t>> send(const void *data,
-                                                             std::size_t size) {
+    auto send(const void *data, std::size_t size) {
         return _local_candidate.transport.send_to(data, size,
                                                   _remote_candidate.endpoint);
     }
 
-    asioice::task<std::tuple<std::error_code, std::size_t>>
-    send(const net::const_buffer &data) {
+    auto send(const net::const_buffer &data) {
         return send(data.data(), data.size());
     }
 
     std::string to_string(int indent = 4) const;
 
-    auto last_keepalive_time() const noexcept {
-        return _last_keepalive_time;
-    }
+    auto last_keepalive_time() const noexcept { return _last_keepalive_time; }
 
     void update_keepalive_time() noexcept {
         _last_keepalive_time = std::chrono::steady_clock::now();
     }
 
-    asioice::task<void> keepalive_task(std::chrono::milliseconds ms, std::weak_ptr<candidate_pair> self);
+    asioice::task<void> keepalive_task(std::chrono::milliseconds ms,
+                                       std::weak_ptr<candidate_pair> self);
+
   private:
     using receiver_list_t =
         boost::intrusive::list<datagram_receiver,
