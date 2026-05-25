@@ -2,7 +2,7 @@
 
 #include <memory>
 #include <functional>
-#include <iostream>
+#include <span>
 
 #include <boost/intrusive/list.hpp>
 #include <boost/intrusive/set.hpp>
@@ -11,24 +11,6 @@
 #include "receiver.hpp"
 #include "candidate.hpp"
 #include "task.hpp"
-#include "stun.hpp"
-#include "stun_transaction.hpp"
-#include "shared_promise.hpp"
-
-#if ASIOICE_USE_BOOST_ASIO > 0
-#define ASIO_TO_EXEC_USE_BOOST 1
-#include <boost/asio/buffer.hpp>
-namespace asioice {
-namespace net = boost::asio;
-}
-#else
-#include <asio/buffer.hpp>
-namespace asioice {
-namespace net = asio;
-}
-#endif
-
-#include "asio2exec.hpp"
 
 namespace asioice {
 
@@ -106,7 +88,7 @@ struct candidate_pair final
                                                   _remote_candidate.endpoint);
     }
 
-    auto send(const net::const_buffer &data) {
+    auto send(const net::const_buffer& data) {
         return send(data.data(), data.size());
     }
 
