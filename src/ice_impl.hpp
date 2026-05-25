@@ -247,10 +247,6 @@ struct agent_datagram_impl
     auto generate_gathering_end_indication() noexcept;
     void sort_check_list() noexcept;
 
-    asioice::candidate_pair *
-    find_pair(const asioice::any_transport &transport,
-              const asioice::candidate &remote_candidate) const noexcept;
-
     check_task pick_next_pair() noexcept;
 
     void unfreeze_initial() noexcept;

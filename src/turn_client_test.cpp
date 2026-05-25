@@ -78,7 +78,7 @@ void allocate_test(std::size_t epoch_count) {
         begin_time = std::chrono::high_resolution_clock::now();
 
         while (true) {
-            auto [err, n] = co_await cpair->send(data.data(), data.size());
+            auto [err, n] = co_await cpair->send(net::buffer(data));
             if (err) {
                 std::cerr << "Send error: " << err.message() << '\n';
                 co_return;

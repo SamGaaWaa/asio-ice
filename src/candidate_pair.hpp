@@ -83,13 +83,9 @@ struct candidate_pair final
                                                   _remote_candidate.endpoint);
     }
 
-    auto send(const void *data, std::size_t size) {
-        return _local_candidate.transport.send_to(data, size,
+    auto send(const net::const_buffer &data) {
+        return _local_candidate.transport.send_to(data,
                                                   _remote_candidate.endpoint);
-    }
-
-    auto send(const net::const_buffer& data) {
-        return send(data.data(), data.size());
     }
 
     std::string to_string(int indent = 4) const;

@@ -22,7 +22,7 @@ namespace asioice {
 
 struct buffer_wrapper {
     // TODO:
-    static constexpr std::size_t max_buffers_count = 4;
+    static constexpr std::size_t max_buffers_count = 16;
     using buffer_sequence_type =
         boost::container::static_vector<net::const_buffer, max_buffers_count>;
 

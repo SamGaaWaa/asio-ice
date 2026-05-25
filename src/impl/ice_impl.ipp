@@ -485,20 +485,6 @@ template <class Layer> void agent_datagram_impl<Layer>::close() noexcept {
 }
 
 template <class Layer>
-asioice::candidate_pair *agent_datagram_impl<Layer>::find_pair(
-    const asioice::any_transport &transport,
-    const asioice::candidate &remote_candidate) const noexcept {
-    for (const auto &p : this->_check_list) {
-        if (p->local_candidate().transport == transport &&
-            p->remote_candidate().endpoint == remote_candidate.endpoint &&
-            utils::case_insensitive_equal(p->remote_candidate().transport_type,
-                                          remote_candidate.transport_type))
-            return p.get();
-    }
-    return nullptr;
-}
-
-template <class Layer>
 asioice::task<bool> agent_datagram_impl<Layer>::add_remote_candidate(
     asioice::candidate remote_candidate, auto... self) {
     if (this->_state == agent_state_t::CLOSED ||
@@ -1810,7 +1796,7 @@ auto agent_datagram_impl<Layer>::sendto(net::const_buffer data,
                            size_t{0}));
                    },
                    [&pair, data] {
-                       return pair->send(data.data(), data.size()) |
+                       return pair->send(net::buffer(data)) |
                               stdexec::then(
                                   [&pair](
                                       std::tuple<std::error_code, std::size_t>

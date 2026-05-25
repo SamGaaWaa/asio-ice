@@ -3,6 +3,18 @@
 #include "config.hpp"
 #include "address.hpp"
 
+#if ASIOICE_USE_BOOST_ASIO > 0
+#include <boost/asio/buffer.hpp>
+namespace asioice {
+namespace net = boost::asio;
+}
+#else
+#include <asio/buffer.hpp>
+namespace asioice {
+namespace net = asio;
+}
+#endif
+
 #include <stdexec/execution.hpp>
 
 #include <span>
@@ -27,8 +39,8 @@ struct __send_receiver {
 
 template <class T>
 concept AsyncPacketTransport =
-    requires(T *t, std::span<const uint8_t> data,
-             std::span<std::span<const uint8_t>> data_array,
+    requires(T *t, net::const_buffer data,
+             std::span<const net::const_buffer> data_array,
              asioice::endpoint ep) {
         stdexec::connect(stdexec::starts_on(stdexec::inline_scheduler{},
                                             t->async_send_to(data, ep)),
@@ -40,8 +52,8 @@ concept AsyncPacketTransport =
 
 template <class T>
 concept AsyncPacketConnectionTransport =
-    requires(T *t, std::span<const uint8_t> data,
-             std::span<std::span<const uint8_t>> data_array) {
+    requires(T *t, net::const_buffer data,
+             std::span<const net::const_buffer> data_array) {
         stdexec::connect(stdexec::starts_on(stdexec::inline_scheduler{},
                                             t->async_send(data)),
                          __send_receiver{});
