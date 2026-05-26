@@ -15,14 +15,12 @@
 
 #if ASIOICE_USE_BOOST_ASIO > 0
 #define ASIO_TO_EXEC_USE_BOOST 1
-#include <boost/asio/io_context.hpp>
 #include <boost/asio/steady_timer.hpp>
 namespace asioice {
 namespace net = boost::asio;
 }
 #else
 #include "asio2exec.hpp"
-#include <asio/io_context.hpp>
 #include <asio/steady_timer.hpp>
 namespace asioice {
 namespace net = asio;

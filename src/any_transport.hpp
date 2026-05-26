@@ -1,9 +1,9 @@
 #pragma once
 
 #include "config.hpp"
-#include "socket_transport.hpp"
 #include "impl/buffer_wrapper.hpp"
 #include "concepts.hpp"
+#include "receiver.hpp"
 #include "small_buffer_resource.hpp"
 
 #include <boost/any/basic_any.hpp>
@@ -13,13 +13,11 @@
 
 #if ASIOICE_USE_BOOST_ASIO > 0
 #include <boost/asio/buffer.hpp>
-#include <boost/asio/ip/udp.hpp>
 namespace asioice {
 namespace net = boost::asio;
 }
 #else
 #include <asio/buffer.hpp>
-#include <asio/ip/udp.hpp>
 namespace asioice {
 namespace net = asio;
 }
@@ -83,8 +81,6 @@ struct interface {
 
     virtual net::any_io_executor get_executor() const noexcept = 0;
 
-    virtual void connect(const asioice::endpoint &endpoint) = 0;
-
     virtual void add_receiver(asioice::datagram_receiver &receiver) = 0;
 
     virtual void clear_early_data() noexcept = 0;
@@ -139,16 +135,26 @@ template <class Transport> struct transport_impl final : public interface {
     send_result_type1 send(net::const_buffer data) override {
         return send_result_type1(
             std::move(data), [this](net::const_buffer data) {
-                return _transport->async_send_to(data, _remote) |
-                       __transform_sndr();
+                if constexpr (requires { _transport->async_send(data); }) {
+                    return _transport->async_send(data) | __transform_sndr();
+                } else {
+                    return stdexec::just(std::tuple{
+                        std::make_error_code(std::errc::function_not_supported),
+                        std::size_t{0}});
+                }
             });
     }
 
     send_result_type2 send(std::span<const net::const_buffer> data) override {
         return send_result_type2(
             std::move(data), [this](std::span<const net::const_buffer> data) {
-                return _transport->async_send_to(data, _remote) |
-                       __transform_sndr();
+                if constexpr (requires { _transport->async_send(data); }) {
+                    return _transport->async_send(data) | __transform_sndr();
+                } else {
+                    return stdexec::just(std::tuple{
+                        std::make_error_code(std::errc::function_not_supported),
+                        std::size_t{0}});
+                }
             });
     }
 
@@ -158,10 +164,6 @@ template <class Transport> struct transport_impl final : public interface {
 
     net::any_io_executor get_executor() const noexcept override {
         return _transport->get_executor();
-    }
-
-    void connect(const asioice::endpoint &endpoint) override {
-        _remote = endpoint;
     }
 
     void add_receiver(asioice::datagram_receiver &receiver) override {
@@ -204,7 +206,6 @@ template <class Transport> struct transport_impl final : public interface {
     }
 
     std::shared_ptr<Transport> _transport;
-    asioice::endpoint _remote{};
 };
 
 } // namespace __any_transport_detail
@@ -413,10 +414,6 @@ struct any_transport {
         return send(buffers, std::move(alloc));
     }
 
-    void connect(const asioice::endpoint &endpoint) {
-        get_interface()->connect(endpoint);
-    }
-
     asioice::endpoint local_endpoint() const {
         return get_interface()->local_endpoint();
     }
@@ -437,9 +434,6 @@ struct any_transport {
     }
 
   private:
-    using udp_transport = __any_transport_detail::transport_impl<
-        asioice::datagram_transport<net::ip::udp::socket>>;
-
     __any_transport_detail::interface *get_interface() noexcept {
         return boost::anys::unsafe_any_cast<__any_transport_detail::interface>(
             &_any);
@@ -450,7 +444,12 @@ struct any_transport {
             &_any);
     }
 
-    boost::anys::basic_any<sizeof(udp_transport), alignof(udp_transport)> _any;
+    static constexpr std::size_t sbo_size = []() constexpr {
+        auto align = alignof(std::max_align_t);
+        return (sizeof(void *) * 3 + align - 1) / align * align;
+    }();
+
+    boost::anys::basic_any<sbo_size, alignof(std::max_align_t)> _any;
 };
 
 static_assert(AsyncPacketTransport<any_transport>);
