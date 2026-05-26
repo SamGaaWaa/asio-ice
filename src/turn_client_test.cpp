@@ -29,7 +29,7 @@ void allocate_test(std::size_t epoch_count) {
               << server_ep.port() << '\n';
 
     auto transport = std::make_shared<Transport>(
-        ctx, ctx, net::ip::udp::endpoint(net::ip::udp::v4(), 0));
+        ctx.get_executor(), net::ip::udp::endpoint(net::ip::udp::v4(), 0));
     transport->socket().connect(server_ep);
     transport->start();
 
@@ -73,7 +73,7 @@ void allocate_test(std::size_t epoch_count) {
         }
 
         std::cout << "\nSending data...\n";
-        net::steady_timer timer{ctx};
+        net::steady_timer timer{ctx.get_executor()};
         std::string data = "\xcdHello, world!";
         begin_time = std::chrono::high_resolution_clock::now();
 
@@ -132,7 +132,8 @@ void allocate_test(std::size_t epoch_count) {
         co_await stdexec::just_stopped();
     };
 
-    asio2exec::scheduler sched{ctx};
+    asio2exec::basic_scheduler<net::io_context::executor_type> sched{
+        ctx.get_executor()};
     auto work = stdexec::when_all(peer_recv_coro(),
                                   allocate_coro() | stdexec::let_value([&] {
                                       return stdexec::just_stopped() |

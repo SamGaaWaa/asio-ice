@@ -9,13 +9,11 @@ namespace asioice::sctp {
 template <AsyncPacketConnectionTransport Layer> struct transport {
     using next_layer_type = Layer;
     using impl_type = asioice::sctp::impl::sctp_impl<next_layer_type>;
+    using executor_type = typename impl_type::executor_type;
 
     transport(std::shared_ptr<next_layer_type> next_layer,
-              exsctp::sctp_options options = {}) {
-        auto &ctx = next_layer->context();
-        _impl =
-            std::make_unique<impl_type>(ctx, std::move(next_layer), options);
-    }
+              exsctp::sctp_options options = {})
+        : _impl{std::make_unique<impl_type>(std::move(next_layer), options)} {}
 
     transport(const transport &) = delete;
     transport &operator=(const transport &) = delete;
@@ -34,9 +32,9 @@ template <AsyncPacketConnectionTransport Layer> struct transport {
 
     void swap(transport &other) noexcept { std::swap(_impl, other._impl); }
 
-    const auto &context() const noexcept { return _impl->context(); }
-
-    auto &context() noexcept { return _impl->context(); }
+    executor_type get_executor() const noexcept {
+        return _impl->get_executor();
+    }
 
     void start() { _impl->start(); }
 

@@ -79,13 +79,16 @@ template <class Layer>
 struct agent_datagram_impl
     : std::enable_shared_from_this<agent_datagram_impl<Layer>> {
     using socket_type = Layer;
+    using executor_type = typename Layer::executor_type;
+    using scheduler_type = asio2exec::basic_scheduler<executor_type>;
     using raw_transport = datagram_transport<Layer>;
     using raw_transport_ptr = std::shared_ptr<raw_transport>;
     using config_type = agent_config;
     using turn_client_type = asioice::turn::client<raw_transport, true>;
+    using timer_type = net::steady_timer::rebind_executor<executor_type>::other;
 
-    agent_datagram_impl(net::io_context &ctx, config_type config) noexcept
-        : _ctx(ctx), _config(std::move(config)),
+    agent_datagram_impl(executor_type ex, config_type config) noexcept
+        : _executor(ex), _config(std::move(config)),
           _ice_controlling(_config.ice_controlling) {
         asioice::hash::random_bytes(&_tie_breaker, sizeof(_tie_breaker));
     }
@@ -99,8 +102,7 @@ struct agent_datagram_impl
     const auto &remote_candidates() const noexcept {
         return _remote_candidates;
     }
-    const auto &context() const noexcept { return _ctx; }
-    auto &context() noexcept { return _ctx; }
+    executor_type get_executor() const noexcept { return _executor; }
     const auto &config() const noexcept { return _config; }
 
     const auto &candidate_pairs() const noexcept { return _check_list; }
@@ -120,7 +122,8 @@ struct agent_datagram_impl
     agent_state_t state() const noexcept { return _state; }
     auto on_state_change() noexcept {
         return _state.on_change() |
-               stdexec::continues_on(asio2exec::scheduler{_ctx});
+               stdexec::continues_on(
+                   asio2exec::basic_scheduler<executor_type>{_executor});
     }
     auto on_closed() noexcept;
     auto on_connected_or_closed() noexcept;
@@ -308,7 +311,7 @@ struct agent_datagram_impl
 
     using valid_list_type = std::vector<valid_pair>;
 
-    net::io_context &_ctx;
+    executor_type _executor;
     asioice::shared_promise<void> _promise{}; // use for some detached work
     stun::transaction_set _transactions{};    // use for connectivity checks
     transaction_state_set _transaction_states{};

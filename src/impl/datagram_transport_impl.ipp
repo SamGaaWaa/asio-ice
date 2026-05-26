@@ -1,14 +1,19 @@
 namespace asioice::impl {
 
 template <class Socket> void datagram_transport_impl<Socket>::start() {
+    using Self = datagram_transport_impl<Socket>;
     if (this->_running)
         return;
-    asio2exec::scheduler sched{this->context()};
     utils::detached_with_data(
-        stdexec::starts_on(sched,
-                           utils::stop_when(this->recv_loop(),
-                                            this->_stop.get_future() |
-                                                stdexec::continues_on(sched))),
+        stdexec::starts_on(
+            asio2exec::basic_scheduler<typename Self::executor_type>{
+                this->get_executor()},
+            utils::stop_when(
+                this->recv_loop(),
+                this->_stop.get_future() |
+                    stdexec::continues_on(asio2exec::basic_scheduler<
+                                          typename Self::executor_type>{
+                        this->get_executor()}))),
         this->shared_from_this());
     this->_running = true;
 }

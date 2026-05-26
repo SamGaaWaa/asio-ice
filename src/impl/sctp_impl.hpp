@@ -10,13 +10,11 @@
 
 #if ASIOICE_USE_BOOST_ASIO > 0
 #define ASIO_TO_EXEC_USE_BOOST 1
-#include <boost/asio/io_context.hpp>
 #include <boost/asio/steady_timer.hpp>
 namespace asioice {
 namespace net = boost::asio;
 }
 #else
-#include <asio/io_context.hpp>
 #include <asio/steady_timer.hpp>
 namespace asioice {
 namespace net = asio;
@@ -27,9 +25,11 @@ namespace net = asio;
 namespace asioice::sctp::impl {
 
 template <asioice::AsyncPacketConnectionTransport Layer> struct io_interface {
-    io_interface(asioice::net::io_context &ctx,
-                 std::shared_ptr<Layer> next_layer)
-        : _ctx{ctx}, _next_layer{std::move(next_layer)} {
+    using executor_type = typename Layer::executor_type;
+    using scheduler_type = asio2exec::basic_scheduler<executor_type>;
+
+    io_interface(std::shared_ptr<Layer> next_layer)
+        : _next_layer{std::move(next_layer)} {
         if (!_next_layer)
             throw std::runtime_error{"_next_layer == nullptr"};
     }
@@ -39,10 +39,11 @@ template <asioice::AsyncPacketConnectionTransport Layer> struct io_interface {
     io_interface &operator=(const io_interface &) = delete;
     io_interface &operator=(io_interface &&) = delete;
 
-    auto &context() noexcept { return _ctx; }
-    const auto &context() const noexcept { return _ctx; }
+    executor_type get_executor() const noexcept {
+        return _next_layer->get_executor();
+    }
 
-    auto scheduler() noexcept { return asio2exec::scheduler{_ctx}; }
+    auto scheduler() noexcept { return scheduler_type{get_executor()}; }
 
     auto send(std::span<const uint8_t> data) {
         return _next_layer->async_send(data);
@@ -53,8 +54,9 @@ template <asioice::AsyncPacketConnectionTransport Layer> struct io_interface {
     }
 
     auto schedule_at(std::chrono::steady_clock::time_point t) {
-        using timer_type = asioice::net::steady_timer;
-        return stdexec::just(timer_type(_ctx, t)) |
+        using timer_type =
+            asioice::net::steady_timer::rebind_executor<executor_type>::other;
+        return stdexec::just(timer_type(this->get_executor(), t)) |
                stdexec::let_value([](auto &timer) {
                    return timer.async_wait(asio2exec::use_sender) |
                           stdexec::then([](auto ec) {}) |
@@ -76,7 +78,6 @@ template <asioice::AsyncPacketConnectionTransport Layer> struct io_interface {
     }
 
   private:
-    asioice::net::io_context &_ctx;
     std::shared_ptr<Layer> _next_layer;
 };
 
@@ -85,21 +86,18 @@ template <class Layer> struct sctp_impl final : asioice::datagram_receiver {
     using interface_type = io_interface<next_layer_type>;
     static_assert(exsctp::IOInterface<interface_type>);
     using exsctp_transport = exsctp::basic_transport<interface_type>;
+    using executor_type = typename next_layer_type::executor_type;
 
-    sctp_impl(asioice::net::io_context &ctx,
-              std::shared_ptr<next_layer_type> next_layer,
+    sctp_impl(std::shared_ptr<next_layer_type> next_layer,
               const exsctp::sctp_options &options) noexcept
-        : _transport(
-              std::make_shared<interface_type>(ctx, std::move(next_layer)),
-              options) {
+        : _transport(std::make_shared<interface_type>(std::move(next_layer)),
+                     options) {
         _transport.interface().add_receiver(*this);
     }
 
-    const auto &context() const noexcept {
-        return _transport.interface().context();
+    executor_type get_executor() const noexcept {
+        return _transport.interface().get_executor();
     }
-
-    auto &context() noexcept { return _transport.interface().context(); }
 
     void start() { _transport.start(); }
 

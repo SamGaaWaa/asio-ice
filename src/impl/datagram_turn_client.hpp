@@ -56,6 +56,8 @@ struct datagram_client
     using base_type = asioice::datagram_receiver;
     using next_layer_type = NextLayer;
     using buffer_sequence_type = asioice::buffer_wrapper;
+    using executor_type = typename next_layer_type::executor_type;
+    using timer_type = net::steady_timer::rebind_executor<executor_type>::other;
 
     datagram_client(std::shared_ptr<next_layer_type> transport,
                     const asioice::endpoint &server, std::string username,
@@ -70,8 +72,9 @@ struct datagram_client
 
     bool is_running() const noexcept { return _is_running; }
 
-    const auto &context() const noexcept { return _next_layer.context(); }
-    auto &context() noexcept { return _next_layer.context(); }
+    executor_type get_executor() const noexcept {
+        return _next_layer.get_executor();
+    }
 
     const auto &next_layer() const noexcept { return _next_layer; }
     auto &next_layer() noexcept { return _next_layer; }

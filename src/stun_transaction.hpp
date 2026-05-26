@@ -46,11 +46,11 @@ struct transaction
         }
     };
 
-    transaction(net::io_context &ctx, const stun::message &req,
+    transaction(net::any_io_executor ex, const stun::message &req,
                 const asioice::endpoint &stun_server,
                 stun::message &resp) noexcept
-        : _ctx{ctx}, request{req}, server{stun_server}, response{resp},
-          _timer{ctx} {}
+        : _executor{std::move(ex)}, request{req}, server{stun_server},
+          response{resp}, _timer{_executor} {}
 
     transaction(const transaction &) = delete;
     transaction &operator=(const transaction &) = delete;
@@ -61,7 +61,7 @@ struct transaction
         return utils::stop_when(
                    retry(transport),
                    _stop_retry.get_future() |
-                       stdexec::continues_on(asio2exec::scheduler{_ctx})) |
+                       stdexec::continues_on(asio2exec::scheduler{_executor})) |
                stdexec::then([](auto &&...) {});
     }
 
@@ -138,7 +138,7 @@ struct transaction
         throw;
     }
 
-    net::io_context &_ctx;
+    net::any_io_executor _executor;
     net::steady_timer _timer;
     std::size_t _max_retries{7};
     asioice::shared_promise<void> _stop_retry;
@@ -190,7 +190,7 @@ struct basic_request_t {
             ICE_IN_DEBUG { std::cout << "Transaction already in progress\n"; }
             co_return false;
         }
-        stun::transaction trans(transport.context(), req, server, resp);
+        stun::transaction trans(transport.get_executor(), req, server, resp);
         transactions.insert(it, trans);
 
         response_receiver<Transport> receiver{transport, transactions};
@@ -199,7 +199,9 @@ struct basic_request_t {
         bool ret = false;
         utils::inplace_receiver<void> retry_receiver;
         auto retry_op = retry_receiver.start(stdexec::starts_on(
-            asio2exec::scheduler{transport.context()}, trans.run(transport)));
+            asio2exec::basic_scheduler<typename Transport::executor_type>{
+                transport.get_executor()},
+            trans.run(transport)));
         stdexec::start(retry_op);
 
         ret = false;

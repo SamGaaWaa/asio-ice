@@ -107,7 +107,8 @@ asioice::task<void> agent_datagram_impl<Layer>::server_reflexive_candidate(
         }
     }
     co_await (utils::on_scope_empty(scope) |
-              stdexec::continues_on(asio2exec::scheduler{this->context()}));
+              stdexec::continues_on(
+                  typename Self::scheduler_type{this->get_executor()}));
 } catch (std::exception &e) {
     ICE_IN_DEBUG { std::cerr << e.what() << '\n'; }
     co_return;
@@ -145,7 +146,7 @@ asioice::task<void> agent_datagram_impl<Layer>::get_component_candidates(
                 continue;
             }
         }
-        Layer sock(this->_ctx);
+        Layer sock(this->_executor);
 #if ASIOICE_USE_BOOST_ASIO
         boost::system::error_code ec;
 #else
@@ -173,8 +174,7 @@ asioice::task<void> agent_datagram_impl<Layer>::get_component_candidates(
             continue;
         }
 
-        auto transport =
-            std::make_shared<Self::raw_transport>(this->_ctx, std::move(sock));
+        auto transport = std::make_shared<Self::raw_transport>(std::move(sock));
 
         ICE_IN_DEBUG {
             std::cout << "Host transport bound to "
@@ -224,7 +224,8 @@ asioice::task<void> agent_datagram_impl<Layer>::get_component_candidates(
     }
     if (!this->_config.turn_servers.empty()) {
         co_await (utils::on_scope_empty(scope) |
-                  stdexec::continues_on(asio2exec::scheduler{this->context()}));
+                  stdexec::continues_on(
+                      typename Self::scheduler_type{this->get_executor()}));
     }
     co_return;
 }
@@ -281,6 +282,7 @@ asioice::task<void> agent_datagram_impl<Layer>::create_relayed_candidate(
 
 template <class Layer>
 asioice::task<void> agent_datagram_impl<Layer>::do_gather_candidates() {
+    using Self = agent_datagram_impl<Layer>;
     if (this->_state == agent_state_t::CLOSED ||
         this->_state == agent_state_t::CONNECTED)
         co_return;
@@ -311,7 +313,8 @@ asioice::task<void> agent_datagram_impl<Layer>::do_gather_candidates() {
     }
     // TODO: may it throws
     co_await (utils::on_scope_empty(scope) |
-              stdexec::continues_on(asio2exec::scheduler{this->context()}) |
+              stdexec::continues_on(
+                  typename Self::scheduler_type{this->get_executor()}) |
               stdexec::then([] { return std::monostate{}; }) |
               stdexec::stopped_as_optional());
     // must execute
@@ -651,6 +654,7 @@ void agent_datagram_impl<Layer>::check_complete(
 template <class Layer>
 asioice::task<bool>
 agent_datagram_impl<Layer>::do_connect(auto... self) noexcept {
+    using Self = agent_datagram_impl<Layer>;
     if (this->_state == agent_state_t::CONNECTING ||
         this->_state == agent_state_t::CLOSED ||
         this->_state == agent_state_t::CONNECTED ||
@@ -679,7 +683,7 @@ agent_datagram_impl<Layer>::do_connect(auto... self) noexcept {
             c.transport.clear_early_data();
         this->_promise.set_stopped();
     });
-    net::steady_timer ta{this->context()};
+    typename Self::timer_type ta{this->get_executor()};
     exec::async_scope scope;
     while (this->_state != agent_state_t::CLOSED &&
            this->_state != agent_state_t::CONNECTED)
@@ -734,7 +738,8 @@ agent_datagram_impl<Layer>::do_connect(auto... self) noexcept {
     scope.request_stop();
     ICE_IN_DEBUG { std::cout << "Waiting for all checks to finish\n"; }
     co_await (utils::on_scope_empty(scope) |
-              stdexec::continues_on(asio2exec::scheduler{this->context()}));
+              stdexec::continues_on(
+                  typename Self::scheduler_type{this->get_executor()}));
     ICE_IN_DEBUG {
         std::cout << "connect: "
                   << (this->_state == agent_state_t::CONNECTED ? "success\n"
@@ -743,8 +748,9 @@ agent_datagram_impl<Layer>::do_connect(auto... self) noexcept {
     if (this->_state == agent_state_t::CONNECTED) {
         utils::detached_with_data(
             utils::stop_when(
-                stdexec::starts_on(asio2exec::scheduler{this->context()},
-                                   this->free_candidates()),
+                stdexec::starts_on(
+                    typename Self::scheduler_type{this->get_executor()},
+                    this->free_candidates()),
                 this->_state.on_change()),
             this->shared_from_this());
         // create turn channel
@@ -755,7 +761,7 @@ agent_datagram_impl<Layer>::do_connect(auto... self) noexcept {
             utils::detached_with_data(
                 utils::stop_when(
                     stdexec::starts_on(
-                        asio2exec::scheduler{this->context()},
+                        typename Self::scheduler_type{this->get_executor()},
                         valid_p.pair->keepalive_task(
                             this->_config.keepalive_interval, valid_p.pair)),
                     this->_state.on_change()),
@@ -781,8 +787,8 @@ void agent_datagram_impl<Layer>::switch_role(bool ice_controlling) noexcept {
 
 template <class Layer>
 asioice::task<void> agent_datagram_impl<Layer>::check(check_task ct) {
-    net::steady_timer timer{this->context(),
-                            this->_config.connectivity_check_timeout};
+    typename agent_datagram_impl<Layer>::timer_type timer{
+        this->get_executor(), this->_config.connectivity_check_timeout};
     co_await utils::stop_when(do_check(std::move(ct)),
                               timer.async_wait(asio2exec::use_sender));
 }
@@ -1031,6 +1037,7 @@ asioice::task<typename agent_datagram_impl<Layer>::request_result>
 agent_datagram_impl<Layer>::request(asioice::candidate_pair &pair,
                                     const stun::message &req,
                                     stun::message &resp) noexcept {
+    using Self = agent_datagram_impl<Layer>;
     request_result ret = request_result::failed;
     auto it = this->_transactions.lower_bound(req.transaction_id);
     if (it != this->_transactions.end() &&
@@ -1038,7 +1045,7 @@ agent_datagram_impl<Layer>::request(asioice::candidate_pair &pair,
         ICE_IN_DEBUG { std::cout << "Transaction already in progress\n"; }
         co_return ret;
     }
-    stun::transaction trans(this->context(), req,
+    stun::transaction trans(this->get_executor(), req,
                             pair.remote_candidate().endpoint, resp);
     this->_transactions.insert(it, trans);
     transaction_state trans_state{pair, trans};
@@ -1046,7 +1053,7 @@ agent_datagram_impl<Layer>::request(asioice::candidate_pair &pair,
 
     utils::inplace_receiver<void> retry_receiver;
     auto retry_op = retry_receiver.start(
-        stdexec::starts_on(asio2exec::scheduler{this->context()},
+        stdexec::starts_on(typename Self::scheduler_type{this->get_executor()},
                            trans.run(pair.local_candidate().transport)));
     stdexec::start(retry_op);
 
@@ -1198,6 +1205,7 @@ asioice::task<void>
 agent_datagram_impl<Layer>::do_handle_request(asioice::any_transport transport,
                                               asioice::endpoint source,
                                               asioice::io_buffer_ptr buf) {
+    using Self = agent_datagram_impl<Layer>;
     ++this->_outgoing_request_handler_count;
     utils::scope_guard on_exit(
         [this]() noexcept { --this->_outgoing_request_handler_count; });
@@ -1268,9 +1276,9 @@ agent_datagram_impl<Layer>::do_handle_request(asioice::any_transport transport,
         this->_state == agent_state_t::GATHERING) {
         // early check
         do {
-            co_await (
-                this->_state.on_change() |
-                stdexec::continues_on(asio2exec::scheduler{this->context()}));
+            co_await (this->_state.on_change() |
+                      stdexec::continues_on(
+                          typename Self::scheduler_type{this->get_executor()}));
         } while (this->_state == agent_state_t::INIT ||
                  this->_state == agent_state_t::GATHERING);
         if (this->_state == agent_state_t::CLOSED ||
@@ -1658,7 +1666,8 @@ asioice::task<void> agent_datagram_impl<Layer>::free_candidates() {
     // aggressive nomination is used, and the selected pairs can quickly
     // change after ICE has completed.
     if (duration.count() < 3000) {
-        net::steady_timer timer{this->context()};
+        typename agent_datagram_impl<Layer>::timer_type timer{
+            this->get_executor()};
         timer.expires_after(std::chrono::milliseconds(3000 - duration.count()));
         co_await timer.async_wait(asio2exec::use_sender);
     }
@@ -1734,6 +1743,7 @@ void agent_datagram_impl<Layer>::create_turn_permission(
 }
 
 template <class Layer> auto agent_datagram_impl<Layer>::on_closed() noexcept {
+    using Self = agent_datagram_impl<Layer>;
     return stdexec::just() | stdexec::let_value([this] {
                return utils::if_else(
                    stdexec::just(this->_state == agent_state_t::CLOSED),
@@ -1741,7 +1751,8 @@ template <class Layer> auto agent_datagram_impl<Layer>::on_closed() noexcept {
                    [this] {
                        return this->_state.on_change() |
                               stdexec::continues_on(
-                                  asio2exec::scheduler{this->context()});
+                                  typename Self::scheduler_type{
+                                      this->get_executor()});
                    });
            }) |
            stdexec::then(
@@ -1751,6 +1762,7 @@ template <class Layer> auto agent_datagram_impl<Layer>::on_closed() noexcept {
 
 template <class Layer>
 auto agent_datagram_impl<Layer>::on_connected_or_closed() noexcept {
+    using Self = agent_datagram_impl<Layer>;
     return stdexec::just() | stdexec::let_value([this] {
                return utils::if_else(
                    stdexec::just(this->_state == agent_state_t::CONNECTED ||
@@ -1759,7 +1771,8 @@ auto agent_datagram_impl<Layer>::on_connected_or_closed() noexcept {
                    [this] {
                        return this->_state.on_change() |
                               stdexec::continues_on(
-                                  asio2exec::scheduler{this->context()});
+                                  typename Self::scheduler_type{
+                                      this->get_executor()});
                    });
            }) |
            stdexec::then([this] {

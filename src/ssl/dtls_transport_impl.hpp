@@ -3,15 +3,6 @@
 #include "config.hpp"
 #if ASIOICE_USE_BOOST_ASIO > 0
 #define ASIO_TO_EXEC_USE_BOOST 1
-#include <boost/asio/io_context.hpp>
-namespace asioice {
-namespace net = boost::asio;
-}
-#else
-#include <asio/io_context.hpp>
-namespace asioice {
-namespace net = asio;
-}
 #endif
 
 #include <openssl/err.h>
@@ -54,6 +45,8 @@ template <class NextLayer>
 struct dtls_impl : asioice::datagram_receiver,
                    std::enable_shared_from_this<dtls_impl<NextLayer>> {
     using next_layer_type = NextLayer;
+    using executor_type = typename next_layer_type::executor_type;
+    using timer_type = net::steady_timer::rebind_executor<executor_type>::other;
     enum handshake_type { server, client };
 
     dtls_impl(std::shared_ptr<next_layer_type> transport, dtls_certificate cert)
@@ -79,9 +72,9 @@ struct dtls_impl : asioice::datagram_receiver,
 
     ~dtls_impl() { ::SSL_free(_ssl); }
 
-    const auto &context() const noexcept { return _next_layer.context(); }
-
-    auto &context() noexcept { return _next_layer.context(); }
+    executor_type get_executor() const noexcept {
+        return _next_layer.get_executor();
+    }
 
     void close() noexcept {
         if (_closed)

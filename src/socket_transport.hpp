@@ -7,14 +7,14 @@ namespace asioice {
 template <class Socket> struct datagram_transport {
     using impl_type = impl::datagram_transport_impl<Socket>;
     using endpoint_type = typename impl_type::endpoint_type;
+    using executor_type = typename impl_type::executor_type;
 
-    datagram_transport(net::io_context &ctx, Socket &&sock)
-        : _impl(std::make_shared<impl_type>(ctx, std::move(sock))) {}
+    datagram_transport(Socket &&sock)
+        : _impl(std::make_shared<impl_type>(std::move(sock))) {}
 
     template <class... Args>
-    datagram_transport(net::io_context &ctx, Args &&...args)
-        : _impl(std::make_shared<impl_type>(ctx, std::forward<Args>(args)...)) {
-    }
+    datagram_transport(Args &&...args)
+        : _impl(std::make_shared<impl_type>(std::forward<Args>(args)...)) {}
 
     datagram_transport(const datagram_transport &) = delete;
     datagram_transport &operator=(const datagram_transport &) = delete;
@@ -47,8 +47,9 @@ template <class Socket> struct datagram_transport {
 
     auto &socket() noexcept { return _impl->socket(); }
     const auto &socket() const noexcept { return _impl->socket(); }
-    auto &context() noexcept { return _impl->context(); }
-    const auto &context() const noexcept { return _impl->context(); }
+    executor_type get_executor() const noexcept {
+        return _impl->get_executor();
+    }
     const auto &local_endpoint() const noexcept {
         return _impl->local_endpoint();
     }

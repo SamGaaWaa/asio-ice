@@ -27,14 +27,14 @@ namespace net = asio;
 #define CLIENT_PORT 12345
 #define MAX_BUFFER 1024
 
-asioice::task<void> server_coro(asioice::net::io_context &io_ctx,
+asioice::task<void> server_coro(asioice::net::any_io_executor ex,
                                 asioice::ssl::dtls_certificate cert,
                                 std::string client_fp) {
     using namespace asioice;
     using DtlsTransport =
         ssl::dtls_transport<datagram_transport<net::ip::udp::socket>>;
 
-    net::ip::udp::socket sock{io_ctx};
+    net::ip::udp::socket sock{ex};
     sock.open(net::ip::udp::v4());
     sock.bind(net::ip::udp::endpoint(net::ip::make_address("127.0.0.1"),
                                      SERVER_PORT));
@@ -45,7 +45,7 @@ asioice::task<void> server_coro(asioice::net::io_context &io_ctx,
 
     auto sock_transport =
         std::make_shared<datagram_transport<net::ip::udp::socket>>(
-            io_ctx, std::move(sock));
+            std::move(sock));
 
     DtlsTransport dtls_server{sock_transport, std::move(cert)};
     dtls_server.set_expected_remote_fingerprint(client_fp);
@@ -86,7 +86,7 @@ asioice::task<void> server_coro(asioice::net::io_context &io_ctx,
         } else if (n == 0) {
             std::cout << "Client closed the connection\n";
             // test fast shutdown
-            net::steady_timer timer{io_ctx, std::chrono::seconds(5)};
+            net::steady_timer timer{ex, std::chrono::seconds(5)};
             co_await timer.async_wait(asio2exec::use_sender);
             ec = co_await dtls_server.async_shutdown(false);
             if (ec)
@@ -119,9 +119,9 @@ int main() {
     net::io_context io_ctx;
     exec::start_detached(stdexec::starts_on(
         asio2exec::scheduler{io_ctx},
-        server_coro(io_ctx, std::move(server_cert), client_fp)));
+        server_coro(io_ctx.get_executor(), std::move(server_cert), client_fp)));
 
-    net::ip::udp::socket sock{io_ctx};
+    net::ip::udp::socket sock{io_ctx.get_executor()};
     sock.open(net::ip::udp::v4());
     sock.bind(net::ip::udp::endpoint(net::ip::make_address("127.0.0.1"),
                                      CLIENT_PORT));
@@ -132,7 +132,7 @@ int main() {
 
     auto sock_transport =
         std::make_shared<datagram_transport<net::ip::udp::socket>>(
-            io_ctx, std::move(sock));
+            std::move(sock));
 
     DtlsTransport dtls_client{sock_transport, std::move(client_cert)};
     dtls_client.set_expected_remote_fingerprint(server_fp);

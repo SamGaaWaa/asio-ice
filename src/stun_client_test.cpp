@@ -32,7 +32,7 @@ void udp_request_test() {
     asio2exec::asio_context asio_thread;
     asio_thread.start();
 
-    auto &ctx = asio_thread.get_executor();
+    auto &ctx = asio_thread.context();
 
     net::ip::udp::resolver resolver(ctx);
     auto resolve_result = resolver.resolve("14.29.112.241", "20002");
@@ -45,7 +45,7 @@ void udp_request_test() {
               << server_ep.port() << '\n';
 
     auto transport = std::make_shared<datagram_transport<net::ip::udp::socket>>(
-        ctx, ctx, net::ip::udp::v4());
+        ctx.get_executor(), net::ip::udp::v4());
     transport->socket().bind(net::ip::udp::endpoint(net::ip::udp::v4(), 0));
     // auto protocol = std::make_shared<
     //     stun_protocol<datagram_transport<net::ip::udp::socket>, true>>(
@@ -80,7 +80,7 @@ void udp_request_test() {
 
     std::cout << "Test client.stop()\n";
     exec::async_scope scope;
-    net::steady_timer timer{ctx, std::chrono::seconds(10)};
+    net::steady_timer timer{ctx.get_executor(), std::chrono::seconds(10)};
     scope.spawn(stdexec::starts_on(sched, request_coro()));
     scope.spawn(stdexec::starts_on(
         sched, timer.async_wait(asio2exec::use_sender) |

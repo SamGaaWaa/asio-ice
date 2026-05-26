@@ -223,7 +223,6 @@ template <class NextLayer> void dtls_impl<NextLayer>::handle_timeout() {
     if (!::DTLSv1_get_timeout(this->_ssl, &tv))
         return;
     (void)tv;
-    asio2exec::scheduler sched{this->context()};
     utils::detached_with_data(
         utils::stop_when(this->timeout_handler(),
                          this->_timeout_handler_promise.get_future()),
@@ -234,7 +233,7 @@ template <class NextLayer>
 asioice::task<void> dtls_impl<NextLayer>::timeout_handler() {
     if (this->_closed)
         co_return;
-    net::steady_timer timer{this->context()};
+    typename dtls_impl<NextLayer>::timer_type timer{this->get_executor()};
     while (true) {
         ::timeval tv;
         std::chrono::milliseconds timeout;

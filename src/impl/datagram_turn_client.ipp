@@ -10,12 +10,12 @@ asioice::task<bool> datagram_client<NextLayer>::request(
         ICE_IN_DEBUG { std::cout << "Transaction already in progress\n"; }
         co_return false;
     }
-    stun::transaction trans(this->context(), req, this->_server, resp);
+    stun::transaction trans(this->get_executor(), req, this->_server, resp);
     this->_transactions.insert(it, trans);
 
     bool ret = false;
     utils::inplace_receiver<void> retry_receiver;
-    asio2exec::scheduler sched{this->context()};
+    asio2exec::scheduler sched{this->get_executor()};
     auto retry_op = retry_receiver.start(
         stdexec::starts_on(sched, trans.run(this->_next_layer)));
     stdexec::start(retry_op);
@@ -276,11 +276,12 @@ template <class NextLayer> void datagram_client<NextLayer>::stop() noexcept {
 
 template <class NextLayer>
 asioice::task<void> datagram_client<NextLayer>::refresh_allocation_task() {
+    using Self = datagram_client<NextLayer>;
     if (!this->is_running())
         co_return;
     utils::scope_guard on_exit(
         [this]() noexcept { this->do_delete_allocation(); });
-    net::steady_timer timer(this->context());
+    typename Self::timer_type timer(this->get_executor());
     while (this->_lifetime > 0) {
         auto expire = std::chrono::seconds(this->_lifetime * 5 / 6);
         timer.expires_after(expire);
@@ -303,7 +304,9 @@ template <class NextLayer>
 void datagram_client<NextLayer>::start_refresh_allocation_task() {
     if (!this->is_running())
         return;
-    asio2exec::scheduler sched{this->context()};
+    asio2exec::basic_scheduler<
+        typename datagram_client<NextLayer>::executor_type>
+        sched{this->get_executor()};
     utils::detached_with_data(
         stdexec::starts_on(
             sched,
@@ -475,7 +478,8 @@ datagram_client<NextLayer>::permission_state::refresh_task() {
             channel.expire();
         }
     });
-    net::steady_timer timer(this->client().context());
+    typename datagram_client<NextLayer>::timer_type timer(
+        this->client().get_executor());
     while (true) {
         timer.expires_after(std::chrono::seconds(60 * 4));
         auto ec = co_await timer.async_wait(asio2exec::use_sender);
@@ -510,7 +514,9 @@ template <class NextLayer>
 void datagram_client<NextLayer>::permission_state::start() {
     if (!this->_client->is_running())
         return;
-    asio2exec::scheduler sched{this->client().context()};
+    asio2exec::basic_scheduler<
+        typename datagram_client<NextLayer>::executor_type>
+        sched{this->client().get_executor()};
     utils::detached_with_data(
         stdexec::starts_on(sched,
                            utils::stop_when(this->refresh_task(),
@@ -553,7 +559,10 @@ datagram_client<NextLayer>::create_permission(std::ranges::view auto peers,
     auto wait_finish =
         stdexec::just() | stdexec::let_value([&] {
             return this->_new_permissions_created.get_future() |
-                   stdexec::continues_on(asio2exec::scheduler{this->context()});
+                   stdexec::continues_on(
+                       asio2exec::basic_scheduler<
+                           typename datagram_client<NextLayer>::executor_type>{
+                           this->get_executor()});
         }) |
         stdexec::then([&] {
             return std::ranges::all_of(creating, [&](const auto &ip) {
@@ -796,7 +805,9 @@ template <class NextLayer>
 void datagram_client<NextLayer>::channel_state::start() {
     if (!this->_client->is_running())
         return;
-    asio2exec::scheduler sched{this->client().context()};
+    asio2exec::basic_scheduler<
+        typename datagram_client<NextLayer>::executor_type>
+        sched{this->client().get_executor()};
     utils::detached_with_data(
         stdexec::starts_on(sched,
                            utils::stop_when(this->refresh_task(),
@@ -816,7 +827,8 @@ asioice::task<void> datagram_client<NextLayer>::channel_state::refresh_task() {
         this->remove_from_set();
         this->remove_from_permission();
     });
-    net::steady_timer timer(this->client().context());
+    typename datagram_client<NextLayer>::timer_type timer(
+        this->client().get_executor());
     while (true) {
         timer.expires_after(std::chrono::seconds(60 * 9));
         auto ec = co_await timer.async_wait(asio2exec::use_sender);

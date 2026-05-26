@@ -25,12 +25,12 @@ void ping_pong(size_t n) {
 
     net::io_context ctx;
 
-    net::ip::udp::socket client_sock{ctx};
+    net::ip::udp::socket client_sock{ctx.get_executor()};
     client_sock.open(net::ip::udp::v4());
     client_sock.bind(
         net::ip::udp::endpoint(net::ip::make_address("127.0.0.1"), 0));
 
-    net::ip::udp::socket server_sock{ctx};
+    net::ip::udp::socket server_sock{ctx.get_executor()};
     server_sock.open(net::ip::udp::v4());
     server_sock.bind(
         net::ip::udp::endpoint(net::ip::make_address("127.0.0.1"), 0));
@@ -40,10 +40,10 @@ void ping_pong(size_t n) {
 
     auto client_transport =
         std::make_shared<datagram_transport<net::ip::udp::socket>>(
-            ctx, std::move(client_sock));
+            std::move(client_sock));
     auto server_transport =
         std::make_shared<datagram_transport<net::ip::udp::socket>>(
-            ctx, std::move(server_sock));
+            std::move(server_sock));
 
     client_transport->start();
     server_transport->start();
@@ -63,7 +63,7 @@ void ping_pong(size_t n) {
         }
         std::cout << "Client connected\n";
 
-        net::steady_timer timer{client.context()};
+        net::steady_timer timer{client.get_executor()};
         std::string data = "Hello exsctp.";
         for (size_t i = 0; i < n; ++i) {
             exsctp::message msg{0, 0,
@@ -96,7 +96,7 @@ void ping_pong(size_t n) {
         }
         std::cout << "Server connected\n";
 
-        net::steady_timer timer{server.context()};
+        net::steady_timer timer{server.get_executor()};
         for (size_t i = 0; i < n; ++i) {
             dcsctp::DcSctpMessage data = co_await server.read();
             std::cout << "Server read " << data.payload().size() << " bytes\n";

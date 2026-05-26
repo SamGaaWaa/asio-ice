@@ -81,8 +81,7 @@ struct interface {
     virtual const void *data() const noexcept = 0;
     virtual void *data() noexcept = 0;
 
-    virtual const net::io_context &context() const noexcept = 0;
-    virtual net::io_context &context() noexcept = 0;
+    virtual net::any_io_executor get_executor() const noexcept = 0;
 
     virtual void connect(const asioice::endpoint &endpoint) = 0;
 
@@ -157,12 +156,8 @@ template <class Transport> struct transport_impl final : public interface {
 
     void *data() noexcept override { return _transport.get(); }
 
-    const net::io_context &context() const noexcept override {
-        return _transport->context();
-    }
-
-    net::io_context &context() noexcept override {
-        return _transport->context();
+    net::any_io_executor get_executor() const noexcept override {
+        return _transport->get_executor();
     }
 
     void connect(const asioice::endpoint &endpoint) override {
@@ -261,6 +256,8 @@ struct any_transport {
     }
 
   public:
+    using executor_type = net::any_io_executor;
+
     any_transport() noexcept = default;
 
     template <class Transport>
@@ -293,11 +290,9 @@ struct any_transport {
 
     void *data() noexcept { return get_interface()->data(); }
 
-    const net::io_context &context() const noexcept {
-        return get_interface()->context();
+    executor_type get_executor() const noexcept {
+        return get_interface()->get_executor();
     }
-
-    net::io_context &context() noexcept { return get_interface()->context(); }
 
     bool empty() const noexcept { return _any.empty(); }
 

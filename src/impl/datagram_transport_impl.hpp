@@ -3,17 +3,7 @@
 #include "config.hpp"
 #if ASIOICE_USE_BOOST_ASIO > 0
 #define ASIO_TO_EXEC_USE_BOOST 1
-#include <boost/asio/io_context.hpp>
-namespace asioice {
-namespace net = boost::asio;
-}
-#else
-#include <asio/io_context.hpp>
-namespace asioice {
-namespace net = asio;
-}
 #endif
-
 #include "asio2exec.hpp"
 #include "receiver.hpp"
 #include "scope_guard.hpp"
@@ -31,17 +21,18 @@ template <class Socket>
 struct datagram_transport_impl
     : std::enable_shared_from_this<datagram_transport_impl<Socket>> {
     using endpoint_type = typename Socket::endpoint_type;
+    using executor_type = typename Socket::executor_type;
     using receiver_list_t =
         boost::intrusive::list<datagram_receiver,
                                boost::intrusive::constant_time_size<false>>;
 
-    datagram_transport_impl(net::io_context &ctx, Socket &&sock) noexcept
-        : _ctx(ctx), _sock(std::move(sock)),
-          _local_endpoint(_sock.local_endpoint()), _early_data(16 * 1024) {}
+    datagram_transport_impl(Socket &&sock) noexcept
+        : _sock(std::move(sock)), _local_endpoint(_sock.local_endpoint()),
+          _early_data(16 * 1024) {}
 
     template <class... Args>
-    datagram_transport_impl(net::io_context &ctx, Args &&...args)
-        : _ctx(ctx), _sock(std::forward<Args>(args)...),
+    datagram_transport_impl(Args &&...args)
+        : _sock(std::forward<Args>(args)...),
           _local_endpoint(_sock.local_endpoint()) {}
 
     datagram_transport_impl(const datagram_transport_impl &) = delete;
@@ -58,8 +49,8 @@ struct datagram_transport_impl
 
     auto &socket() noexcept { return _sock; }
     const auto &socket() const noexcept { return _sock; }
-    auto &context() noexcept { return _ctx; }
-    const auto &context() const noexcept { return _ctx; }
+    executor_type get_executor() const noexcept { return _sock.get_executor(); }
+    executor_type get_executor() noexcept { return _sock.get_executor(); }
 
     const auto &local_endpoint() const noexcept { return _local_endpoint; }
 
@@ -87,7 +78,6 @@ struct datagram_transport_impl
   private:
     asioice::task<void> recv_loop();
 
-    net::io_context &_ctx;
     Socket _sock;
     endpoint_type _local_endpoint;
     io_buffer_pool _pool{};

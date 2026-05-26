@@ -2,9 +2,10 @@
 
 #include <iostream>
 
-inline asioice::task<void> resolve_server(asioice::net::ip::udp::resolver &resolver,
-                                      std::string_view stun_server,
-                                      std::vector<asioice::endpoint> &endpoints) {
+inline asioice::task<void>
+resolve_server(asioice::net::ip::udp::resolver &resolver,
+               std::string_view stun_server,
+               std::vector<asioice::endpoint> &endpoints) {
     using namespace asioice;
     if (stun_server.size() < 1)
         co_return;
@@ -67,7 +68,8 @@ inline void get_local_addresses_test(uint64_t n) {
               << "ns\n";
 }
 
-inline asioice::task<void> gather_task(asioice::net::io_context &ctx, int num) try {
+inline asioice::task<void> gather_task(asioice::net::io_context &ctx,
+                                       int num) try {
     using namespace asioice;
 
     const char *stun_servers[] = {/*"stun.l.google.com:19302",*/
@@ -85,7 +87,7 @@ inline asioice::task<void> gather_task(asioice::net::io_context &ctx, int num) t
 
     auto agent1 =
         std::make_shared<impl::agent_datagram_impl<net::ip::udp::socket>>(
-            ctx, config1);
+            ctx.get_executor(), config1);
 
     agent_config config2 = {
         .username = "user2",
@@ -99,7 +101,7 @@ inline asioice::task<void> gather_task(asioice::net::io_context &ctx, int num) t
         .transport_policy = asioice::transport_policy::ALL};
     auto agent2 =
         std::make_shared<impl::agent_datagram_impl<net::ip::udp::socket>>(
-            ctx, config2);
+            ctx.get_executor(), config2);
 
     utils::scope_guard on_exit([&]() noexcept {
         agent1->close();
@@ -109,11 +111,11 @@ inline asioice::task<void> gather_task(asioice::net::io_context &ctx, int num) t
     // Trickle ICE
     exec::async_scope scope;
     asio2exec::scheduler sched{ctx};
-    net::steady_timer network_timer(ctx);
+    net::steady_timer network_timer(ctx.get_executor());
     auto network_latency = std::chrono::milliseconds(60);
 
-    net::steady_timer timer1(ctx, std::chrono::seconds(5));
-    net::steady_timer timer2(ctx, std::chrono::seconds(5));
+    net::steady_timer timer1(ctx.get_executor(), std::chrono::seconds(5));
+    net::steady_timer timer2(ctx.get_executor(), std::chrono::seconds(5));
 
     agent2->on_data([&](io_buffer_ptr data, uint8_t component) {
         // remove header
@@ -131,13 +133,14 @@ inline asioice::task<void> gather_task(asioice::net::io_context &ctx, int num) t
     });
 
     agent1->on_local_candidates(
-        [&agent2](const asioice::candidate *c, std::size_t n) -> asioice::task<void> {
+        [&agent2](const asioice::candidate *c,
+                  std::size_t n) -> asioice::task<void> {
             if (!c) {
                 std::cout << "Agent1 finish gathering\n";
                 co_await agent2->add_remote_candidate();
                 co_return;
             }
-            net::steady_timer timer(agent2->context(),
+            net::steady_timer timer(agent2->get_executor(),
                                     std::chrono::milliseconds(60));
             for (std::size_t i = 0; i < n; ++i) {
                 std::cout << "Agent1's local candidates: " << c[i].to_string()
@@ -152,13 +155,14 @@ inline asioice::task<void> gather_task(asioice::net::io_context &ctx, int num) t
         });
 
     agent2->on_local_candidates(
-        [&agent1](const asioice::candidate *c, std::size_t n) -> asioice::task<void> {
+        [&agent1](const asioice::candidate *c,
+                  std::size_t n) -> asioice::task<void> {
             if (!c) {
                 std::cout << "Agent2 finish gathering\n";
                 co_await agent1->add_remote_candidate();
                 co_return;
             }
-            net::steady_timer timer(agent1->context(),
+            net::steady_timer timer(agent1->get_executor(),
                                     std::chrono::milliseconds(60));
             for (std::size_t i = 0; i < n; ++i) {
                 std::cout << "Agent2's local candidates: " << c[i].to_string()
@@ -207,7 +211,8 @@ inline asioice::task<void> gather_task(asioice::net::io_context &ctx, int num) t
     std::cout << "Agent1 is connecting ...\n";
     scope.spawn(stdexec::starts_on(sched, agent1->connect()) | utils::ignore());
 
-    co_await (asioice::utils::on_scope_empty(scope) | stdexec::continues_on(sched));
+    co_await (asioice::utils::on_scope_empty(scope) |
+              stdexec::continues_on(sched));
 
     bool agent1_connected = agent1->state() == impl::agent_state_t::CONNECTED;
     bool agent2_connected = agent2->state() == impl::agent_state_t::CONNECTED;

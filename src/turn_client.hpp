@@ -41,6 +41,7 @@ class client<NextLayer, true> final : public turn_interface {
   public:
     using impl_type = impl::datagram_client<NextLayer>;
     using next_layer_type = typename impl_type::next_layer_type;
+    using executor_type = typename impl_type::executor_type;
 
     client(std::shared_ptr<next_layer_type> transport,
            const asioice::endpoint &server, std::string username,
@@ -71,8 +72,9 @@ class client<NextLayer, true> final : public turn_interface {
 
     void stop() noexcept { _impl->stop(); }
 
-    const auto &context() const noexcept { return _impl->context(); }
-    auto &context() noexcept { return _impl->context(); }
+    executor_type get_executor() const noexcept {
+        return _impl->get_executor();
+    }
     const auto &next_layer() const noexcept { return _impl->next_layer(); }
     auto &next_layer() noexcept { return _impl->next_layer(); }
     const auto &impl() const noexcept { return *_impl; }

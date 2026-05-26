@@ -125,13 +125,13 @@ std::string candidate_pair::to_string(int indent) const {
 asioice::task<void>
 candidate_pair::keepalive_task(std::chrono::milliseconds ms,
                                std::weak_ptr<candidate_pair> self) {
-    net::io_context *ctx = nullptr;
+    net::any_io_executor ex;
     if (auto p = self.lock(); !p || p->_keepalive_started)
         co_return;
     else {
         ICE_IN_DEBUG { std::cout << "Keepalive task started\n"; }
         p->_keepalive_started = true;
-        ctx = &p->local_candidate().transport.context();
+        ex = p->local_candidate().transport.get_executor();
     }
     utils::scope_guard on_exit([&]() noexcept {
         auto p = self.lock();
@@ -141,7 +141,7 @@ candidate_pair::keepalive_task(std::chrono::milliseconds ms,
         p->_keepalive_started = false;
     });
 
-    net::steady_timer timer{*ctx};
+    net::steady_timer timer{ex};
     while (true) {
         auto p = self.lock();
         if (!p)

@@ -6,11 +6,8 @@
 #include <cassert>
 #include <memory>
 #include <memory_resource>
-#include <iostream>
 
 #include <boost/container/small_vector.hpp>
-
-#include <stdexec/execution.hpp>
 
 namespace asioice::utils {
 
@@ -50,18 +47,9 @@ class small_buffer_resource final : public std::pmr::memory_resource {
     void *do_allocate(size_t bytes, size_t alignment) override {
         size_t offset = get_next_block_offset(alignment);
         if (offset + bytes > Size) {
-            ICE_IN_DEBUG {
-                std::cout
-                    << "Allocated with upstream resource, requested size: "
-                    << bytes << ", alignment: " << alignment << "\n";
-            }
             return _upstream->allocate(bytes, alignment);
         }
         _allocated_blocks.push_back(block{offset, bytes});
-        ICE_IN_DEBUG {
-            std::cout << "Allocated in small buffer, requested size: " << bytes
-                      << ", alignment: " << alignment << "\n";
-        }
         return &_storage[offset];
     }
 
