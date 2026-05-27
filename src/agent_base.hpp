@@ -1,0 +1,410 @@
+#pragma once
+
+#include "agent_config.hpp"
+#include "address.hpp"
+#include "candidate_pair.hpp"
+#include "config.hpp"
+#include "scope_guard.hpp"
+#include "stun.hpp"
+#include "task.hpp"
+#include "stop_when.hpp"
+#include "stun_transaction.hpp"
+#include "hash.hpp"
+#include "property.hpp"
+#include "async_function.hpp"
+#include "detached_with_data.hpp"
+#include "if_else.hpp"
+#include "turn_interface.hpp"
+
+#include <exec/async_scope.hpp>
+#include <exec/finally.hpp>
+#include <exec/start_detached.hpp>
+#include <exec/repeat_until.hpp>
+
+#if ASIOICE_USE_BOOST_ASIO > 0
+#define ASIO_TO_EXEC_USE_BOOST 1
+#include "asio2exec.hpp"
+#include <boost/asio/io_context.hpp>
+#include <boost/asio/ip/host_name.hpp>
+#include <boost/asio/ip/basic_endpoint.hpp>
+#include <boost/asio/ip/udp.hpp>
+#include <boost/asio/as_tuple.hpp>
+namespace asioice {
+namespace net = boost::asio;
+}
+#else
+#include "asio2exec.hpp"
+#include <asio/io_context.hpp>
+#include <asio/ip/host_name.hpp>
+#include <asio/ip/basic_endpoint.hpp>
+#include <asio/ip/udp.hpp>
+#include <asio/as_tuple.hpp>
+namespace asioice {
+namespace net = asio;
+}
+#endif
+
+#include <chrono>
+#include <iostream>
+#include <optional>
+#include <vector>
+#include <deque>
+#include <list>
+#include <memory>
+#include <algorithm>
+#include <ranges>
+
+#include <boost/intrusive/set.hpp>
+#include <boost/container/flat_map.hpp>
+
+namespace asioice {
+
+enum struct agent_state_t : char {
+    INIT,
+    GATHERING,
+    CONNECTING,
+    CONNECTED,
+    CLOSED
+};
+
+enum struct check_list_state_t { RUNNING, COMPLETED, FAILED };
+
+struct agent_base : std::enable_shared_from_this<agent_base> {
+    // using socket_type = Layer;
+    // using executor_type = typename Layer::executor_type;
+    // using scheduler_type = asio2exec::basic_scheduler<executor_type>;
+    // using raw_transport = datagram_transport<Layer>;
+    // using raw_transport_ptr = std::shared_ptr<raw_transport>;
+    // using config_type = agent_config;
+    // using turn_client_type = asioice::turn::client<raw_transport, true>;
+    // using timer_type =
+    // net::steady_timer::rebind_executor<executor_type>::other;
+  private:
+    // interface need to be overridden by agent_impl
+    virtual net::any_io_executor base_get_executor() const noexcept = 0;
+    virtual any_transport
+    base_create_socket_transport(const net::ip::address &local_addr) = 0;
+    virtual std::shared_ptr<turn::turn_interface> base_create_turn_client(
+        any_transport &socket_transport, const asioice::endpoint &server,
+        std::string_view username, std::string_view password) = 0;
+    virtual any_transport base_create_turn_transport(
+        std::shared_ptr<turn::turn_interface> client) = 0;
+
+  public:
+    agent_base(agent_config config) noexcept
+        : _config(std::move(config)),
+          _ice_controlling(_config.ice_controlling) {
+        asioice::hash::random_bytes(&_tie_breaker, sizeof(_tie_breaker));
+    }
+
+    agent_base(const agent_base &) = delete;
+    agent_base &operator=(const agent_base &) = delete;
+    agent_base(agent_base &&) = delete;
+    agent_base &operator=(agent_base &&) = delete;
+
+    virtual ~agent_base() {}
+
+    const auto &local_candidates() const noexcept { return _local_candidates; }
+    const auto &remote_candidates() const noexcept {
+        return _remote_candidates;
+    }
+    const auto &config() const noexcept { return _config; }
+
+    const auto &candidate_pairs() const noexcept { return _check_list; }
+
+    const auto &local_username() const noexcept { return _config.username; }
+    const auto &local_password() const noexcept { return _config.password; }
+
+    const auto &remote_username() const noexcept { return _remote_username; }
+    void set_remote_username(std::string username) noexcept {
+        _remote_username = std::move(username);
+    }
+    const auto &remote_password() const noexcept { return _remote_password; }
+    void set_remote_password(std::string password) noexcept {
+        _remote_password = std::move(password);
+    }
+
+    agent_state_t state() const noexcept { return _state; }
+    auto on_state_change() noexcept {
+        return _state.on_change() |
+               stdexec::continues_on(asio2exec::scheduler{base_get_executor()});
+    }
+
+    auto on_closed() noexcept {
+        return stdexec::just() | stdexec::let_value([this] {
+                   return utils::if_else(
+                       stdexec::just(this->_state == agent_state_t::CLOSED),
+                       [] { return stdexec::just(); },
+                       [this] {
+                           return this->_state.on_change() |
+                                  stdexec::continues_on(asio2exec::scheduler{
+                                      this->base_get_executor()});
+                       });
+               }) |
+               stdexec::then(
+                   [this] { return this->_state == agent_state_t::CLOSED; }) |
+               exec::repeat_until();
+    }
+
+    auto on_connected_or_closed() noexcept {
+        return stdexec::just() | stdexec::let_value([this] {
+                   return utils::if_else(
+                       stdexec::just(this->_state == agent_state_t::CONNECTED ||
+                                     this->_state == agent_state_t::CLOSED),
+                       [] { return stdexec::just(); },
+                       [this] {
+                           return this->_state.on_change() |
+                                  stdexec::continues_on(asio2exec::scheduler{
+                                      this->base_get_executor()});
+                       });
+               }) |
+               stdexec::then([this] {
+                   return this->_state == agent_state_t::CONNECTED ||
+                          this->_state == agent_state_t::CLOSED;
+               }) |
+               exec::repeat_until();
+    }
+
+    check_list_state_t check_list_state() const noexcept {
+        return _check_list_state;
+    }
+
+    void close() noexcept;
+
+    bool all_components_nominated() const noexcept;
+    bool all_components_have_valid_pair() const noexcept;
+
+    auto gather_candidates() {
+        return utils::stop_when(this->do_gather_candidates(),
+                                this->on_connected_or_closed());
+    }
+
+    asioice::task<bool> add_remote_candidate(asioice::candidate c);
+    auto add_remote_candidate() noexcept {
+        this->_remote_candidates_end = true;
+        return stdexec::just(true);
+    }
+
+    auto connect(auto... self) noexcept {
+        return utils::stop_when(this->do_connect(std::move(self)...),
+                                this->on_closed());
+    }
+
+    boost::container::small_vector<asioice::candidate_pair *, 2>
+    nominated_pairs() const;
+
+    template <class Func> void on_local_candidates(Func &&cb) {
+        _on_local_candidates = std::forward<Func>(cb);
+    }
+
+    auto sendto(net::const_buffer data, uint8_t component);
+
+    void
+    on_data(std::function<void(asioice::io_buffer_ptr, uint8_t)> callback) {
+        _on_data = std::move(callback);
+    }
+
+  protected:
+    std::shared_ptr<asioice::candidate_pair>
+    find_nominated_pair(uint8_t component) const noexcept;
+
+  private:
+    struct stun_receiver : asioice::datagram_receiver {
+        stun_receiver(const asioice::any_transport &transport,
+                      agent_base *agent, uint8_t component) noexcept
+            : asioice::datagram_receiver(), _transport(transport),
+              _agent(agent), _component(component) {
+            _transport.add_receiver(*this);
+        }
+        const auto &transport() const noexcept { return _transport; }
+        bool datagram_received(io_buffer_ptr &buffer,
+                               const asioice::endpoint &endpoint) override;
+
+      private:
+        asioice::any_transport _transport;
+        agent_base *_agent;
+        uint8_t _component;
+    };
+
+    struct check_task {
+        std::shared_ptr<asioice::candidate_pair> pair;
+        std::shared_ptr<asioice::candidate_pair> triggered_by{nullptr};
+        bool use_candidate{false};
+        uint64_t priority{0};
+    };
+
+    struct valid_pair {
+        std::shared_ptr<asioice::candidate_pair> pair;
+        std::shared_ptr<asioice::candidate_pair> source;
+        bool nominated = false;
+    };
+
+    struct transaction_state
+        : boost::intrusive::set_base_hook<
+              boost::intrusive::link_mode<boost::intrusive::auto_unlink>> {
+        transaction_state(asioice::candidate_pair &p,
+                          stun::transaction &t) noexcept
+            : pair{&p}, transaction{&t} {}
+
+        struct key_type {
+            using type = asioice::candidate_pair *;
+            type operator()(const transaction_state &s) const noexcept {
+                return s.pair;
+            }
+        };
+        asioice::candidate_pair *pair;
+        stun::transaction *transaction;
+    };
+
+    using transaction_state_set = boost::intrusive::multiset<
+        transaction_state,
+        boost::intrusive::key_of_value<typename transaction_state::key_type>,
+        boost::intrusive::constant_time_size<false>>;
+
+    enum struct request_result : char { succeed, failed, canceled };
+
+    asioice::task<void> do_gather_candidates();
+
+    asioice::task<void> get_component_candidates(
+        std::vector<asioice::candidate> &component_candidates,
+        uint8_t component, const std::vector<net::ip::address> &addresses);
+
+    asioice::task<void> server_reflexive_candidate(
+        std::vector<asioice::candidate> &srflx_candidates,
+        const asioice::candidate &local_candidate,
+        stun::transaction_set &transactions,
+        const asioice::endpoint &stun_server) noexcept;
+
+    asioice::task<void> server_reflexive_candidate(
+        std::vector<asioice::candidate> &srflx_candidates,
+        const std::vector<asioice::candidate> &local_candidates,
+        const std::vector<asioice::endpoint> &stun_servers) noexcept;
+
+    asioice::task<void> create_relayed_candidate(
+        std::vector<asioice::candidate> &component_candidates,
+        std::shared_ptr<turn::turn_interface> client,
+        any_transport host_transport, uint8_t component) noexcept;
+
+    void pair_local_candidate(const asioice::candidate &c);
+    void pair_remote_candidate(const asioice::candidate &c);
+    void init_pair_state(asioice::candidate_pair &pair) const noexcept;
+
+    auto generate_gathering_end_indication() noexcept {
+        bool old = this->_local_candidates_end;
+        this->_local_candidates_end = true;
+        return utils::if_else(
+            stdexec::just(!old && this->_on_local_candidates != nullptr),
+            [this] {
+                return stdexec::just(std::move(this->_on_local_candidates)) |
+                       stdexec::let_value(
+                           [](auto &cb) { return cb(nullptr, 0); });
+            },
+            [] { return stdexec::just(); });
+    }
+
+    void sort_check_list() noexcept;
+
+    check_task pick_next_pair() noexcept;
+
+    void unfreeze_initial() noexcept;
+
+    asioice::task<request_result> request(asioice::candidate_pair &pair,
+                                          const stun::message &req,
+                                          stun::message &resp) noexcept;
+
+    void switch_role(bool ice_controlling) noexcept;
+
+    void set_check_list_state(check_list_state_t s) noexcept {
+        _check_list_state = s;
+    }
+
+    std::shared_ptr<asioice::candidate_pair>
+    construct_valid_pair(const stun::message &req, const stun::message &resp,
+                         check_task &ct);
+
+    void build_request(stun::message &req,
+                       asioice::candidate_pair &pair) noexcept;
+
+    bool
+    in_triggered_check_queue(const asioice::candidate_pair &p) const noexcept;
+
+    asioice::task<void> check(check_task ct);
+    asioice::task<void> do_check(check_task ct);
+
+    bool verify_username(std::string_view name) const noexcept;
+
+    asioice::task<void> do_handle_request(asioice::any_transport transport,
+                                          asioice::endpoint source,
+                                          asioice::io_buffer_ptr buf);
+
+    asioice::task<bool> do_connect() noexcept;
+
+    template <class Transport>
+    auto send_stun(Transport &transport, const stun::message &msg,
+                   const asioice::endpoint &ep) {
+        auto byte_size = msg.serialized_size();
+        return stdexec::just(
+                   boost::container::small_vector<std::byte, 1024>(byte_size)) |
+               stdexec::let_value([&](auto &buf) {
+                   int n = msg.write_to(buf.data(), buf.size());
+                   assert(n > 0);
+                   buf.resize(n);
+                   return transport.async_send_to(
+                       net::const_buffer{buf.data(), buf.size()}, ep);
+               });
+    }
+
+    void check_complete(asioice::candidate_pair &pair) noexcept;
+
+    void request_handler(asioice::any_transport &transport,
+                         const asioice::endpoint &source,
+                         asioice::io_buffer_ptr buf);
+
+    void create_stun_receiver(const asioice::any_transport &transport,
+                              uint8_t component) noexcept;
+    void create_turn_permission(const net::ip::address &ip);
+
+    bool set_nominated(asioice::candidate_pair &pair) noexcept;
+    void default_nominate();
+
+    asioice::task<void> free_candidates();
+
+    void create_channel_for_valid_pair();
+
+    using check_list_type =
+        std::vector<std::shared_ptr<asioice::candidate_pair>>;
+
+    using valid_list_type = std::vector<valid_pair>;
+
+    asioice::shared_promise<void> _promise{}; // use for some detached work
+    stun::transaction_set _transactions{};    // use for connectivity checks
+    transaction_state_set _transaction_states{};
+    agent_config _config;
+    bool _ice_controlling = true;
+    bool _remote_is_lite = false;
+    std::string _remote_username{};
+    std::string _remote_password{};
+    uint64_t _tie_breaker = 0;
+    std::vector<asioice::candidate> _local_candidates{};
+    std::vector<asioice::candidate> _remote_candidates{};
+    bool _local_candidates_end = false;
+    bool _remote_candidates_end = false;
+    check_list_type _check_list{};
+    asioice::utils::property<check_list_state_t> _check_list_state{
+        check_list_state_t::RUNNING};
+    valid_list_type _valid_list{};
+    std::deque<check_task> _triggered_check_queue{};
+    std::size_t _pending_check_count{0};
+    asioice::shared_promise<void> _check_complete_notifier{};
+    asioice::shared_promise<void> _request_handler_promise{};
+    std::size_t _outgoing_request_handler_count{0};
+    std::function<void(asioice::io_buffer_ptr, uint8_t)> _on_data{};
+    std::list<stun_receiver> _stun_receivers{};
+    asioice::utils::property<agent_state_t> _state{agent_state_t::INIT};
+
+    // callbacks
+    utils::async_function<void(const asioice::candidate *, std::size_t)>
+        _on_local_candidates{};
+};
+
+} // namespace asioice

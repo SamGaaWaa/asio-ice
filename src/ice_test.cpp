@@ -1,4 +1,6 @@
-#include "ice_impl.hpp"
+#include "basic_agent.hpp"
+#include "ignore.hpp"
+#include "on_scope_empty.hpp"
 
 #include <iostream>
 
@@ -71,6 +73,7 @@ inline void get_local_addresses_test(uint64_t n) {
 inline asioice::task<void> gather_task(asioice::net::io_context &ctx,
                                        int num) try {
     using namespace asioice;
+    using Agent = basic_agent<net::ip::udp::socket>;
 
     const char *stun_servers[] = {/*"stun.l.google.com:19302",*/
                                   "14.29.112.241:20002"};
@@ -84,10 +87,7 @@ inline asioice::task<void> gather_task(asioice::net::io_context &ctx,
                           "1234"}},
         .component_count = 2,
         .transport_policy = asioice::transport_policy::ALL};
-
-    auto agent1 =
-        std::make_shared<impl::agent_datagram_impl<net::ip::udp::socket>>(
-            ctx.get_executor(), config1);
+    Agent agent1(ctx.get_executor(), config1);
 
     agent_config config2 = {
         .username = "user2",
@@ -99,14 +99,7 @@ inline asioice::task<void> gather_task(asioice::net::io_context &ctx,
             },
         .component_count = 2,
         .transport_policy = asioice::transport_policy::ALL};
-    auto agent2 =
-        std::make_shared<impl::agent_datagram_impl<net::ip::udp::socket>>(
-            ctx.get_executor(), config2);
-
-    utils::scope_guard on_exit([&]() noexcept {
-        agent1->close();
-        agent2->close();
-    });
+    Agent agent2(ctx.get_executor(), config2);
 
     // Trickle ICE
     exec::async_scope scope;
@@ -117,7 +110,7 @@ inline asioice::task<void> gather_task(asioice::net::io_context &ctx,
     net::steady_timer timer1(ctx.get_executor(), std::chrono::seconds(5));
     net::steady_timer timer2(ctx.get_executor(), std::chrono::seconds(5));
 
-    agent2->on_data([&](io_buffer_ptr data, uint8_t component) {
+    agent2.on_data([&](io_buffer_ptr data, uint8_t component) {
         // remove header
         data->consume_front(1);
         if (component == 1)
@@ -132,54 +125,52 @@ inline asioice::task<void> gather_task(asioice::net::io_context &ctx,
                       << '\n';
     });
 
-    agent1->on_local_candidates(
-        [&agent2](const asioice::candidate *c,
-                  std::size_t n) -> asioice::task<void> {
-            if (!c) {
-                std::cout << "Agent1 finish gathering\n";
-                co_await agent2->add_remote_candidate();
-                co_return;
-            }
-            net::steady_timer timer(agent2->get_executor(),
-                                    std::chrono::milliseconds(60));
-            for (std::size_t i = 0; i < n; ++i) {
-                std::cout << "Agent1's local candidates: " << c[i].to_string()
-                          << '\n';
-            }
-            std::cout << "Agent1 is sending local candidates to agent2\n";
-            // Simulate network latency
-            co_await timer.async_wait(asio2exec::use_sender);
-            for (std::size_t i = 0; i < n; ++i) {
-                co_await agent2->add_remote_candidate(c[i]);
-            }
-        });
+    agent1.on_local_candidates([&agent2](const asioice::candidate *c,
+                                         std::size_t n) -> asioice::task<void> {
+        if (!c) {
+            std::cout << "Agent1 finish gathering\n";
+            co_await agent2.add_remote_candidate();
+            co_return;
+        }
+        net::steady_timer timer(agent2.get_executor(),
+                                std::chrono::milliseconds(60));
+        for (std::size_t i = 0; i < n; ++i) {
+            std::cout << "Agent1's local candidates: " << c[i].to_string()
+                      << '\n';
+        }
+        std::cout << "Agent1 is sending local candidates to agent2\n";
+        // Simulate network latency
+        co_await timer.async_wait(asio2exec::use_sender);
+        for (std::size_t i = 0; i < n; ++i) {
+            co_await agent2.add_remote_candidate(c[i]);
+        }
+    });
 
-    agent2->on_local_candidates(
-        [&agent1](const asioice::candidate *c,
-                  std::size_t n) -> asioice::task<void> {
-            if (!c) {
-                std::cout << "Agent2 finish gathering\n";
-                co_await agent1->add_remote_candidate();
-                co_return;
-            }
-            net::steady_timer timer(agent1->get_executor(),
-                                    std::chrono::milliseconds(60));
-            for (std::size_t i = 0; i < n; ++i) {
-                std::cout << "Agent2's local candidates: " << c[i].to_string()
-                          << '\n';
-            }
-            std::cout << "Agent2 is sending local candidates to agent1\n";
-            // Simulate network latency
-            co_await timer.async_wait(asio2exec::use_sender);
-            for (std::size_t i = 0; i < n; ++i) {
-                co_await agent1->add_remote_candidate(c[i]);
-            }
-        });
+    agent2.on_local_candidates([&agent1](const asioice::candidate *c,
+                                         std::size_t n) -> asioice::task<void> {
+        if (!c) {
+            std::cout << "Agent2 finish gathering\n";
+            co_await agent1.add_remote_candidate();
+            co_return;
+        }
+        net::steady_timer timer(agent1.get_executor(),
+                                std::chrono::milliseconds(60));
+        for (std::size_t i = 0; i < n; ++i) {
+            std::cout << "Agent2's local candidates: " << c[i].to_string()
+                      << '\n';
+        }
+        std::cout << "Agent2 is sending local candidates to agent1\n";
+        // Simulate network latency
+        co_await timer.async_wait(asio2exec::use_sender);
+        for (std::size_t i = 0; i < n; ++i) {
+            co_await agent1.add_remote_candidate(c[i]);
+        }
+    });
 
     std::cout << "Agent1 is gathering...\n";
     scope.spawn(
         stdexec::starts_on(
-            sched, utils::stop_when(agent1->gather_candidates(),
+            sched, utils::stop_when(agent1.gather_candidates(),
                                     timer1.async_wait(asio2exec::use_sender))) |
         utils::ignore());
 
@@ -189,37 +180,37 @@ inline asioice::task<void> gather_task(asioice::net::io_context &ctx,
     network_timer.expires_after(network_latency);
     co_await network_timer.async_wait(asio2exec::use_sender);
 
-    agent2->set_remote_username(agent1->local_username());
-    agent2->set_remote_password(agent1->local_password());
+    agent2.set_remote_username(agent1.local_username());
+    agent2.set_remote_password(agent1.local_password());
 
     std::cout << "Agent2 is gathering...\n";
     scope.spawn(
         stdexec::starts_on(
-            sched, utils::stop_when(agent2->gather_candidates(),
+            sched, utils::stop_when(agent2.gather_candidates(),
                                     timer2.async_wait(asio2exec::use_sender))) |
         utils::ignore());
     std::cout << "Agent2 is connecting ...\n";
-    scope.spawn(stdexec::starts_on(sched, agent2->connect()) | utils::ignore());
+    scope.spawn(stdexec::starts_on(sched, agent2.connect()) | utils::ignore());
 
     std::cout << "Agent2 create ANSWER with empty candidate list\n";
     // Simulate network latency
     network_timer.expires_after(network_latency);
     co_await network_timer.async_wait(asio2exec::use_sender);
-    agent1->set_remote_username(agent2->local_username());
-    agent1->set_remote_password(agent2->local_password());
+    agent1.set_remote_username(agent2.local_username());
+    agent1.set_remote_password(agent2.local_password());
 
     std::cout << "Agent1 is connecting ...\n";
-    scope.spawn(stdexec::starts_on(sched, agent1->connect()) | utils::ignore());
+    scope.spawn(stdexec::starts_on(sched, agent1.connect()) | utils::ignore());
 
     co_await (asioice::utils::on_scope_empty(scope) |
               stdexec::continues_on(sched));
 
-    bool agent1_connected = agent1->state() == impl::agent_state_t::CONNECTED;
-    bool agent2_connected = agent2->state() == impl::agent_state_t::CONNECTED;
+    bool agent1_connected = agent1.state() == agent_state_t::CONNECTED;
+    bool agent2_connected = agent2.state() == agent_state_t::CONNECTED;
     if (agent1_connected && agent2_connected) {
         std::cout << "Connect success\n";
-        auto np1 = agent1->nominated_pairs();
-        auto np2 = agent2->nominated_pairs();
+        auto np1 = agent1.nominated_pairs();
+        auto np2 = agent2.nominated_pairs();
         std::cout << "\nAgent1's nominated pairs:\n";
         for (const auto &p : np1) {
             std::cout << p->to_string() << '\n';
@@ -234,9 +225,9 @@ inline asioice::task<void> gather_task(asioice::net::io_context &ctx,
             /*demultiplex with STUN*/ "\12This is RTCP packet";
         for (int i = 0; i < num; ++i) {
             if (rand() % 2)
-                co_await agent1->sendto(net::buffer(rtp), 1);
+                co_await agent1.sendto(net::buffer(rtp), 1);
             else
-                co_await agent1->sendto(net::buffer(rtcp), 2);
+                co_await agent1.sendto(net::buffer(rtcp), 2);
             timer1.expires_after(std::chrono::seconds(30));
             co_await timer1.async_wait(asio2exec::use_sender);
         }

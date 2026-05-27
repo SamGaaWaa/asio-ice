@@ -1,7 +1,13 @@
-namespace asioice::impl {
+#include "agent_base.hpp"
 
-template <class Layer>
-asioice::task<void> agent_datagram_impl<Layer>::server_reflexive_candidate(
+#include "on_scope_empty.hpp"
+#include "if_else.hpp"
+#include "small_set.hpp"
+#include "string_utils.hpp"
+
+namespace asioice {
+
+asioice::task<void> agent_base::server_reflexive_candidate(
     std::vector<asioice::candidate> &srflx_candidates,
     const asioice::candidate &local_candidate,
     stun::transaction_set &transactions,
@@ -67,12 +73,10 @@ asioice::task<void> agent_datagram_impl<Layer>::server_reflexive_candidate(
     co_return;
 }
 
-template <class Layer>
-asioice::task<void> agent_datagram_impl<Layer>::server_reflexive_candidate(
+asioice::task<void> agent_base::server_reflexive_candidate(
     std::vector<asioice::candidate> &srflx_candidates,
     const std::vector<asioice::candidate> &local_candidates,
     const std::vector<asioice::endpoint> &stun_servers) noexcept try {
-    using Self = agent_datagram_impl<Layer>;
     if (stun_servers.empty()) {
         ICE_IN_DEBUG { std::cerr << "no STUN servers\n"; }
         co_return;
@@ -92,13 +96,14 @@ asioice::task<void> agent_datagram_impl<Layer>::server_reflexive_candidate(
     for (std::size_t i = 0; i < stun_servers.size(); ++i) {
         const auto &endpoint = stun_servers[i];
         for (const auto &local_candidate : local_candidates) {
-            const typename Self::raw_transport *transport =
-                local_candidate.transport.get<typename Self::raw_transport>();
-            assert(transport);
-            if (transport->local_endpoint().address().is_v4() &&
+            // const typename Self::raw_transport *transport =
+            //     local_candidate.transport.get<typename
+            //     Self::raw_transport>();
+            const auto &transport = local_candidate.transport;
+            if (transport.local_endpoint().address().is_v4() &&
                 !endpoint.address().is_v4())
                 continue;
-            if (transport->local_endpoint().address().is_v6() &&
+            if (transport.local_endpoint().address().is_v6() &&
                 !endpoint.address().is_v6())
                 continue;
             scope.spawn(this->server_reflexive_candidate(
@@ -106,19 +111,17 @@ asioice::task<void> agent_datagram_impl<Layer>::server_reflexive_candidate(
                 endpoint));
         }
     }
-    co_await (utils::on_scope_empty(scope) |
-              stdexec::continues_on(
-                  typename Self::scheduler_type{this->get_executor()}));
+    co_await (
+        utils::on_scope_empty(scope) |
+        stdexec::continues_on(asio2exec::scheduler{this->base_get_executor()}));
 } catch (std::exception &e) {
     ICE_IN_DEBUG { std::cerr << e.what() << '\n'; }
     co_return;
 }
 
-template <class Layer>
-asioice::task<void> agent_datagram_impl<Layer>::get_component_candidates(
+asioice::task<void> agent_base::get_component_candidates(
     std::vector<asioice::candidate> &component_candidates, uint8_t component,
-    const std::vector<net::ip::address> &addresses, auto... self) {
-    using Self = agent_datagram_impl<Layer>;
+    const std::vector<net::ip::address> &addresses) {
 
     if (addresses.empty()) {
         co_return;
@@ -146,41 +149,10 @@ asioice::task<void> agent_datagram_impl<Layer>::get_component_candidates(
                 continue;
             }
         }
-        Layer sock(this->_executor);
-#if ASIOICE_USE_BOOST_ASIO
-        boost::system::error_code ec;
-#else
-        std::error_code ec;
-#endif
-        if (address.is_v4()) {
-            sock.open(net::ip::udp::v4(), ec);
-        } else {
-            sock.open(net::ip::udp::v6(), ec);
-        }
-        if (ec) {
-            ICE_IN_DEBUG {
-                std::cerr << "Failed to open socket: " << ec.message() << '\n';
-            }
+
+        auto transport = this->base_create_socket_transport(address);
+        if (!transport)
             continue;
-        }
-
-        // TODO: support port ranges
-        sock.bind(asioice::endpoint(address, 0), ec);
-        if (ec) {
-            ICE_IN_DEBUG {
-                std::cerr << "Failed to bind address \"" << address.to_string()
-                          << "\": " << ec.message() << '\n';
-            }
-            continue;
-        }
-
-        auto transport = std::make_shared<Self::raw_transport>(std::move(sock));
-
-        ICE_IN_DEBUG {
-            std::cout << "Host transport bound to "
-                      << transport->local_endpoint().address() << ':'
-                      << transport->local_endpoint().port() << '\n';
-        }
 
         host_candidates.emplace_back(asioice::candidate{
             .foundation = candidate_foundation(
@@ -188,19 +160,18 @@ asioice::task<void> agent_datagram_impl<Layer>::get_component_candidates(
             .component = component,
             .transport_type = this->_config.transport,
             .priority = candidate_priority(component, candidate_type::host),
-            .endpoint =
-                asioice::endpoint{address, transport->local_endpoint().port()},
+            .endpoint = transport.local_endpoint(),
             .type = candidate_type::host,
             .transport = transport});
         create_stun_receiver(host_candidates.back().transport, component);
-        transport->start();
+        transport.start();
 
         // create TURN clients
         for (const auto &t : this->_config.turn_servers) {
             scope.spawn(create_relayed_candidate(
                 component_candidates,
-                std::make_shared<typename Self::turn_client_type>(
-                    transport, t.address, t.username, t.password),
+                this->base_create_turn_client(transport, t.address, t.username,
+                                              t.password),
                 transport, component));
         }
     }
@@ -225,15 +196,14 @@ asioice::task<void> agent_datagram_impl<Layer>::get_component_candidates(
     if (!this->_config.turn_servers.empty()) {
         co_await (utils::on_scope_empty(scope) |
                   stdexec::continues_on(
-                      typename Self::scheduler_type{this->get_executor()}));
+                      asio2exec::scheduler{this->base_get_executor()}));
     }
     co_return;
 }
 
-template <class Layer>
-asioice::task<void> agent_datagram_impl<Layer>::create_relayed_candidate(
-    std::vector<asioice::candidate> &component_candidates, auto client,
-    typename agent_datagram_impl<Layer>::raw_transport_ptr host_transport,
+asioice::task<void> agent_base::create_relayed_candidate(
+    std::vector<asioice::candidate> &component_candidates,
+    std::shared_ptr<turn::turn_interface> client, any_transport host_transport,
     uint8_t component) noexcept {
     auto ret = co_await client->create_allocation(std::chrono::seconds(60 * 5));
     if (!ret) {
@@ -259,9 +229,10 @@ asioice::task<void> agent_datagram_impl<Layer>::create_relayed_candidate(
             .endpoint = *client->reflex_address(),
             .type = candidate_type::srflx,
             .related = client->local_endpoint(),
-            .transport = asioice::any_transport{std::move(host_transport)}});
+            .transport = std::move(host_transport)});
     }
-    asioice::any_transport turn_transport{client};
+    asioice::any_transport turn_transport =
+        this->base_create_turn_transport(client);
     create_stun_receiver(turn_transport, component);
     tmp.emplace_back(asioice::candidate{
         .foundation = candidate_foundation(
@@ -280,9 +251,7 @@ asioice::task<void> agent_datagram_impl<Layer>::create_relayed_candidate(
     co_return;
 }
 
-template <class Layer>
-asioice::task<void> agent_datagram_impl<Layer>::do_gather_candidates() {
-    using Self = agent_datagram_impl<Layer>;
+asioice::task<void> agent_base::do_gather_candidates() {
     if (this->_state == agent_state_t::CLOSED ||
         this->_state == agent_state_t::CONNECTED)
         co_return;
@@ -312,16 +281,16 @@ asioice::task<void> agent_datagram_impl<Layer>::do_gather_candidates() {
                                              addresses));
     }
     // TODO: may it throws
-    co_await (utils::on_scope_empty(scope) |
-              stdexec::continues_on(
-                  typename Self::scheduler_type{this->get_executor()}) |
-              stdexec::then([] { return std::monostate{}; }) |
-              stdexec::stopped_as_optional());
+    co_await (
+        utils::on_scope_empty(scope) |
+        stdexec::continues_on(asio2exec::scheduler{this->base_get_executor()}) |
+        stdexec::then([] { return std::monostate{}; }) |
+        stdexec::stopped_as_optional());
     // must execute
     co_await this->generate_gathering_end_indication();
 }
 
-inline bool __validate_remote_candidate(const asioice::candidate &c) noexcept {
+static bool __validate_remote_candidate(const asioice::candidate &c) noexcept {
     switch (c.type) {
     case asioice::candidate_type::host:
     case asioice::candidate_type::srflx:
@@ -332,9 +301,7 @@ inline bool __validate_remote_candidate(const asioice::candidate &c) noexcept {
     }
 }
 
-template <class Layer>
-void agent_datagram_impl<Layer>::pair_local_candidate(
-    const asioice::candidate &c) {
+void agent_base::pair_local_candidate(const asioice::candidate &c) {
     assert(c.type != asioice::candidate_type::srflx &&
            "Should not pair srflx candidates");
     for (const auto &remote_c : this->_remote_candidates) {
@@ -375,9 +342,7 @@ void agent_datagram_impl<Layer>::pair_local_candidate(
         this->sort_check_list();
 }
 
-template <class Layer>
-void agent_datagram_impl<Layer>::pair_remote_candidate(
-    const asioice::candidate &c) {
+void agent_base::pair_remote_candidate(const asioice::candidate &c) {
     for (const auto &local_c : this->_local_candidates) {
         if (!local_c.can_pair_with(c))
             continue;
@@ -425,9 +390,7 @@ void agent_datagram_impl<Layer>::pair_remote_candidate(
         this->sort_check_list();
 }
 
-template <class Layer>
-void agent_datagram_impl<Layer>::init_pair_state(
-    asioice::candidate_pair &pair) const noexcept {
+void agent_base::init_pair_state(asioice::candidate_pair &pair) const noexcept {
     if (!this->_config.trickle_ice)
         return;
     // TODO
@@ -459,15 +422,14 @@ void agent_datagram_impl<Layer>::init_pair_state(
     pair.set_state(asioice::candidate_pair::state_t::FROZEN);
 }
 
-template <class Layer>
-void agent_datagram_impl<Layer>::sort_check_list() noexcept {
+void agent_base::sort_check_list() noexcept {
     std::ranges::sort(this->_check_list,
                       [](const auto &a, const auto &b) noexcept {
                           return a->priority() > b->priority();
                       });
 }
 
-template <class Layer> void agent_datagram_impl<Layer>::close() noexcept {
+void agent_base::close() noexcept {
     if (this->_state == agent_state_t::CLOSED)
         return;
     this->_state = agent_state_t::CLOSED;
@@ -487,9 +449,8 @@ template <class Layer> void agent_datagram_impl<Layer>::close() noexcept {
     this->_on_data = nullptr;
 }
 
-template <class Layer>
-asioice::task<bool> agent_datagram_impl<Layer>::add_remote_candidate(
-    asioice::candidate remote_candidate, auto... self) {
+asioice::task<bool>
+agent_base::add_remote_candidate(asioice::candidate remote_candidate) {
     if (this->_state == agent_state_t::CLOSED ||
         this->_state == agent_state_t::CONNECTED ||
         this->_remote_candidates_end)
@@ -528,9 +489,7 @@ asioice::task<bool> agent_datagram_impl<Layer>::add_remote_candidate(
     co_return true;
 }
 
-template <class Layer>
-typename agent_datagram_impl<Layer>::check_task
-agent_datagram_impl<Layer>::pick_next_pair() noexcept {
+typename agent_base::check_task agent_base::pick_next_pair() noexcept {
     if (this->_check_list.empty()) {
         return {};
     }
@@ -610,8 +569,7 @@ agent_datagram_impl<Layer>::pick_next_pair() noexcept {
     return {};
 }
 
-template <class Layer>
-void agent_datagram_impl<Layer>::unfreeze_initial() noexcept {
+void agent_base::unfreeze_initial() noexcept {
     asioice::small_set<std::string_view> seen_foundations;
     std::vector<asioice::candidate_pair *> pairs(this->_check_list.size(),
                                                  nullptr);
@@ -631,9 +589,7 @@ void agent_datagram_impl<Layer>::unfreeze_initial() noexcept {
     this->_check_list_state = check_list_state_t::RUNNING;
 }
 
-template <class Layer>
-void agent_datagram_impl<Layer>::check_complete(
-    asioice::candidate_pair &pair) noexcept {
+void agent_base::check_complete(asioice::candidate_pair &pair) noexcept {
     if (pair.state() == asioice::candidate_pair::state_t::SUCCEEDED) {
         for (auto &p : this->_check_list) {
             if (p->state() == asioice::candidate_pair::state_t::FROZEN &&
@@ -651,10 +607,7 @@ void agent_datagram_impl<Layer>::check_complete(
     }
 }
 
-template <class Layer>
-asioice::task<bool>
-agent_datagram_impl<Layer>::do_connect(auto... self) noexcept {
-    using Self = agent_datagram_impl<Layer>;
+asioice::task<bool> agent_base::do_connect() noexcept {
     if (this->_state == agent_state_t::CONNECTING ||
         this->_state == agent_state_t::CLOSED ||
         this->_state == agent_state_t::CONNECTED ||
@@ -683,7 +636,7 @@ agent_datagram_impl<Layer>::do_connect(auto... self) noexcept {
             c.transport.clear_early_data();
         this->_promise.set_stopped();
     });
-    typename Self::timer_type ta{this->get_executor()};
+    net::steady_timer ta{this->base_get_executor()};
     exec::async_scope scope;
     while (this->_state != agent_state_t::CLOSED &&
            this->_state != agent_state_t::CONNECTED)
@@ -737,9 +690,9 @@ agent_datagram_impl<Layer>::do_connect(auto... self) noexcept {
     }
     scope.request_stop();
     ICE_IN_DEBUG { std::cout << "Waiting for all checks to finish\n"; }
-    co_await (utils::on_scope_empty(scope) |
-              stdexec::continues_on(
-                  typename Self::scheduler_type{this->get_executor()}));
+    co_await (
+        utils::on_scope_empty(scope) |
+        stdexec::continues_on(asio2exec::scheduler{this->base_get_executor()}));
     ICE_IN_DEBUG {
         std::cout << "connect: "
                   << (this->_state == agent_state_t::CONNECTED ? "success\n"
@@ -749,7 +702,7 @@ agent_datagram_impl<Layer>::do_connect(auto... self) noexcept {
         utils::detached_with_data(
             utils::stop_when(
                 stdexec::starts_on(
-                    typename Self::scheduler_type{this->get_executor()},
+                    asio2exec::scheduler{this->base_get_executor()},
                     this->free_candidates()),
                 this->_state.on_change()),
             this->shared_from_this());
@@ -761,7 +714,7 @@ agent_datagram_impl<Layer>::do_connect(auto... self) noexcept {
             utils::detached_with_data(
                 utils::stop_when(
                     stdexec::starts_on(
-                        typename Self::scheduler_type{this->get_executor()},
+                        asio2exec::scheduler{this->base_get_executor()},
                         valid_p.pair->keepalive_task(
                             this->_config.keepalive_interval, valid_p.pair)),
                     this->_state.on_change()),
@@ -771,8 +724,7 @@ agent_datagram_impl<Layer>::do_connect(auto... self) noexcept {
     co_return this->_state == agent_state_t::CONNECTED;
 }
 
-template <class Layer>
-void agent_datagram_impl<Layer>::switch_role(bool ice_controlling) noexcept {
+void agent_base::switch_role(bool ice_controlling) noexcept {
     ICE_IN_DEBUG {
         std::cout << "Switching to "
                   << (ice_controlling ? "controlling" : "controlled")
@@ -785,16 +737,14 @@ void agent_datagram_impl<Layer>::switch_role(bool ice_controlling) noexcept {
     this->sort_check_list();
 }
 
-template <class Layer>
-asioice::task<void> agent_datagram_impl<Layer>::check(check_task ct) {
-    typename agent_datagram_impl<Layer>::timer_type timer{
-        this->get_executor(), this->_config.connectivity_check_timeout};
+asioice::task<void> agent_base::check(check_task ct) {
+    net::steady_timer timer{this->base_get_executor(),
+                            this->_config.connectivity_check_timeout};
     co_await utils::stop_when(do_check(std::move(ct)),
                               timer.async_wait(asio2exec::use_sender));
 }
 
-template <class Layer>
-asioice::task<void> agent_datagram_impl<Layer>::do_check(check_task ct) {
+asioice::task<void> agent_base::do_check(check_task ct) {
     assert(ct.pair);
     auto &pair = *ct.pair;
     ++this->_pending_check_count;
@@ -828,7 +778,6 @@ asioice::task<void> agent_datagram_impl<Layer>::do_check(check_task ct) {
         if (pair.local_candidate().type == asioice::candidate_type::relay) {
             auto client = static_cast<turn::turn_interface *>(
                 pair.local_candidate().transport.data());
-            assert(client);
             if (!client->has_permission(
                     pair.remote_candidate().endpoint.address())) {
                 ICE_IN_DEBUG {
@@ -872,6 +821,7 @@ asioice::task<void> agent_datagram_impl<Layer>::do_check(check_task ct) {
             on_exit.dismiss();
             if (pair.state() == asioice::candidate_pair::state_t::IN_PROGRESS &&
                 this->_transaction_states.count(&pair) == 0) {
+                // TODO
                 // The last check task
                 pair.set_state(asioice::candidate_pair::state_t::WAITING);
             }
@@ -945,11 +895,10 @@ asioice::task<void> agent_datagram_impl<Layer>::do_check(check_task ct) {
     co_return;
 }
 
-template <class Layer>
 std::shared_ptr<asioice::candidate_pair>
-agent_datagram_impl<Layer>::construct_valid_pair(
-    const stun::message &req, const stun::message &resp,
-    typename agent_datagram_impl<Layer>::check_task &ct) {
+agent_base::construct_valid_pair(const stun::message &req,
+                                 const stun::message &resp,
+                                 agent_base::check_task &ct) {
     auto &pair = *ct.pair;
     assert(resp.xor_mapped_address);
     if (*resp.xor_mapped_address == pair.local_candidate().endpoint) {
@@ -1002,9 +951,8 @@ agent_datagram_impl<Layer>::construct_valid_pair(
     return valid_p;
 }
 
-template <class Layer>
-void agent_datagram_impl<Layer>::build_request(
-    stun::message &req, asioice::candidate_pair &pair) noexcept {
+void agent_base::build_request(stun::message &req,
+                               asioice::candidate_pair &pair) noexcept {
     std::string tx_username;
     tx_username.resize_and_overwrite(
         this->local_username().size() + this->remote_username().size() + 1,
@@ -1032,12 +980,9 @@ void agent_datagram_impl<Layer>::build_request(
     }
 }
 
-template <class Layer>
-asioice::task<typename agent_datagram_impl<Layer>::request_result>
-agent_datagram_impl<Layer>::request(asioice::candidate_pair &pair,
-                                    const stun::message &req,
-                                    stun::message &resp) noexcept {
-    using Self = agent_datagram_impl<Layer>;
+asioice::task<typename agent_base::request_result>
+agent_base::request(asioice::candidate_pair &pair, const stun::message &req,
+                    stun::message &resp) noexcept {
     request_result ret = request_result::failed;
     auto it = this->_transactions.lower_bound(req.transaction_id);
     if (it != this->_transactions.end() &&
@@ -1045,7 +990,7 @@ agent_datagram_impl<Layer>::request(asioice::candidate_pair &pair,
         ICE_IN_DEBUG { std::cout << "Transaction already in progress\n"; }
         co_return ret;
     }
-    stun::transaction trans(this->get_executor(), req,
+    stun::transaction trans(this->base_get_executor(), req,
                             pair.remote_candidate().endpoint, resp);
     this->_transactions.insert(it, trans);
     transaction_state trans_state{pair, trans};
@@ -1053,7 +998,7 @@ agent_datagram_impl<Layer>::request(asioice::candidate_pair &pair,
 
     utils::inplace_receiver<void> retry_receiver;
     auto retry_op = retry_receiver.start(
-        stdexec::starts_on(typename Self::scheduler_type{this->get_executor()},
+        stdexec::starts_on(asio2exec::scheduler{this->base_get_executor()},
                            trans.run(pair.local_candidate().transport)));
     stdexec::start(retry_op);
 
@@ -1152,16 +1097,14 @@ END:
     co_return ret;
 }
 
-template <class Layer>
-void agent_datagram_impl<Layer>::create_stun_receiver(
-    const asioice::any_transport &transport, uint8_t component) noexcept {
+void agent_base::create_stun_receiver(const asioice::any_transport &transport,
+                                      uint8_t component) noexcept {
     this->_stun_receivers.emplace_back(transport, this, component);
 }
 
-template <class Layer>
-void agent_datagram_impl<Layer>::request_handler(
-    asioice::any_transport &transport, const asioice::endpoint &source,
-    asioice::io_buffer_ptr buf) {
+void agent_base::request_handler(asioice::any_transport &transport,
+                                 const asioice::endpoint &source,
+                                 asioice::io_buffer_ptr buf) {
     if (this->_state == agent_state_t::CLOSED)
         return;
     if (this->_outgoing_request_handler_count > 256) {
@@ -1177,9 +1120,7 @@ void agent_datagram_impl<Layer>::request_handler(
         this->shared_from_this());
 }
 
-template <class Layer>
-bool agent_datagram_impl<Layer>::verify_username(
-    std::string_view name) const noexcept {
+bool agent_base::verify_username(std::string_view name) const noexcept {
     if (this->_remote_username.empty() &&
         (this->_state == agent_state_t::INIT ||
          this->_state == agent_state_t::GATHERING)) {
@@ -1200,12 +1141,10 @@ bool agent_datagram_impl<Layer>::verify_username(
                             name.end()} == this->_remote_username;
 }
 
-template <class Layer>
 asioice::task<void>
-agent_datagram_impl<Layer>::do_handle_request(asioice::any_transport transport,
-                                              asioice::endpoint source,
-                                              asioice::io_buffer_ptr buf) {
-    using Self = agent_datagram_impl<Layer>;
+agent_base::do_handle_request(asioice::any_transport transport,
+                              asioice::endpoint source,
+                              asioice::io_buffer_ptr buf) {
     ++this->_outgoing_request_handler_count;
     utils::scope_guard on_exit(
         [this]() noexcept { --this->_outgoing_request_handler_count; });
@@ -1278,7 +1217,7 @@ agent_datagram_impl<Layer>::do_handle_request(asioice::any_transport transport,
         do {
             co_await (this->_state.on_change() |
                       stdexec::continues_on(
-                          typename Self::scheduler_type{this->get_executor()}));
+                          asio2exec::scheduler{this->base_get_executor()}));
         } while (this->_state == agent_state_t::INIT ||
                  this->_state == agent_state_t::GATHERING);
         if (this->_state == agent_state_t::CLOSED ||
@@ -1405,8 +1344,7 @@ agent_datagram_impl<Layer>::do_handle_request(asioice::any_transport transport,
                    .use_candidate = use_candidate});
 }
 
-template <class Layer>
-bool agent_datagram_impl<Layer>::in_triggered_check_queue(
+bool agent_base::in_triggered_check_queue(
     const asioice::candidate_pair &pair) const noexcept {
     return std::ranges::find_if(this->_triggered_check_queue,
                                 [&](const auto &ct) noexcept {
@@ -1414,25 +1352,7 @@ bool agent_datagram_impl<Layer>::in_triggered_check_queue(
                                 }) != this->_triggered_check_queue.end();
 }
 
-template <class Layer>
-template <class Transport>
-auto agent_datagram_impl<Layer>::send_stun(Transport &transport,
-                                           const stun::message &msg,
-                                           const asioice::endpoint &ep) {
-    auto byte_size = msg.serialized_size();
-    return stdexec::just(
-               boost::container::small_vector<std::byte, 1024>(byte_size)) |
-           stdexec::let_value([&](auto &buf) {
-               int n = msg.write_to(buf.data(), buf.size());
-               assert(n > 0);
-               buf.resize(n);
-               return transport.async_send_to(
-                   net::const_buffer{buf.data(), buf.size()}, ep);
-           });
-}
-
-template <class Layer>
-bool agent_datagram_impl<Layer>::stun_receiver::datagram_received(
+bool agent_base::stun_receiver::datagram_received(
     io_buffer_ptr &buffer, const asioice::endpoint &source) {
     if (!buffer) [[unlikely]] // ignore empty buffers
         return true;
@@ -1472,9 +1392,7 @@ bool agent_datagram_impl<Layer>::stun_receiver::datagram_received(
                                   this->_transport.data());
 }
 
-template <class Layer>
-bool agent_datagram_impl<Layer>::set_nominated(
-    asioice::candidate_pair &pair) noexcept {
+bool agent_base::set_nominated(asioice::candidate_pair &pair) noexcept {
     if (this->_state == agent_state_t::CLOSED ||
         this->_state == agent_state_t::CONNECTED)
         return false;
@@ -1544,9 +1462,8 @@ bool agent_datagram_impl<Layer>::set_nominated(
     return true;
 }
 
-template <class Layer>
 boost::container::small_vector<asioice::candidate_pair *, 2>
-agent_datagram_impl<Layer>::nominated_pairs() const {
+agent_base::nominated_pairs() const {
     boost::container::small_vector<asioice::candidate_pair *, 2> res;
     res.reserve(this->_config.component_count);
     for (uint8_t component = 1; component <= this->_config.component_count;
@@ -1564,7 +1481,7 @@ agent_datagram_impl<Layer>::nominated_pairs() const {
     return res;
 }
 
-template <class Layer> void agent_datagram_impl<Layer>::default_nominate() {
+void agent_base::default_nominate() {
     if (this->_state == agent_state_t::CLOSED ||
         this->_state == agent_state_t::CONNECTED || !this->_ice_controlling)
         return;
@@ -1605,8 +1522,7 @@ template <class Layer> void agent_datagram_impl<Layer>::default_nominate() {
     }
 }
 
-template <class Layer>
-bool agent_datagram_impl<Layer>::all_components_nominated() const noexcept {
+bool agent_base::all_components_nominated() const noexcept {
     if (this->_valid_list.size() < this->_config.component_count)
         return false;
     for (uint8_t component = 1; component <= this->_config.component_count;
@@ -1620,9 +1536,7 @@ bool agent_datagram_impl<Layer>::all_components_nominated() const noexcept {
     return true;
 }
 
-template <class Layer>
-bool agent_datagram_impl<Layer>::all_components_have_valid_pair()
-    const noexcept {
+bool agent_base::all_components_have_valid_pair() const noexcept {
     if (this->_valid_list.size() < this->_config.component_count)
         return false;
     for (uint8_t component = 1; component <= this->_config.component_count;
@@ -1636,21 +1550,7 @@ bool agent_datagram_impl<Layer>::all_components_have_valid_pair()
     return true;
 }
 
-template <class Layer>
-auto agent_datagram_impl<Layer>::generate_gathering_end_indication() noexcept {
-    bool old = this->_local_candidates_end;
-    this->_local_candidates_end = true;
-    return utils::if_else(
-        stdexec::just(!old && this->_on_local_candidates != nullptr),
-        [this] {
-            return stdexec::just(std::move(this->_on_local_candidates)) |
-                   stdexec::let_value([](auto &cb) { return cb(nullptr, 0); });
-        },
-        [] { return stdexec::just(); });
-}
-
-template <class Layer>
-asioice::task<void> agent_datagram_impl<Layer>::free_candidates() {
+asioice::task<void> agent_base::free_candidates() {
     if (this->_state != agent_state_t::CONNECTED)
         co_return;
     const auto now = std::chrono::steady_clock::now();
@@ -1666,8 +1566,7 @@ asioice::task<void> agent_datagram_impl<Layer>::free_candidates() {
     // aggressive nomination is used, and the selected pairs can quickly
     // change after ICE has completed.
     if (duration.count() < 3000) {
-        typename agent_datagram_impl<Layer>::timer_type timer{
-            this->get_executor()};
+        net::steady_timer timer{this->base_get_executor()};
         timer.expires_after(std::chrono::milliseconds(3000 - duration.count()));
         co_await timer.async_wait(asio2exec::use_sender);
     }
@@ -1718,9 +1617,7 @@ asioice::task<void> agent_datagram_impl<Layer>::free_candidates() {
     ICE_IN_DEBUG { std::cout << "Candidates freed\n"; }
 }
 
-template <class Layer>
-void agent_datagram_impl<Layer>::create_turn_permission(
-    const net::ip::address &ip) {
+void agent_base::create_turn_permission(const net::ip::address &ip) {
     if (this->_state == agent_state_t::CLOSED)
         return;
     for (const auto &local_c : this->_local_candidates) {
@@ -1742,88 +1639,7 @@ void agent_datagram_impl<Layer>::create_turn_permission(
     }
 }
 
-template <class Layer> auto agent_datagram_impl<Layer>::on_closed() noexcept {
-    using Self = agent_datagram_impl<Layer>;
-    return stdexec::just() | stdexec::let_value([this] {
-               return utils::if_else(
-                   stdexec::just(this->_state == agent_state_t::CLOSED),
-                   [] { return stdexec::just(); },
-                   [this] {
-                       return this->_state.on_change() |
-                              stdexec::continues_on(
-                                  typename Self::scheduler_type{
-                                      this->get_executor()});
-                   });
-           }) |
-           stdexec::then(
-               [this] { return this->_state == agent_state_t::CLOSED; }) |
-           exec::repeat_until();
-}
-
-template <class Layer>
-auto agent_datagram_impl<Layer>::on_connected_or_closed() noexcept {
-    using Self = agent_datagram_impl<Layer>;
-    return stdexec::just() | stdexec::let_value([this] {
-               return utils::if_else(
-                   stdexec::just(this->_state == agent_state_t::CONNECTED ||
-                                 this->_state == agent_state_t::CLOSED),
-                   [] { return stdexec::just(); },
-                   [this] {
-                       return this->_state.on_change() |
-                              stdexec::continues_on(
-                                  typename Self::scheduler_type{
-                                      this->get_executor()});
-                   });
-           }) |
-           stdexec::then([this] {
-               return this->_state == agent_state_t::CONNECTED ||
-                      this->_state == agent_state_t::CLOSED;
-           }) |
-           exec::repeat_until();
-}
-
-template <class Layer>
-auto agent_datagram_impl<Layer>::sendto(net::const_buffer data,
-                                        uint8_t component) {
-    std::shared_ptr<asioice::candidate_pair> p{};
-    for (auto &valid_p : this->_valid_list) {
-        if (valid_p.nominated && valid_p.pair->component() == component)
-            [[likely]] {
-            p = valid_p.pair;
-            break;
-        }
-    }
-    ICE_IN_DEBUG {
-        if (!p)
-            std::cerr << "No nominated pairs for component " << component
-                      << '\n';
-    }
-    if (this->_state == agent_state_t::CLOSED) [[unlikely]]
-        p = nullptr;
-    return stdexec::just(std::move(p)) | stdexec::let_value([data](auto &pair) {
-               return utils::if_else(
-                   stdexec::just(pair == nullptr),
-                   [] {
-                       return stdexec::just(std::make_tuple(
-                           std::make_error_code(std::errc::bad_address),
-                           size_t{0}));
-                   },
-                   [&pair, data] {
-                       return pair->send(net::buffer(data)) |
-                              stdexec::then(
-                                  [&pair](
-                                      std::tuple<std::error_code, std::size_t>
-                                          res) {
-                                      if (!std::get<0>(res))
-                                          pair->update_keepalive_time();
-                                      return std::move(res);
-                                  });
-                   });
-           });
-}
-
-template <class Layer>
-void agent_datagram_impl<Layer>::create_channel_for_valid_pair() {
+void agent_base::create_channel_for_valid_pair() {
     for (auto &valid_p : this->_valid_list) {
         if (!valid_p.nominated ||
             valid_p.pair->local_candidate().type != candidate_type::relay)
@@ -1848,4 +1664,20 @@ void agent_datagram_impl<Layer>::create_channel_for_valid_pair() {
     }
 }
 
-} // namespace asioice::impl
+std::shared_ptr<asioice::candidate_pair>
+agent_base::find_nominated_pair(uint8_t component) const noexcept {
+    if (this->_state == agent_state_t::CLOSED) [[unlikely]]
+        return nullptr;
+    for (auto &valid_p : this->_valid_list) {
+        if (valid_p.nominated && valid_p.pair->component() == component)
+            [[likely]] {
+            return valid_p.pair;
+        }
+    }
+    ICE_IN_DEBUG {
+        std::cerr << "No nominated pairs for component " << component << '\n';
+    }
+    return nullptr;
+}
+
+} // namespace asioice

@@ -66,6 +66,7 @@ using send_result_type2 = exec::function<
     allocator_query>;
 
 struct interface {
+    virtual void start() = 0;
     virtual sendto_result_type1 send_to(net::const_buffer data,
                                         asioice::endpoint dst) = 0;
 
@@ -109,6 +110,12 @@ template <class Transport> struct transport_impl final : public interface {
 
     std::shared_ptr<Transport> get_shared() const noexcept {
         return _transport;
+    }
+
+    void start() override {
+        if constexpr (requires { _transport->start(); }) {
+            _transport->start();
+        }
     }
 
     sendto_result_type1 send_to(net::const_buffer data,
@@ -325,6 +332,8 @@ struct any_transport {
             return nullptr;
         return impl->get_shared();
     }
+
+    void start() { get_interface()->start(); }
 
     auto send_to(net::const_buffer data, const asioice::endpoint &dst,
                  allocator_type alloc = {}) {
