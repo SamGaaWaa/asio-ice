@@ -101,7 +101,7 @@ struct agent_base {
     nominated_pairs() const;
 
     void on_local_candidates(boost::compat::move_only_function<
-                             void(const asioice::candidate *, std::size_t)>
+                             void(std::span<const asioice::candidate>)>
                                  cb);
 
     void on_data(

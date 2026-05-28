@@ -99,8 +99,7 @@ agent_base::nominated_pairs() const {
 }
 
 void agent_base::on_local_candidates(
-    boost::compat::move_only_function<void(const asioice::candidate *,
-                                           std::size_t)>
+    boost::compat::move_only_function<void(std::span<const asioice::candidate>)>
         cb) {
     _impl->on_local_candidates(std::move(cb));
 }

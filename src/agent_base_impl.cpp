@@ -91,7 +91,7 @@ asioice::task<void> agent_base_impl::server_reflexive_candidate(
         .related = local_candidate.endpoint,
         .transport = std::move(transport)};
     if (this->_on_local_candidates)
-        this->_on_local_candidates(&srflx, 1);
+        this->_on_local_candidates({&srflx, 1});
     this->pair_local_candidate(local_candidate);
     srflx_candidates.emplace_back(std::move(srflx));
 } catch (const std::exception &e) {
@@ -210,8 +210,7 @@ asioice::task<void> agent_base_impl::get_component_candidates(
         co_return;
     if (this->_config.transport_policy == asioice::transport_policy::ALL &&
         this->_on_local_candidates)
-        this->_on_local_candidates(host_candidates.data(),
-                                   host_candidates.size());
+        this->_on_local_candidates(host_candidates);
     if (this->_config.transport_policy == asioice::transport_policy::ALL) {
         for (const auto &c : host_candidates)
             this->pair_local_candidate(c);
@@ -278,7 +277,7 @@ asioice::task<void> agent_base_impl::create_relayed_candidate(
         .type = candidate_type::relay,
         .transport = std::move(turn_transport)});
     if (this->_on_local_candidates)
-        this->_on_local_candidates(tmp.data(), tmp.size());
+        this->_on_local_candidates(tmp);
     this->pair_local_candidate(tmp.back());
     std::move(tmp.begin(), tmp.end(), std::back_inserter(component_candidates));
     co_return;
@@ -1717,7 +1716,7 @@ void agent_base_impl::generate_gathering_end_indication() noexcept {
     if (!old && this->_on_local_candidates) {
         try {
             auto cb = std::move(this->_on_local_candidates);
-            cb(nullptr, 0);
+            cb(std::span<const asioice::candidate>{});
         } catch (...) {
         }
     }

@@ -148,19 +148,19 @@ inline asioice::task<void> gather_task(asioice::net::io_context &ctx,
                       << '\n';
     });
 
-    agent1.on_local_candidates([&](const asioice::candidate *c, std::size_t n) {
-        if (!c) {
+    agent1.on_local_candidates([&](std::span<const asioice::candidate> c) {
+        if (c.empty()) {
             std::cout << "Agent1 finish gathering\n";
             scope.spawn(agent2.add_remote_candidate() | utils::ignore());
             return;
         }
-        for (std::size_t i = 0; i < n; ++i) {
+        for (std::size_t i = 0; i < c.size(); ++i) {
             std::cout << "Agent1's local candidates: " << c[i].to_string()
                       << '\n';
         }
         std::cout << "Agent1 is sending local candidates to agent2\n";
 
-        std::vector<asioice::candidate> candidates(c, c + n);
+        std::vector<asioice::candidate> candidates(c.begin(), c.end());
         // Simulate network latency
         scope.spawn([](auto candidates, auto &agent1,
                        auto &agent2) -> asioice::task<void> {
@@ -173,19 +173,19 @@ inline asioice::task<void> gather_task(asioice::net::io_context &ctx,
         }(std::move(candidates), agent1, agent2));
     });
 
-    agent2.on_local_candidates([&](const asioice::candidate *c, std::size_t n) {
-        if (!c) {
+    agent2.on_local_candidates([&](std::span<const asioice::candidate> c) {
+        if (c.empty()) {
             std::cout << "Agent2 finish gathering\n";
             scope.spawn(agent1.add_remote_candidate() | utils::ignore());
             return;
         }
-        for (std::size_t i = 0; i < n; ++i) {
+        for (std::size_t i = 0; i < c.size(); ++i) {
             std::cout << "Agent2's local candidates: " << c[i].to_string()
                       << '\n';
         }
         std::cout << "Agent2 is sending local candidates to agent1\n";
 
-        std::vector<asioice::candidate> candidates(c, c + n);
+        std::vector<asioice::candidate> candidates(c.begin(), c.end());
         // Simulate network latency
         scope.spawn([](auto candidates, auto &agent1,
                        auto &agent2) -> asioice::task<void> {

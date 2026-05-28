@@ -22,6 +22,7 @@
 #include <deque>
 #include <list>
 #include <memory>
+#include <span>
 
 #include <boost/intrusive/set.hpp>
 #include <boost/container/flat_map.hpp>
@@ -133,7 +134,7 @@ struct agent_base_impl : std::enable_shared_from_this<agent_base_impl> {
     nominated_pairs() const;
 
     void on_local_candidates(boost::compat::move_only_function<
-                             void(const asioice::candidate *, std::size_t)>
+                             void(std::span<const asioice::candidate>)>
                                  cb) {
         _on_local_candidates = std::move(cb);
     }
@@ -334,8 +335,7 @@ struct agent_base_impl : std::enable_shared_from_this<agent_base_impl> {
     asioice::utils::property<agent_state_t> _state{agent_state_t::INIT};
 
     // callbacks
-    boost::compat::move_only_function<void(const asioice::candidate *,
-                                           std::size_t)>
+    boost::compat::move_only_function<void(std::span<const asioice::candidate>)>
         _on_local_candidates{};
 };
 
