@@ -24,7 +24,7 @@ void allocate_test(std::size_t epoch_count) {
     net::io_context ctx;
 
     const net::ip::udp::endpoint server_ep(net::ip::make_address("127.0.0.1"),
-                                           13478);
+                                           3478);
     std::cout << "TURN server: " << server_ep.address().to_string() << ':'
               << server_ep.port() << '\n';
 
