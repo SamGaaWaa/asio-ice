@@ -17,7 +17,7 @@ template <class Sock> struct basic_agent_impl final : agent_base {
     using timer_type = net::steady_timer::rebind_executor<executor_type>::other;
 
     basic_agent_impl(executor_type ex, agent_config config)
-        : agent_base(std::move(config)), _executor(std::move(ex)) {}
+        : agent_base(ex, std::move(config)), _executor(std::move(ex)) {}
 
     executor_type get_executor() const noexcept { return _executor; }
 
@@ -81,10 +81,6 @@ template <class Sock> struct basic_agent_impl final : agent_base {
     }
 
   private:
-    net::any_io_executor base_get_executor() const noexcept override {
-        return _executor;
-    }
-
     any_transport
     base_create_socket_transport(const net::ip::address &local_addr) override {
         socket_type sock(this->_executor);
@@ -175,51 +171,41 @@ template <class Sock> struct basic_agent {
     using executor_type = typename socket_type::executor_type;
 
     basic_agent(executor_type ex, agent_config config)
-        : _impl(std::make_shared<impl_type>(std::move(ex), std::move(config))) {
+        : _impl(std::make_unique<impl_type>(std::move(ex), std::move(config))) {
     }
 
     basic_agent(const basic_agent &) = delete;
     basic_agent &operator=(const basic_agent &) = delete;
-
-    basic_agent(basic_agent &&other) noexcept : _impl{std::move(other._impl)} {}
-
-    basic_agent &operator=(basic_agent &&other) noexcept {
-        if (this != &other) {
-            close();
-            _impl = std::move(other._impl);
-        }
-        return *this;
-    }
-
-    ~basic_agent() { close(); }
+    basic_agent(basic_agent &&other) noexcept = default;
+    basic_agent &operator=(basic_agent &&other) noexcept = default;
 
     executor_type get_executor() const noexcept {
         return _impl->get_executor();
     }
 
-    const auto &local_candidates() const noexcept {
+    std::span<const asioice::candidate> local_candidates() const noexcept {
         return _impl->local_candidates();
     }
 
-    const auto &remote_candidates() const noexcept {
+    std::span<const asioice::candidate> remote_candidates() const noexcept {
         return _impl->remote_candidates();
     }
 
-    const auto &config() const noexcept { return _impl->config(); }
+    const agent_config& config() const noexcept { return _impl->config(); }
 
-    const auto &candidate_pairs() const noexcept {
+    const std::vector<std::shared_ptr<asioice::candidate_pair>>& candidate_pairs() const noexcept {
         return _impl->candidate_pairs();
     }
 
-    const auto &local_username() const noexcept {
+    const std::string &local_username() const noexcept {
         return _impl->local_username();
     }
 
-    const auto &local_password() const noexcept {
+    const std::string &local_password() const noexcept {
         return _impl->local_password();
     }
 
-    const auto &remote_username() const noexcept {
+    const std::string &remote_username() const noexcept {
         return _impl->remote_username();
     }
 
@@ -227,7 +213,7 @@ template <class Sock> struct basic_agent {
         _impl->set_remote_username(std::move(username));
     }
 
-    const auto &remote_password() const noexcept {
+    const std::string &remote_password() const noexcept {
         return _impl->remote_password();
     }
 
@@ -245,10 +231,6 @@ template <class Sock> struct basic_agent {
         return _impl->on_connected_or_closed();
     }
 
-    check_list_state_t check_list_state() const noexcept {
-        return _impl->check_list_state();
-    }
-
     bool all_components_nominated() const noexcept {
         return _impl->all_components_nominated();
     }
@@ -257,19 +239,18 @@ template <class Sock> struct basic_agent {
         return _impl->all_components_have_valid_pair();
     }
 
-    auto gather_candidates() { return _impl->gather_candidates(); }
+    asioice::task<void> gather_candidates() { return _impl->gather_candidates(); }
 
-    asioice::task<bool> add_remote_candidate(asioice::candidate c,
-                                             auto... self) {
-        return _impl->add_remote_candidate(std::move(c), std::move(self)...);
+    asioice::task<bool> add_remote_candidate(asioice::candidate c) {
+        return _impl->add_remote_candidate(std::move(c));
     }
 
     auto add_remote_candidate() noexcept {
         return _impl->add_remote_candidate();
     }
 
-    auto connect(auto... self) noexcept {
-        return _impl->connect(std::move(self)...);
+    asioice::task<bool> connect() noexcept {
+        return _impl->connect();
     }
 
     boost::container::small_vector<asioice::candidate_pair *, 2>
@@ -285,20 +266,17 @@ template <class Sock> struct basic_agent {
         return _impl->sendto(data, component);
     }
 
-    void
-    on_data(std::function<void(asioice::io_buffer_ptr, uint8_t)> callback) {
-        _impl->on_data(std::move(callback));
+    template <class Func>
+        requires (std::invocable<Func, asioice::io_buffer_ptr, uint8_t>)
+    void on_data(Func &&callback) {
+        _impl->on_data(std::forward<Func>(callback));
     }
 
     void close() {
-        if (_impl) {
-            _impl->close();
-            _impl = nullptr;
-        }
+        _impl->close();
     }
-
   private:
-    std::shared_ptr<impl_type> _impl;
+    std::unique_ptr<impl_type> _impl;
 };
 
 } // namespace asioice

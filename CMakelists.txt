@@ -74,6 +74,7 @@ file(GLOB ICE_SRC_FILES
     src/string_utils.cpp
     src/io_buffer2.cpp
     src/agent_base.cpp
+    src/agent_base_impl.cpp
 )
 if(ASIOICE_ENABLE_DTLS)
     list(APPEND ICE_SRC_FILES src/ssl/datagram_bio.cpp src/ssl/dtls_certificate.cpp)

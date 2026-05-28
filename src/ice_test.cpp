@@ -2,6 +2,29 @@
 #include "ignore.hpp"
 #include "on_scope_empty.hpp"
 
+#if ASIOICE_USE_BOOST_ASIO > 0
+#define ASIO_TO_EXEC_USE_BOOST 1
+#include "asio2exec.hpp"
+#include <boost/asio/io_context.hpp>
+#include <boost/asio/ip/host_name.hpp>
+#include <boost/asio/ip/basic_endpoint.hpp>
+#include <boost/asio/ip/udp.hpp>
+#include <boost/asio/as_tuple.hpp>
+namespace asioice {
+namespace net = boost::asio;
+}
+#else
+#include "asio2exec.hpp"
+#include <asio/io_context.hpp>
+#include <asio/ip/host_name.hpp>
+#include <asio/ip/basic_endpoint.hpp>
+#include <asio/ip/udp.hpp>
+#include <asio/as_tuple.hpp>
+namespace asioice {
+namespace net = asio;
+}
+#endif
+
 #include <iostream>
 
 inline asioice::task<void>
@@ -125,46 +148,54 @@ inline asioice::task<void> gather_task(asioice::net::io_context &ctx,
                       << '\n';
     });
 
-    agent1.on_local_candidates([&agent2](const asioice::candidate *c,
-                                         std::size_t n) -> asioice::task<void> {
+    agent1.on_local_candidates([&](const asioice::candidate *c, std::size_t n) {
         if (!c) {
             std::cout << "Agent1 finish gathering\n";
-            co_await agent2.add_remote_candidate();
-            co_return;
+            scope.spawn(agent2.add_remote_candidate() | utils::ignore());
+            return;
         }
-        net::steady_timer timer(agent2.get_executor(),
-                                std::chrono::milliseconds(60));
         for (std::size_t i = 0; i < n; ++i) {
             std::cout << "Agent1's local candidates: " << c[i].to_string()
                       << '\n';
         }
         std::cout << "Agent1 is sending local candidates to agent2\n";
+
+        std::vector<asioice::candidate> candidates(c, c + n);
         // Simulate network latency
-        co_await timer.async_wait(asio2exec::use_sender);
-        for (std::size_t i = 0; i < n; ++i) {
-            co_await agent2.add_remote_candidate(c[i]);
-        }
+        scope.spawn([](auto candidates, auto &agent1,
+                       auto &agent2) -> asioice::task<void> {
+            net::steady_timer timer(agent1.get_executor(),
+                                    std::chrono::milliseconds(60));
+            co_await timer.async_wait(asio2exec::use_sender);
+            for (auto &c : candidates) {
+                co_await agent2.add_remote_candidate(std::move(c));
+            }
+        }(std::move(candidates), agent1, agent2));
     });
 
-    agent2.on_local_candidates([&agent1](const asioice::candidate *c,
-                                         std::size_t n) -> asioice::task<void> {
+    agent2.on_local_candidates([&](const asioice::candidate *c, std::size_t n) {
         if (!c) {
             std::cout << "Agent2 finish gathering\n";
-            co_await agent1.add_remote_candidate();
-            co_return;
+            scope.spawn(agent1.add_remote_candidate() | utils::ignore());
+            return;
         }
-        net::steady_timer timer(agent1.get_executor(),
-                                std::chrono::milliseconds(60));
         for (std::size_t i = 0; i < n; ++i) {
             std::cout << "Agent2's local candidates: " << c[i].to_string()
                       << '\n';
         }
         std::cout << "Agent2 is sending local candidates to agent1\n";
+
+        std::vector<asioice::candidate> candidates(c, c + n);
         // Simulate network latency
-        co_await timer.async_wait(asio2exec::use_sender);
-        for (std::size_t i = 0; i < n; ++i) {
-            co_await agent1.add_remote_candidate(c[i]);
-        }
+        scope.spawn([](auto candidates, auto &agent1,
+                       auto &agent2) -> asioice::task<void> {
+            net::steady_timer timer(agent2.get_executor(),
+                                    std::chrono::milliseconds(60));
+            co_await timer.async_wait(asio2exec::use_sender);
+            for (auto &c : candidates) {
+                co_await agent1.add_remote_candidate(std::move(c));
+            }
+        }(std::move(candidates), agent1, agent2));
     });
 
     std::cout << "Agent1 is gathering...\n";
