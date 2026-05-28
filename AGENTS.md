@@ -1,149 +1,122 @@
 # Agent Guidelines for asio-ice
 
-This document provides guidelines for AI agents working on the asio-ice codebase.
-
 ## Project Overview
 
-asio-ice is an ICE (Interactive Connectivity Establishment) implementation in C++20/23. It uses Boost.Asio (or standalone Asio) for networking, OpenSSL for cryptography, and custom coroutine-based async abstractions.
+asio-ice is an ICE (RFC 8445) implementation in C++23 using Boost.Asio, OpenSSL, and [stdexec](https://github.com/NVIDIA/stdexec) for sender/receiver-based structured concurrency.
 
 ## Build Commands
 
-**Prerequisites**: CMake 3.22+, Boost 1.83+ (components: json, context), OpenSSL development libraries, compiler with C++23 support (Clang 20+, GCC 13+, MSVC 19.34+).
+**Prerequisites**: CMake 3.22+, Boost 1.89+, OpenSSL 3.0+ (optional, for DTLS), Clang 20+ / GCC 13+ / MSVC 19.34+, and `STDEXEC_DIR` pointing to stdexec's `include/` tree.
 
-### Standard Build Scripts
-- `./debug-build.sh` – Clang debug build with address sanitizer (output in `clang-build`)
-- `./release-build.sh` – Clang release build (`-O3`, no debug symbols)
-- `./gcc-debug-build.sh`, `./gcc-release-build.sh` – GCC builds
-- `./msvc-debug-build.bat` – MSVC debug build (Windows, requires VS environment)
+**IMPORTANT**: Every build script hardcodes personal paths (`/home/sam/opensource/...`, `C:\Boost\...`, etc.). You must edit `Boost_DIR`, `STDEXEC_DIR`, and `OPENSSL_ROOT_DIR` per machine before running them.
 
-### Manual CMake Configuration
+### Build scripts
+- `./debug-build.sh` — Clang debug, address sanitizer, output `clang-build/`
+- `./release-build.sh` — Clang release (`-O3`)
+- `./gcc-debug-build.sh`, `./gcc-release-build.sh` — output `gcc-build/`
+- `./msvc-debug-build.bat`, `./mingw-debug-build.bat` — Windows
+
+### Manual CMake
 ```bash
 mkdir -p build && cd build
 cmake .. -DCMAKE_BUILD_TYPE=Debug -DASIOICE_USE_BOOST_ASIO=ON \
-         -DBoost_DIR=<path_to_boost_cmake> \
-         -DOPENSSL_LIB_DIR=<openssl_lib_path> \
-         -DOPENSSL_INCLUDE_DIR=<openssl_include_path>
+         -DBoost_DIR=<path>/lib/cmake/Boost-1.89.0 \
+         -DSTDEXEC_DIR=<path>/stdexec/include
 make -j$(nproc)
 ```
-### Build Targets
-- `asioice` – static library
-- `ice_test` – main test executable
-- Individual test executables (`*_test`) – built from `src/*_test.cpp`
 
-## Lint/Format Commands
+### Build targets
+- `asioice` — static library
+- `ice_test` — full ICE integration test
+- `stun_test`, `candidate_test`, `hash_test`, `turn_client_test`, `async_queue_test`, `io_buffer_test`, `io_buffer2_test`, `on_scope_empty_test`
+- Optional (with `-DASIOICE_ENABLE_DTLS=ON`): `dtls_test`
+- Optional (with `-DASIOICE_ENABLE_SCTP_OVER_DTLS=ON`): `sctp_test`, `boost_fiber_test`
 
-### Code Formatting
-The project uses `.clang-format` with 80‑column limit, 4‑space indentation.
-
-To format a single file:
-```bash
-clang-format -i path/to/file.cpp
-```
-
-To format all source files:
-```bash
-find src include -name "*.cpp" -o -name "*.hpp" -o -name "*.ipp" | xargs clang-format -i
-```
-
-### Linting
-No automatic linting (clang‑tidy) is configured. Rely on compiler warnings and address sanitizer.
+### CMake options
+| Option | Default | Description |
+|--------|---------|-------------|
+| `ASIOICE_USE_BOOST_ASIO` | `ON` | Use Boost.Asio; `OFF` for standalone Asio |
+| `ASIOICE_USE_OPENSSL` | `OFF` | Auto-enabled by DTLS/SCTP |
+| `ASIOICE_ENABLE_DTLS` | `OFF` | Enables DTLS transport |
+| `ASIOICE_ENABLE_SCTP_OVER_DTLS` | `OFF` | Enables SCTP-over-DTLS + submodule build |
+| `ENABLE_IO_URING` | `OFF` | io_uring backend (Linux only) |
+| `ASIOICE_TEST` | `ON` | Build tests |
 
 ## Test Commands
 
-### Running Tests
-After building, test executables are in the build directory (e.g., `clang‑build/`). Each test is a standalone executable named `*_test`.
+Tests are standalone executables (no framework). Each `src/*_test.cpp` contains a `main()` and plain functions that throw `std::runtime_error` on failure.
 
-Run a single test (e.g., `hash_test`):
 ```bash
 cd clang-build
-./hash_test
+./hash_test          # run one test
+# Run all: execute each *_test executable in the build directory
 ```
 
-To run all tests, execute each `*_test` executable.
+## Code Style & Conventions
 
-### Test Structure
-- Tests are plain C++ functions that throw `std::runtime_error` on failure.
-- Each `*_test.cpp` file contains a `main()` function that calls the test functions.
-- No external test framework is used.
+### Namespaces
+- **Primary namespace**: `asioice` (NOT `ice`)
+- **Asio alias**: `namespace net = boost::asio;` (or `asio`) — defined *inside* `namespace asioice` in each header that needs it (not at global scope or in a shared header)
+- Sub-namespaces: `asioice::stun`, `asioice::turn`, `asioice::hash`, `asioice::utils`, `asioice::fiber`, `asioice::ssl`, `asioice::impl`
 
-### Debugging Tests
-Build with `-DCMAKE_BUILD_TYPE=Debug` and address sanitizer enabled (default in `debug-build.sh`). Use `gdb` or `lldb` as needed.
+### Naming
+- **Types** (structs, classes, enums): `snake_case` — e.g. `agent_base`, `candidate_pair`, `agent_config`
+- **Functions/variables**: `snake_case`
+- **Private members**: underscore prefix `_val`, `_impl`, `_data`
+- **Constants/macros**: `UPPER_SNAKE_CASE`
+- **Template parameters**: short identifiers — `T`, `Sock`, `Func`, `Key`, `Rng`, `BufferSequence`, etc.
 
-## Code Style Guidelines
+### Formatting
+- `.clang-format` enforces 80-column limit, 4-space indent, right-aligned pointers
+- `SortIncludes: Never` — includes order is **intentional**; never reorder or auto-sort them
+- Format command: `find src include -name "*.cpp" -o -name "*.hpp" -o -name "*.ipp" | xargs clang-format -i`
 
-### General Principles
-- Follow existing codebase conventions.
-- Prioritize correctness, performance, and clarity.
-- Use modern C++23 features where appropriate.
-### Naming Conventions
-- **Types (structs, classes, enums)**: `snake_case`
-- **Functions and variables**: `snake_case`
-- **Private member variables**: prefix with underscore (`_`)
-- **Constants and macros**: `UPPER_SNAKE_CASE`
-- **Template parameters**: `PascalCase`
-### Includes Order
+### Include order (preserve, do not reorder)
 1. Corresponding header (for `.cpp` files)
 2. Project headers (`"config.hpp"`, `"address.hpp"`, etc.)
-3. System/Boost headers (`<vector>`, `<boost/asio.hpp>`)
-4. Conditional includes based on `ASIOICE_USE_BOOST_ASIO`
-### Namespaces
-- Primary namespace: `ice`
-- Alias `net` for `boost::asio` or `asio` (depending on config)
-- Avoid `using namespace` in headers; allowed in `.cpp` files for brevity.
-### Error Handling
-- Use exceptions for unrecoverable errors (e.g., `throw std::runtime_error("message")`).
-- Use `std::error_code` for recoverable I/O errors (common with Asio operations).
-- Mark functions `noexcept` when they cannot throw (e.g., getters, move operations).
-- Use `[[likely]]`/`[[unlikely]]` for branch hints where performance is critical.
-### C++ Features
-- Prefer `constexpr` and `consteval` where possible.
-- Use coroutines (`co_await`, `co_return`) for async operations.
-- Use concepts (`requires`) to constrain templates.
-- Use `std::variant`, `std::optional`, `std::string_view` appropriately.
-- Prefer stack allocation and RAII types; use smart pointers for ownership.
-- Leverage Asio’s executors and I/O context; use custom async abstractions (`task`, `async_queue`, `shared_promise`).
-- Ensure thread‑safety where required (e.g., `std::mutex`, `std::atomic`).
-- Document public APIs with clear comments; follow existing comment style.
+3. System/Boost headers
+4. Conditional Boost.Asio vs standalone Asio includes using `#if ASIOICE_USE_BOOST_ASIO`
 
-## Project‑Specific Patterns & Common Pitfalls
+### Error handling
+- Unrecoverable errors: `throw std::runtime_error("message")`
+- Recoverable I/O errors: `std::error_code`
+- Mark functions `noexcept` when safe (getters, move constructors)
 
-### Configuration
-- `ASIOICE_USE_BOOST_ASIO` – 1 if using Boost.Asio, 0 for standalone Asio.
-- `ASIOICE_ENABLE_IO_URING` – 1 to enable io_uring support (Linux only).
-- `ICE_DEBUG` – 1 in debug builds, 0 in release.
+## Project-Specific Patterns & Gotchas
 
-### Transport Abstraction
-- `any_transport` type‑erased transport interface.
-- `dtls_transport` for DTLS‑secured communication.
-- `socket_transport` for plain UDP/TCP sockets.
+### config.hpp is generated — do not edit directly
+`include/config.hpp` is generated from `include/config.hpp.in` via CMake's `configure_file()` at line 60 of `CMakeLists.txt`. It is **gitignored**. Always edit `config.hpp.in` for configuration changes.
 
-### ICE Concepts
-- `candidate`, `candidate_pair`, `stun_transaction`, `turn_client`.
-- Follow RFC 5245 semantics; refer to existing implementations.
+### Key macros
+- `ASIOICE_USE_BOOST_ASIO` — 1 for Boost.Asio, 0 for standalone Asio
+- `ASIOICE_ENABLE_IO_URING` — 1 for io_uring (Linux only; CMake option is `ENABLE_IO_URING` without the prefix)
+- `ICE_DEBUG` — 1 in debug builds (`#ifndef NDEBUG`), 0 in release
 
-### Common Pitfalls
-- Update `config.hpp.in` when adding new configuration macros.
-- Include `config.hpp` in headers that use `ASIOICE_*` macros.
-- Conditionally include Boost.Asio / standalone Asio.
-- Mark move constructors `noexcept`.
-- Respect 80‑column limit (enforced by `.clang‑format`).
-
-## Quick Reference
-
-### Adding Code & Formatting
-- **New source file**: Add `.cpp` to `src/`, update `CMakeLists.txt` (`ICE_SRC_FILES` or `TEST_SOURCES`), create header, follow include order, write tests in `*_test.cpp`.
-- **New test**: Create `src/*_test.cpp`, implement throwing test functions, add `main()`, build and run executable.
-- **Formatting**: `find src include -name "*.cpp" -o -name "*.hpp" -o -name "*.ipp" | xargs clang-format -i`
-
-### Typical Workflow
-```bash
-./debug-build.sh
-cd clang-build
-./your_feature_test
-clang-format -i ../src/your_feature.cpp
+### asio2exec bridge
+The `asio2exec.hpp` header (vendored in `third_party/`) bridges Asio completion tokens to stdexec senders. When using Boost.Asio, you **must** define `ASIO_TO_EXEC_USE_BOOST` **before** including it:
+```cpp
+#define ASIO_TO_EXEC_USE_BOOST 1
+#include <asio2exec.hpp>
 ```
 
+### Boost linkage
+CMake sets `Boost_USE_STATIC_LIBS ON` and links `Boost::boost` (not individual components). The `Boost::json` and `Boost::context` libraries must be available.
+
+### `.ipp` files
+Template implementation files use `.ipp` extension (not `.inl`). Found in `src/ssl/` and `src/impl/`.
+
+### Submodule
+`exsctp/dcsctp` is a git submodule (https://github.com/samgaawaa/dcsctp). It is only built when `ASIOICE_ENABLE_SCTP_OVER_DTLS=ON`.
+
+### Coroutine type
+`asioice::task<T>` is an alias for `exec::basic_task<T, exec::__task::inline_task_context<T>>` from stdexec.
+
+### When adding files
+- New `.cpp` source: add to `ICE_SRC_FILES` in `CMakeLists.txt` (line 67–78)
+- New test: add to `TEST_SOURCES` glob in `CMakeLists.txt` (line 129–141)
+- New config macro: edit `include/config.hpp.in`, then re-run cmake
+
 ## References
-- `.clang‑format` – formatting rules
-- `CMakeLists.txt` – build configuration
-- Existing source files (`src/`, `include/`) – examples
+- `.clang-format` — formatting rules
+- `CMakeLists.txt` — build configuration and source file registration
+- `README.md` — API overview and usage examples

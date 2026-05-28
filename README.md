@@ -84,58 +84,81 @@ target_link_libraries(your_target PRIVATE asioice)
 
 ### Basic Example
 
-The following snippet creates two ICE agents, gathers candidates, exchanges them via trickle ICE with simulated network latency, and performs connectivity checks.
+The following snippet creates two ICE agents on the same machine, exchanges candidates directly via trickle ICE, and sends data over the nominated pair.
 
 ```cpp
 #include "basic_agent.hpp"
+#include "ignore.hpp"
+#include "on_scope_empty.hpp"
+
+#if ASIOICE_USE_BOOST_ASIO > 0
+#define ASIO_TO_EXEC_USE_BOOST 1
+#include "asio2exec.hpp"
+#include <boost/asio/io_context.hpp>
+#include <boost/asio/ip/udp.hpp>
+namespace asioice {
+namespace net = boost::asio;
+}
+#else
+#include "asio2exec.hpp"
+#include <asio/io_context.hpp>
+#include <asio/ip/udp.hpp>
+namespace asioice {
+namespace net = asio;
+}
+#endif
+
+#include <iostream>
 
 using namespace asioice;
 
-int main() {
+auto run_ice() -> task<void> {
     net::io_context ctx;
+    asio2exec::scheduler sched{ctx};
+
+    using Agent = basic_agent<net::ip::udp::socket>;
 
     agent_config config1{
-        .username = "user1",
-        .password = "pass1",
-        .ice_controlling = true,
-        .component_count = 1,
-        .transport_policy = transport_policy::ALL
+        .username = "user1", .password = "pass1",
+        .ice_controlling = true, .component_count = 1
     };
-
     agent_config config2{
-        .username = "user2",
-        .password = "pass2",
-        .ice_controlling = false,
-        .component_count = 1,
-        .transport_policy = transport_policy::ALL
+        .username = "user2", .password = "pass2",
+        .ice_controlling = false, .component_count = 1
     };
 
-    basic_agent<net::ip::udp::socket> agent1(ctx.get_executor(), config1);
-    basic_agent<net::ip::udp::socket> agent2(ctx.get_executor(), config2);
+    Agent agent1(ctx.get_executor(), config1);
+    Agent agent2(ctx.get_executor(), config2);
 
     agent2.set_remote_username(agent1.local_username());
     agent2.set_remote_password(agent1.local_password());
     agent1.set_remote_username(agent2.local_username());
     agent1.set_remote_password(agent2.local_password());
 
+    exec::async_scope scope;
+
     // Trickle ICE: exchange candidates as they arrive
     agent1.on_local_candidates(
-        [&](const asioice::candidate *c, std::size_t n) -> asioice::task<void> {
+        [&](const candidate *c, std::size_t n) {
             if (c) {
                 for (std::size_t i = 0; i < n; ++i)
-                    co_await agent2.add_remote_candidate(c[i]);
+                    scope.spawn(
+                        agent2.add_remote_candidate(c[i]) | utils::ignore());
             } else {
-                co_await agent2.add_remote_candidate(); // end of candidates
+                scope.spawn(
+                    agent2.add_remote_candidate() | utils::ignore());
             }
         });
 
     agent2.on_local_candidates(
-        [&](const asioice::candidate *c, std::size_t n) -> asioice::task<void> {
+        [&](const candidate *c, std::size_t n) {
             if (c) {
                 for (std::size_t i = 0; i < n; ++i)
-                    co_await agent1.add_remote_candidate(c[i]);
+                    scope.spawn(
+                        agent1.add_remote_candidate(c[i]) | utils::ignore());
             } else {
-                co_await agent1.add_remote_candidate();
+                scope.spawn(
+                    agent1.add_remote_candidate() | utils::ignore());
             }
         });
 
@@ -145,23 +168,41 @@ int main() {
                   << '\n';
     });
 
-    exec::async_scope scope;
-    asio2exec::scheduler sched{ctx};
-
     scope.spawn(stdexec::starts_on(sched, agent1.gather_candidates()));
     scope.spawn(stdexec::starts_on(sched, agent2.gather_candidates()));
     scope.spawn(stdexec::starts_on(sched, agent1.connect()));
     scope.spawn(stdexec::starts_on(sched, agent2.connect()));
 
-    ctx.run();
+    // Wait for all spawned work to complete
+    co_await (on_scope_empty(scope) | stdexec::continues_on(sched));
 
     if (agent1.state() == agent_state_t::CONNECTED &&
         agent2.state() == agent_state_t::CONNECTED) {
-        // Send data over the nominated pair, component 1
         co_await agent1.sendto(net::buffer("Hello ICE!"), 1);
     }
 }
+
+int main() {
+    net::io_context ctx;
+    exec::start_detached(
+        stdexec::starts_on(asio2exec::scheduler{ctx}, run_ice()));
+    ctx.run();
+}
 ```
+
+### WebSocket Signaling Example
+
+A more complex example demonstrating compatibility with Python aioice using Boost.Beast WebSocket for signaling:
+
+```bash
+# Build and run
+cd example && mkdir build && cd build
+cmake .. -DBoost_DIR=<path> -DSTDEXEC_DIR=<path>
+make websocket_ice_example
+./websocket_ice_example
+```
+
+Two peers exchange SDP offers/answers and trickle-ICE candidates over a WebSocket relay server (port 18080). Once ICE connects, application data flows over the nominated pair. See `example/websocket_ice_example.cpp` for the full source.
 
 ### Configuration
 
