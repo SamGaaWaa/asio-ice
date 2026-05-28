@@ -137,11 +137,13 @@ struct datagram_client
         }
     }
 
+    template <class ConstBufferSequence>
     asioice::task<std::tuple<std::error_code, std::size_t>>
-    async_send_to(buffer_sequence_type buffers,
+    async_send_to(ConstBufferSequence buffers,
                   net::ip::udp::endpoint destination, auto... self);
 
-    auto send_channel_data(buffer_sequence_type buffers, uint16_t channel,
+    template <class ConstBufferSequence>
+    auto send_channel_data(ConstBufferSequence buffers, uint16_t channel,
                            auto... self);
 
     auto &expired_channel() noexcept { return _expired_channel; }

@@ -646,13 +646,16 @@ void datagram_client<NextLayer>::delete_permission(
 }
 
 template <class NextLayer>
+template <class ConstBufferSequence>
 asioice::task<std::tuple<std::error_code, std::size_t>>
-datagram_client<NextLayer>::async_send_to(
-    typename datagram_client<NextLayer>::buffer_sequence_type buffers,
-    net::ip::udp::endpoint destination, auto... self) {
+datagram_client<NextLayer>::async_send_to(ConstBufferSequence buffer_sequence,
+                                          net::ip::udp::endpoint destination,
+                                          auto... self) {
     if (!this->is_running())
         co_return std::make_tuple(
             std::make_error_code(std::errc::operation_canceled), 0);
+
+    asioice::buffer_wrapper buffers{buffer_sequence};
     auto it = this->_peer_to_channel.find(destination);
     if (it != this->_peer_to_channel.end()) {
         ICE_IN_DEBUG { std::cout << "Sending channel data\n"; }
@@ -694,9 +697,10 @@ datagram_client<NextLayer>::async_send_to(
 }
 
 template <class NextLayer>
+template <class ConstBufferSequence>
 auto datagram_client<NextLayer>::send_channel_data(
-    typename datagram_client<NextLayer>::buffer_sequence_type buffers,
-    uint16_t channel, auto... self) {
+    ConstBufferSequence buffer_sequence, uint16_t channel, auto... self) {
+    asioice::buffer_wrapper buffers{buffer_sequence};
     auto data_size = net::buffer_size(buffers.buffers());
     return stdexec::just(std::move(buffers), std::array<char, 4>{},
                          std::move(self)...) |
