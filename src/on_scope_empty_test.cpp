@@ -1,8 +1,8 @@
-#include "config.hpp"
-#include "on_scope_empty.hpp"
-#include "task.hpp"
-#include "stop_when.hpp"
-#include "scope_guard.hpp"
+#include "asioice/config.hpp"
+#include "asioice/detail/on_scope_empty.hpp"
+#include "asioice/task.hpp"
+#include "asioice/detail/stop_when.hpp"
+#include "asioice/detail/scope_guard.hpp"
 
 #if ASIOICE_USE_BOOST_ASIO > 0
 #define ASIO_TO_EXEC_USE_BOOST 1

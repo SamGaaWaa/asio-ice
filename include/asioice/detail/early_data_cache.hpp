@@ -1,9 +1,9 @@
 #pragma once
 
-#include "config.hpp"
-#include "io_buffer2.hpp"
-#include "address.hpp"
-#include "receiver.hpp"
+#include "asioice/config.hpp"
+#include "asioice/detail/io_buffer.hpp"
+#include "asioice/address.hpp"
+#include "asioice/detail/receiver.hpp"
 
 #include <vector>
 #include <ranges>

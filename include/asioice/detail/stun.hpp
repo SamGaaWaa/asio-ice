@@ -1,8 +1,8 @@
 #pragma once
 
-#include "config.hpp"
-#include "address.hpp"
-#include "endian.hpp"
+#include "asioice/config.hpp"
+#include "asioice/address.hpp"
+#include "asioice/endian.hpp"
 
 #if ASIOICE_USE_BOOST_ASIO > 0
 #include <boost/asio/ip/address.hpp>

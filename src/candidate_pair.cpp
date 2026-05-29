@@ -1,6 +1,6 @@
-#include "candidate_pair.hpp"
-#include "scope_guard.hpp"
-#include "stun.hpp"
+#include "asioice/candidate_pair.hpp"
+#include "asioice/detail/scope_guard.hpp"
+#include "asioice/detail/stun.hpp"
 
 #include "json.hpp"
 

@@ -1,6 +1,6 @@
 #pragma once
 
-#include "config.hpp"
+#include "asioice/config.hpp"
 #if ASIOICE_USE_BOOST_ASIO > 0
 #define ASIO_TO_EXEC_USE_BOOST 1
 #endif
@@ -8,18 +8,18 @@
 #include <openssl/err.h>
 #include <openssl/ssl.h>
 
-#include "concepts.hpp"
+#include "asioice/concepts.hpp"
 #include "asio2exec.hpp"
-#include "receiver.hpp"
-#include "scope_guard.hpp"
-#include "shared_promise.hpp"
-#include "stop_when.hpp"
-#include "task.hpp"
-#include "async_mutex.hpp"
-#include "impl/buffer_wrapper.hpp"
-#include "ssl/datagram_bio.hpp"
-#include "ssl/dtls_config.hpp"
-#include "detached_with_data.hpp"
+#include "asioice/detail/receiver.hpp"
+#include "asioice/detail/scope_guard.hpp"
+#include "asioice/detail/shared_promise.hpp"
+#include "asioice/detail/stop_when.hpp"
+#include "asioice/task.hpp"
+#include "asioice/detail/async_mutex.hpp"
+#include "asioice/detail/buffer_wrapper.hpp"
+#include "asioice/ssl/datagram_bio.hpp"
+#include "asioice/ssl/dtls_config.hpp"
+#include "asioice/detail/detached_with_data.hpp"
 
 #include <memory>
 #include <deque>
@@ -148,4 +148,4 @@ struct dtls_impl : asioice::datagram_receiver,
 
 } // namespace asioice::ssl::impl
 
-#include "ssl/dtls_transport_impl.ipp"
+#include "asioice/ssl/dtls_transport_impl.ipp"

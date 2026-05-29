@@ -1,5 +1,5 @@
-#include "address.hpp"
-#include "scope_guard.hpp"
+#include "asioice/address.hpp"
+#include "asioice/detail/scope_guard.hpp"
 
 #ifdef _WIN32
 #include <iphlpapi.h>

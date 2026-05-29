@@ -1,10 +1,10 @@
 #pragma once
 
-#include "config.hpp"
-#include "async_queue.hpp"
-#include "io_buffer2.hpp"
-#include "scope_guard.hpp"
-#include "address.hpp"
+#include "asioice/config.hpp"
+#include "asioice/detail/async_queue.hpp"
+#include "asioice/detail/io_buffer.hpp"
+#include "asioice/detail/scope_guard.hpp"
+#include "asioice/address.hpp"
 
 #include <boost/intrusive/list_hook.hpp>
 

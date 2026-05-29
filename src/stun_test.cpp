@@ -1,11 +1,11 @@
 #include <chrono>
 #include <iostream>
 
-#include "address.hpp"
+#include "asioice/address.hpp"
 #include "base64.hpp"
 #include "hash.hpp"
 #include "json.hpp"
-#include "stun.hpp"
+#include "asioice/detail/stun.hpp"
 
 #if ASIOICE_USE_BOOST_ASIO > 0
 #define ASIO_TO_EXEC_USE_BOOST 1

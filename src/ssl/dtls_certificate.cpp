@@ -1,5 +1,5 @@
-#include "ssl/dtls_config.hpp"
-#include "scope_guard.hpp"
+#include "asioice/ssl/dtls_config.hpp"
+#include "asioice/detail/scope_guard.hpp"
 
 #include <openssl/ssl.h>
 #include <openssl/err.h>

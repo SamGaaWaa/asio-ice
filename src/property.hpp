@@ -1,7 +1,7 @@
 #pragma once
 
-#include "config.hpp"
-#include "shared_promise.hpp"
+#include "asioice/config.hpp"
+#include "asioice/detail/shared_promise.hpp"
 
 #include <chrono>
 

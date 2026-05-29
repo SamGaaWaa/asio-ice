@@ -1,10 +1,10 @@
 #pragma once
 
-#include "config.hpp"
-#include "impl/buffer_wrapper.hpp"
-#include "concepts.hpp"
-#include "receiver.hpp"
-#include "small_buffer_resource.hpp"
+#include "asioice/config.hpp"
+#include "asioice/detail/buffer_wrapper.hpp"
+#include "asioice/concepts.hpp"
+#include "asioice/detail/receiver.hpp"
+#include "asioice/detail/small_buffer_resource.hpp"
 
 #include <boost/any/basic_any.hpp>
 

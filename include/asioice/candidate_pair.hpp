@@ -7,10 +7,10 @@
 #include <boost/intrusive/list.hpp>
 #include <boost/intrusive/set.hpp>
 
-#include "config.hpp"
-#include "receiver.hpp"
-#include "candidate.hpp"
-#include "task.hpp"
+#include "asioice/config.hpp"
+#include "asioice/detail/receiver.hpp"
+#include "asioice/candidate.hpp"
+#include "asioice/task.hpp"
 
 namespace asioice {
 

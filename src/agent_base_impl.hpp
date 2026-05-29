@@ -1,17 +1,17 @@
 #pragma once
 
-#include "config.hpp"
-#include "agent_config.hpp"
-#include "agent_base.hpp"
-#include "address.hpp"
-#include "candidate_pair.hpp"
-#include "stun.hpp"
-#include "task.hpp"
-#include "stop_when.hpp"
-#include "stun_transaction.hpp"
+#include "asioice/config.hpp"
+#include "asioice/agent_config.hpp"
+#include "asioice/impl/agent_base.hpp"
+#include "asioice/address.hpp"
+#include "asioice/candidate_pair.hpp"
+#include "asioice/detail/stun.hpp"
+#include "asioice/task.hpp"
+#include "asioice/detail/stop_when.hpp"
+#include "asioice/detail/stun_transaction.hpp"
 #include "property.hpp"
-#include "if_else.hpp"
-#include "turn_interface.hpp"
+#include "asioice/detail/if_else.hpp"
+#include "asioice/impl/turn_interface.hpp"
 
 #include <exec/async_scope.hpp>
 #include <exec/repeat_until.hpp>

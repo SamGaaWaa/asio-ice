@@ -1,11 +1,12 @@
 #include "agent_base_impl.hpp"
-#include "on_scope_empty.hpp"
-#include "if_else.hpp"
-#include "small_set.hpp"
-#include "string_utils.hpp"
-#include "detached_with_data.hpp"
 #include "hash.hpp"
-#include "scope_guard.hpp"
+
+#include "asioice/detail/on_scope_empty.hpp"
+#include "asioice/detail/if_else.hpp"
+#include "asioice/detail/small_set.hpp"
+#include "asioice/detail/string_utils.hpp"
+#include "asioice/detail/detached_with_data.hpp"
+#include "asioice/detail/scope_guard.hpp"
 
 #if ASIOICE_USE_BOOST_ASIO > 0
 #define ASIO_TO_EXEC_USE_BOOST 1

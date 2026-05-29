@@ -1,7 +1,7 @@
 #pragma once
 
-#include "if_else.hpp"
-#include "shared_promise.hpp"
+#include "asioice/detail/if_else.hpp"
+#include "asioice/detail/shared_promise.hpp"
 
 #include <cassert>
 

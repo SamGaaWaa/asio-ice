@@ -57,7 +57,7 @@ if(ENABLE_IO_URING)
 else()
     set(ASIOICE_ENABLE_IO_URING 0)
 endif()
-configure_file("${CMAKE_CURRENT_SOURCE_DIR}/include/config.hpp.in" "${CMAKE_CURRENT_SOURCE_DIR}/include/config.hpp")
+configure_file("${CMAKE_CURRENT_SOURCE_DIR}/include/asioice/config.hpp.in" "${CMAKE_CURRENT_SOURCE_DIR}/include/asioice/config.hpp")
 
 # add_subdirectory(cppmdns)
 if(ASIOICE_ENABLE_SCTP_OVER_DTLS)
@@ -72,7 +72,7 @@ file(GLOB ICE_SRC_FILES
     src/hash.cpp
     src/candidate_pair.cpp
     src/string_utils.cpp
-    src/io_buffer2.cpp
+    src/io_buffer.cpp
     src/agent_base.cpp
     src/agent_base_impl.cpp
 )

@@ -1,6 +1,6 @@
-#include "config.hpp"
-#include "async_queue.hpp"
-#include "task.hpp"
+#include "asioice/config.hpp"
+#include "asioice/detail/async_queue.hpp"
+#include "asioice/task.hpp"
 
 #include <boost/circular_buffer.hpp>
 

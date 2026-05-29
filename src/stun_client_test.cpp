@@ -1,7 +1,7 @@
-#include "config.hpp"
-#include "scope_guard.hpp"
-#include "socket_transport.hpp"
-#include "stun_transaction.hpp"
+#include "asioice/config.hpp"
+#include "asioice/detail/scope_guard.hpp"
+#include "asioice/socket_transport.hpp"
+#include "asioice/detail/stun_transaction.hpp"
 
 #if ASIOICE_USE_BOOST_ASIO > 0
 #include <boost/asio/buffer.hpp>

@@ -1,7 +1,5 @@
 #pragma once
 
-#include "config.hpp"
-
 #include <cstddef>
 #include <cassert>
 #include <memory>

@@ -1,6 +1,6 @@
-#include "basic_agent.hpp"
-#include "ignore.hpp"
-#include "on_scope_empty.hpp"
+#include "asioice/basic_agent.hpp"
+#include "asioice/detail/ignore.hpp"
+#include "asioice/detail/on_scope_empty.hpp"
 
 #if ASIOICE_USE_BOOST_ASIO > 0
 #define ASIO_TO_EXEC_USE_BOOST 1

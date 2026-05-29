@@ -6,18 +6,18 @@
 #include <boost/intrusive/set.hpp>
 #include <boost/container/flat_set.hpp>
 
-#include "config.hpp"
-#include "async_queue.hpp"
+#include "asioice/config.hpp"
+#include "asioice/detail/async_queue.hpp"
 #include "binary.hpp"
-#include "impl/buffer_wrapper.hpp"
-#include "io_buffer2.hpp"
-#include "receiver.hpp"
-#include "shared_promise.hpp"
-#include "task.hpp"
-#include "stun_transaction.hpp"
-#include "inplace_receiver.hpp"
-#include "small_set.hpp"
-#include "detached_with_data.hpp"
+#include "asioice/detail/buffer_wrapper.hpp"
+#include "asioice/detail/io_buffer.hpp"
+#include "asioice/detail/receiver.hpp"
+#include "asioice/detail/shared_promise.hpp"
+#include "asioice/task.hpp"
+#include "asioice/detail/stun_transaction.hpp"
+#include "asioice/detail/inplace_receiver.hpp"
+#include "asioice/detail/small_set.hpp"
+#include "asioice/detail/detached_with_data.hpp"
 
 #if ASIOICE_USE_BOOST_ASIO > 0
 #define ASIO_TO_EXEC_USE_BOOST 1
@@ -368,4 +368,4 @@ struct datagram_client
 
 } // namespace asioice::turn::impl
 
-#include "impl/datagram_turn_client.ipp"
+#include "asioice/impl/datagram_turn_client.ipp"

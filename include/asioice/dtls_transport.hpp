@@ -1,7 +1,7 @@
 #pragma once
 
-#include "config.hpp"
-#include "ssl/dtls_transport_impl.hpp"
+#include "asioice/config.hpp"
+#include "asioice/ssl/dtls_transport_impl.hpp"
 
 namespace asioice::ssl {
 

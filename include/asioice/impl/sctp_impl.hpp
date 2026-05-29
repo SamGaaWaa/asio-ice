@@ -3,9 +3,9 @@
 #include <memory>
 #include <stdexcept>
 
-#include "config.hpp"
-#include "concepts.hpp"
-#include "receiver.hpp"
+#include "asioice/config.hpp"
+#include "asioice/concepts.hpp"
+#include "asioice/detail/receiver.hpp"
 #include "exsctp/transport.hpp"
 
 #if ASIOICE_USE_BOOST_ASIO > 0

@@ -1,7 +1,7 @@
-#include "agent_base.hpp"
-#include "turn_client.hpp"
-#include "switch_case.hpp"
-#include "socket_transport.hpp"
+#include "asioice/impl/agent_base.hpp"
+#include "asioice/turn_client.hpp"
+#include "asioice/detail/switch_case.hpp"
+#include "asioice/socket_transport.hpp"
 
 namespace asioice {
 

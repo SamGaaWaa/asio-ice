@@ -1,8 +1,8 @@
 #pragma once
 
-#include "io_buffer2.hpp"
-#include "packet_queue.hpp"
-#include "shared_promise.hpp"
+#include "asioice/detail/io_buffer.hpp"
+#include "asioice/detail/packet_queue.hpp"
+#include "asioice/detail/shared_promise.hpp"
 
 #include <openssl/bio.h>
 

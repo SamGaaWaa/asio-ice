@@ -1,14 +1,14 @@
 #pragma once
 
-#include "config.hpp"
-#include "any_transport.hpp"
-#include "stun.hpp"
-#include "shared_promise.hpp"
-#include "stop_when.hpp"
-#include "task.hpp"
-#include "scope_guard.hpp"
-#include "receiver.hpp"
-#include "inplace_receiver.hpp"
+#include "asioice/config.hpp"
+#include "asioice/any_transport.hpp"
+#include "asioice/detail/stun.hpp"
+#include "asioice/detail/shared_promise.hpp"
+#include "asioice/detail/stop_when.hpp"
+#include "asioice/task.hpp"
+#include "asioice/detail/scope_guard.hpp"
+#include "asioice/detail/receiver.hpp"
+#include "asioice/detail/inplace_receiver.hpp"
 
 #include <boost/intrusive/set.hpp>
 #include <boost/container/small_vector.hpp>

@@ -1,10 +1,9 @@
-#include "io_buffer2.hpp"
-#include "receiver.hpp"
-#include "scope_guard.hpp"
-#include "socket_transport.hpp"
-#include "turn_client.hpp"
-#include "candidate_pair.hpp"
-// #include "leak_detector.hpp"
+#include "asioice/detail/io_buffer.hpp"
+#include "asioice/detail/receiver.hpp"
+#include "asioice/detail/scope_guard.hpp"
+#include "asioice/socket_transport.hpp"
+#include "asioice/turn_client.hpp"
+#include "asioice/candidate_pair.hpp"
 
 #include <iostream>
 
@@ -15,9 +14,6 @@ using TurnClient = asioice::turn::client<Transport, true>;
 
 void allocate_test(std::size_t epoch_count) {
     using namespace asioice;
-    // debug::leak_detector_start();
-    // utils::scope_guard stop_leak_detector([]()noexcept {
-    // debug::leak_detector_stop(); });
 
     std::chrono::high_resolution_clock::time_point begin_time, end_time;
     std::size_t total_bytes = 0;

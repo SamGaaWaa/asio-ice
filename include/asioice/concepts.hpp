@@ -1,7 +1,7 @@
 #pragma once
 
-#include "config.hpp"
-#include "address.hpp"
+#include "asioice/config.hpp"
+#include "asioice/address.hpp"
 
 #if ASIOICE_USE_BOOST_ASIO > 0
 #include <boost/asio/buffer.hpp>
