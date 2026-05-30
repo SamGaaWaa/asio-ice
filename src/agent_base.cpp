@@ -88,7 +88,7 @@ exec::function<bool()> agent_base::add_remote_candidate() noexcept {
         [this] { return _impl->add_remote_candidate(); }};
 }
 
-asioice::task<bool> agent_base::connect() noexcept {
+asioice::task<bool> agent_base::connect() {
     co_await _impl->connect();
     co_return this->state() == agent_state_t::CONNECTED;
 }

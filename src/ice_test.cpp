@@ -1,6 +1,9 @@
-#include "asioice/basic_agent.hpp"
+#include "asioice/agent.hpp"
 #include "asioice/detail/ignore.hpp"
 #include "asioice/detail/on_scope_empty.hpp"
+#include "asioice/detail/stop_when.hpp"
+
+#include <exec/start_detached.hpp>
 
 #if ASIOICE_USE_BOOST_ASIO > 0
 #define ASIO_TO_EXEC_USE_BOOST 1
@@ -96,7 +99,7 @@ inline void get_local_addresses_test(uint64_t n) {
 inline asioice::task<void> gather_task(asioice::net::io_context &ctx,
                                        int num) try {
     using namespace asioice;
-    using Agent = basic_agent<net::ip::udp::socket>;
+    using Agent = asioice::agent;
 
     const char *stun_servers[] = {/*"stun.l.google.com:19302",*/
                                   "14.29.112.241:20002"};
