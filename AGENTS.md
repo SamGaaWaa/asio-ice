@@ -85,7 +85,7 @@ cd clang-build
 ## Project-Specific Patterns & Gotchas
 
 ### config.hpp is generated — do not edit directly
-`include/config.hpp` is generated from `include/config.hpp.in` via CMake's `configure_file()` at line 60 of `CMakeLists.txt`. It is **gitignored**. Always edit `config.hpp.in` for configuration changes.
+`include/asioice/config.hpp` is generated from `include/asioice/config.hpp.in` via CMake's `configure_file()`. The `.gitignore` entry (`include/config.hpp`) has a path mismatch; `config.hpp` is currently tracked but should not be hand-edited. Always edit `config.hpp.in` for configuration changes and re-run cmake.
 
 ### Key macros
 - `ASIOICE_USE_BOOST_ASIO` — 1 for Boost.Asio, 0 for standalone Asio
@@ -112,9 +112,9 @@ Template implementation files use `.ipp` extension (not `.inl`). Found in `src/s
 `asioice::task<T>` is an alias for `exec::basic_task<T, exec::__task::inline_task_context<T>>` from stdexec.
 
 ### When adding files
-- New `.cpp` source: add to `ICE_SRC_FILES` in `CMakeLists.txt` (line 67–78)
-- New test: add to `TEST_SOURCES` glob in `CMakeLists.txt` (line 129–141)
-- New config macro: edit `include/config.hpp.in`, then re-run cmake
+- New `.cpp` source: add to `ICE_SRC_FILES` in `CMakeLists.txt`
+- New test: add to `TEST_SOURCES` glob in `CMakeLists.txt`
+- New config macro: edit `include/asioice/config.hpp.in`, then re-run cmake
 
 ## References
 - `.clang-format` — formatting rules
