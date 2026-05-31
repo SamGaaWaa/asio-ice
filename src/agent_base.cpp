@@ -105,7 +105,7 @@ void agent_base::on_local_candidates(
 }
 
 void agent_base::on_data(
-    boost::compat::move_only_function<void(asioice::io_buffer_ptr, uint8_t)>
+    boost::compat::move_only_function<void(asioice::io_buffer_ptr &, uint8_t)>
         callback) {
     _impl->on_data(std::move(callback));
 }
@@ -113,6 +113,14 @@ void agent_base::on_data(
 std::shared_ptr<asioice::candidate_pair>
 agent_base::find_nominated_pair(uint8_t component) const noexcept {
     return _impl->find_nominated_pair(component);
+}
+
+void agent_base::add_receiver(ice_receiver &receiver) noexcept {
+    _impl->add_receiver(receiver);
+}
+
+void agent_base::remove_receiver(ice_receiver &receiver) noexcept {
+    _impl->remove_receiver(receiver);
 }
 
 } // namespace asioice

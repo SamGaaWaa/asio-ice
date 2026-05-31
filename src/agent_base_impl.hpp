@@ -139,14 +139,24 @@ struct agent_base_impl : std::enable_shared_from_this<agent_base_impl> {
         _on_local_candidates = std::move(cb);
     }
 
-    void on_data(
-        boost::compat::move_only_function<void(asioice::io_buffer_ptr, uint8_t)>
-            callback) {
+    void on_data(boost::compat::move_only_function<
+                 void(asioice::io_buffer_ptr &, uint8_t)>
+                     callback) {
         _on_data = std::move(callback);
     }
 
     std::shared_ptr<asioice::candidate_pair>
     find_nominated_pair(uint8_t component) const noexcept;
+
+    void add_receiver(ice_receiver &receiver) {
+        _receivers.push_back(&receiver);
+    }
+
+    void remove_receiver(ice_receiver &receiver) noexcept {
+        auto it = std::ranges::find(_receivers, &receiver);
+        if (it != _receivers.end())
+            _receivers.erase(it);
+    }
 
   private:
     struct stun_receiver : asioice::datagram_receiver {
@@ -300,6 +310,9 @@ struct agent_base_impl : std::enable_shared_from_this<agent_base_impl> {
 
     void create_channel_for_valid_pair();
 
+    void dispatch_received_data(asioice::io_buffer_ptr buffer,
+                                uint8_t component);
+
     using check_list_type =
         std::vector<std::shared_ptr<asioice::candidate_pair>>;
 
@@ -329,7 +342,8 @@ struct agent_base_impl : std::enable_shared_from_this<agent_base_impl> {
     asioice::shared_promise<void> _check_complete_notifier{};
     asioice::shared_promise<void> _request_handler_promise{};
     std::size_t _outgoing_request_handler_count{0};
-    boost::compat::move_only_function<void(asioice::io_buffer_ptr, uint8_t)>
+    std::vector<ice_receiver *> _receivers{};
+    boost::compat::move_only_function<void(asioice::io_buffer_ptr &, uint8_t)>
         _on_data{};
     std::list<stun_receiver> _stun_receivers{};
     asioice::utils::property<agent_state_t> _state{agent_state_t::INIT};

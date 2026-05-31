@@ -1,6 +1,7 @@
 #pragma once
 
 #include "asioice/impl/basic_agent_impl.hpp"
+#include "asioice/impl/ice_transport.hpp"
 
 namespace asioice {
 
@@ -8,9 +9,10 @@ template <class Sock> struct basic_agent {
     using impl_type = asioice::impl::basic_agent_impl<Sock>;
     using socket_type = Sock;
     using executor_type = typename socket_type::executor_type;
+    using ice_transport_type = impl::ice_transport<impl_type>;
 
     basic_agent(executor_type ex, agent_config config)
-        : _impl(std::make_unique<impl_type>(std::move(ex), std::move(config))) {
+        : _impl(std::make_shared<impl_type>(std::move(ex), std::move(config))) {
     }
 
     basic_agent(const basic_agent &) = delete;
@@ -102,7 +104,8 @@ template <class Sock> struct basic_agent {
         _impl->on_local_candidates(std::forward<Func>(cb));
     }
 
-    auto sendto(net::const_buffer data, uint8_t component) {
+    template <class ConstBufferSequence>
+    auto sendto(ConstBufferSequence data, uint8_t component) {
         return _impl->sendto(data, component);
     }
 
@@ -114,8 +117,19 @@ template <class Sock> struct basic_agent {
 
     void close() { _impl->close(); }
 
+    void add_receiver(ice_receiver &receiver) { _impl->add_receiver(receiver); }
+
+    void remove_receiver(ice_receiver &receiver) noexcept {
+        _impl->remove_receiver(receiver);
+    }
+
+    std::shared_ptr<ice_transport_type>
+    create_ice_transport(uint8_t component) {
+        return std::make_shared<ice_transport_type>(_impl, component);
+    }
+
   private:
-    std::unique_ptr<impl_type> _impl;
+    std::shared_ptr<impl_type> _impl;
 };
 
 } // namespace asioice

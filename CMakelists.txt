@@ -158,5 +158,3 @@ if(ASIOICE_TEST)
         target_link_libraries(sctp_test PRIVATE OpenSSL::SSL OpenSSL::Crypto exsctp)
     endif()
 endif()
-
-add_subdirectory(example/aioice)

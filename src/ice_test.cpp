@@ -2,6 +2,7 @@
 #include "asioice/detail/ignore.hpp"
 #include "asioice/detail/on_scope_empty.hpp"
 #include "asioice/detail/stop_when.hpp"
+#include "asioice/dtls_transport.hpp"
 
 #include <exec/start_detached.hpp>
 
@@ -29,6 +30,8 @@ namespace net = asio;
 #endif
 
 #include <iostream>
+
+#define MAX_BUFFER 1200
 
 inline asioice::task<void>
 resolve_server(asioice::net::ip::udp::resolver &resolver,
@@ -100,9 +103,15 @@ inline asioice::task<void> gather_task(asioice::net::io_context &ctx,
                                        int num) try {
     using namespace asioice;
     using Agent = asioice::agent;
+    using IceTransport = typename Agent::ice_transport_type;
+    using DtlsTransport = ssl::dtls_transport<IceTransport>;
 
     const char *stun_servers[] = {/*"stun.l.google.com:19302",*/
                                   "14.29.112.241:20002"};
+
+    ssl::dtls_certificate server_cert, client_cert;
+    std::string server_fp = server_cert.get_fingerprint_sha256();
+    std::string client_fp = client_cert.get_fingerprint_sha256();
 
     agent_config config1 = {
         .username = "user1",
@@ -111,9 +120,12 @@ inline asioice::task<void> gather_task(asioice::net::io_context &ctx,
         .turn_servers = {{{net::ip::make_address("127.0.0.1"), 13478},
                           "samgaawaa",
                           "1234"}},
-        .component_count = 2,
+        .component_count = 1,
         .transport_policy = asioice::transport_policy::ALL};
     Agent agent1(ctx.get_executor(), config1);
+    std::shared_ptr<IceTransport> transport1 = agent1.create_ice_transport(1);
+    DtlsTransport dtls_client{transport1, std::move(client_cert)};
+    dtls_client.set_expected_remote_fingerprint(server_fp);
 
     agent_config config2 = {
         .username = "user2",
@@ -123,9 +135,12 @@ inline asioice::task<void> gather_task(asioice::net::io_context &ctx,
             {
                 {net::ip::make_address("14.29.112.241"), 20002},
             },
-        .component_count = 2,
+        .component_count = 1,
         .transport_policy = asioice::transport_policy::ALL};
     Agent agent2(ctx.get_executor(), config2);
+    std::shared_ptr<IceTransport> transport2 = agent2.create_ice_transport(1);
+    DtlsTransport dtls_server{transport2, std::move(server_cert)};
+    dtls_server.set_expected_remote_fingerprint(client_fp);
 
     // Trickle ICE
     exec::async_scope scope;
@@ -135,21 +150,6 @@ inline asioice::task<void> gather_task(asioice::net::io_context &ctx,
 
     net::steady_timer timer1(ctx.get_executor(), std::chrono::seconds(5));
     net::steady_timer timer2(ctx.get_executor(), std::chrono::seconds(5));
-
-    agent2.on_data([&](io_buffer_ptr data, uint8_t component) {
-        // remove header
-        data->consume_front(1);
-        if (component == 1)
-            std::cout << "RTP from agent1: "
-                      << std::string_view{(const char *)data->data(),
-                                          data->size()}
-                      << '\n';
-        else if (component == 2)
-            std::cout << "RTCP from agent1: "
-                      << std::string_view{(const char *)data->data(),
-                                          data->size()}
-                      << '\n';
-    });
 
     agent1.on_local_candidates([&](std::span<const asioice::candidate> c) {
         if (c.empty()) {
@@ -253,24 +253,103 @@ inline asioice::task<void> gather_task(asioice::net::io_context &ctx,
         for (const auto &p : np2) {
             std::cout << p->to_string() << '\n';
         }
-        std::string_view rtp =
-            /*demultiplex with STUN*/ "\12This is RTP packet";
-        std::string_view rtcp =
-            /*demultiplex with STUN*/ "\12This is RTCP packet";
-        for (int i = 0; i < num; ++i) {
-            if (rand() % 2)
-                co_await agent1.sendto(net::buffer(rtp), 1);
-            else
-                co_await agent1.sendto(net::buffer(rtcp), 2);
-            timer1.expires_after(std::chrono::seconds(30));
-            co_await timer1.async_wait(asio2exec::use_sender);
-        }
+        // std::string_view rtp =
+        //     /*demultiplex with STUN*/ "\12This is RTP packet";
+        // std::string_view rtcp =
+        //     /*demultiplex with STUN*/ "\12This is RTCP packet";
+        // for (int i = 0; i < num; ++i) {
+        //     if (rand() % 2)
+        //         co_await agent1.sendto(net::buffer(rtp), 1);
+        //     else
+        //         co_await agent1.sendto(net::buffer(rtcp), 2);
+        //     timer1.expires_after(std::chrono::seconds(30));
+        //     co_await timer1.async_wait(asio2exec::use_sender);
+        // }
     } else {
         std::cout << "Agent1 connect "
                   << (agent1_connected ? "success, " : "failed, ")
                   << "agent2 connect "
                   << (agent2_connected ? "success\n" : "failed\n");
+        co_return;
     }
+    std::tuple<std::tuple<std::error_code>, std::tuple<std::error_code>>
+        dtls_handshake_res = co_await stdexec::when_all(
+            dtls_client.async_handshake(DtlsTransport::handshake_type::client),
+            dtls_server.async_handshake(DtlsTransport::handshake_type::server));
+    if (std::get<0>(std::get<0>(dtls_handshake_res)) != std::error_code{} ||
+        std::get<0>(std::get<1>(dtls_handshake_res)) != std::error_code{}) {
+        std::cout << "DTLS handshake failed\n";
+    } else {
+        std::cout << "DTLS handshake success\n";
+    }
+    scope.spawn([](DtlsTransport &dtls_client) -> asioice::task<void> {
+        std::string msg;
+        char recv_buf[1024];
+        while (true) {
+            std::cout << ">>>";
+            std::getline(std::cin, msg);
+            if (msg == "quit") {
+                auto ec = co_await dtls_client.async_shutdown(false);
+                if (ec)
+                    std::cerr << "Shutdown failed: " << ec.message() << '\n';
+                else
+                    std::cout << "Shutdown success\n";
+                co_return;
+            }
+            auto [ec, n] = co_await dtls_client.async_send(net::buffer(msg));
+            if (ec) {
+                std::cerr << "Send failed: " << ec.message() << '\n';
+                co_return;
+            }
+            std::tie(ec, n) = co_await dtls_client.async_receive(
+                net::buffer(recv_buf, sizeof(recv_buf)));
+            if (ec) {
+                std::cerr << "Read failed: " << ec.message() << '\n';
+                co_return;
+            }
+            if (n == 0) {
+                std::cerr << "Peer closed\n";
+                co_return;
+            }
+            std::cout << std::string_view{recv_buf, n} << '\n';
+        }
+    }(dtls_client));
+    scope.spawn([](DtlsTransport &dtls_server) -> asioice::task<void> {
+        std::cout << "Waiting for data from client...\n";
+        char buffer[MAX_BUFFER];
+        while (true) {
+            auto [ec, n] = co_await dtls_server.async_receive(
+                net::buffer(buffer, sizeof(buffer) - 1));
+            if (ec) {
+                std::cout << "Server read error: " << ec.message() << '\n';
+                co_return;
+            } else if (n > 0) {
+                buffer[n] = '\0';
+                std::tie(ec, n) =
+                    co_await dtls_server.async_send(net::buffer(buffer, n));
+                if (ec || n == 0) {
+                    std::cout << "Sent response failed\n";
+                    co_return;
+                }
+            } else if (n == 0) {
+                std::cout << "Client closed the connection\n";
+                // test fast shutdown
+                net::steady_timer timer{dtls_server.get_executor(),
+                                        std::chrono::seconds(5)};
+                co_await timer.async_wait(asio2exec::use_sender);
+                ec = co_await dtls_server.async_shutdown(false);
+                if (ec)
+                    std::cerr << "Server shutdown failed: " << ec.message()
+                              << '\n';
+                else
+                    std::cout << "Server shutdown success\n";
+                co_return;
+            }
+        }
+    }(dtls_server));
+
+    co_await (asioice::utils::on_scope_empty(scope) |
+              stdexec::continues_on(sched));
 } catch (const std::exception &e) {
     std::cerr << "Unhandled exception: " << e.what() << '\n';
     co_return;

@@ -40,7 +40,11 @@ struct datagram_receiver
     }
 
     virtual bool datagram_received(io_buffer_ptr &buffer,
-                                   const asioice::endpoint &endpoint) = 0;
+                                   const asioice::endpoint &endpoint) {
+        return false;
+    }
+
+    virtual bool datagram_received(io_buffer_ptr &buffer) { return false; }
 
     void detach() noexcept {
         if (is_linked()) {
@@ -51,6 +55,18 @@ struct datagram_receiver
 
   private:
     std::shared_ptr<void> _transport;
+};
+
+struct ice_receiver {
+    ice_receiver() noexcept = default;
+    ice_receiver(const ice_receiver &) = delete;
+    ice_receiver &operator=(const ice_receiver &) = delete;
+    ice_receiver(ice_receiver &&) = delete;
+    ice_receiver &operator=(ice_receiver &&) = delete;
+    virtual ~ice_receiver() = default;
+
+    virtual uint8_t component() const noexcept = 0;
+    virtual void data_received(io_buffer_ptr buffer) = 0;
 };
 
 struct queue_datagram_receiver : public datagram_receiver {
@@ -78,9 +94,9 @@ struct queue_datagram_receiver : public datagram_receiver {
     asioice::async_queue<std::tuple<io_buffer_ptr, asioice::endpoint>> _q;
 };
 
-template <class ReceiverList>
+template <class ReceiverList, class... Args>
 inline bool dispatch_receivers(ReceiverList &receivers, io_buffer_ptr &buffer1,
-                               const asioice::endpoint &endpoint) {
+                               Args &&...args) {
     if (receivers.empty())
         return false;
     auto buffer{std::move(buffer1)};
@@ -101,7 +117,7 @@ inline bool dispatch_receivers(ReceiverList &receivers, io_buffer_ptr &buffer1,
         auto &r = receivers1.front();
         receivers1.pop_front();
         tmp.push_back(r);
-        if (r.datagram_received(buffer, endpoint)) {
+        if (r.datagram_received(buffer, std::forward<Args>(args)...)) {
             on_err.dismiss();
             return true;
         }

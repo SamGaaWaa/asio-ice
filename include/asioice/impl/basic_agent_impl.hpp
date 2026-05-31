@@ -22,7 +22,8 @@ template <class Sock> struct basic_agent_impl final : agent_base {
 
     executor_type get_executor() const noexcept { return _executor; }
 
-    auto sendto(net::const_buffer data, uint8_t component) {
+    template <class ConstBufferSequence>
+    auto sendto(ConstBufferSequence data, uint8_t component) {
         auto p = this->find_nominated_pair(component);
         if (!p) {
             throw std::runtime_error(

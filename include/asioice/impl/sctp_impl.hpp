@@ -137,6 +137,13 @@ template <class Layer> struct sctp_impl final : asioice::datagram_receiver {
         return true;
     }
 
+    bool datagram_received(asioice::io_buffer_ptr &buffer) override {
+        if (!buffer || buffer->size() < 1)
+            return false;
+        _transport.dispatch_packet({buffer->data(), buffer->size()});
+        return true;
+    }
+
     exsctp_transport _transport;
 };
 

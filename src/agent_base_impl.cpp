@@ -1395,8 +1395,11 @@ bool agent_base_impl::stun_receiver::datagram_received(
         }
         // application data
         if (this->_agent->_on_data)
-            this->_agent->_on_data(std::move(buffer), this->_component);
-        return false;
+            this->_agent->_on_data(buffer, this->_component);
+        if (buffer)
+            this->_agent->dispatch_received_data(std::move(buffer),
+                                                 this->_component);
+        return true;
     }
     // STUN
     if (buffer->size() < asioice::stun::HEADER_SIZE) {
@@ -1719,6 +1722,22 @@ void agent_base_impl::generate_gathering_end_indication() noexcept {
             auto cb = std::move(this->_on_local_candidates);
             cb(std::span<const asioice::candidate>{});
         } catch (...) {
+        }
+    }
+}
+
+void agent_base_impl::dispatch_received_data(asioice::io_buffer_ptr buffer,
+                                             uint8_t component) {
+    auto it =
+        std::ranges::find_if(this->_receivers, [component](auto r) noexcept {
+            return r->component() == component;
+        });
+    if (it != this->_receivers.end()) {
+        (*it)->data_received(std::move(buffer));
+    } else {
+        ICE_IN_DEBUG {
+            std::cerr << "No receiver for component "
+                      << static_cast<int>(component) << '\n';
         }
     }
 }

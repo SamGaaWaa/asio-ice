@@ -345,6 +345,18 @@ bool dtls_impl<NextLayer>::datagram_received(io_buffer_ptr &buffer,
 }
 
 template <class NextLayer>
+bool dtls_impl<NextLayer>::datagram_received(io_buffer_ptr &buffer) {
+    if (!buffer || buffer->size() < 1)
+        return false;
+    uint8_t first_b = *buffer->begin();
+    if (first_b < 20 || first_b > 63)
+        return false;
+    auto buf = std::move(buffer);
+    this->_bio.in.push(std::move(buf));
+    return true;
+}
+
+template <class NextLayer>
 int dtls_impl<NextLayer>::verify_callback(int preverify_ok,
                                           X509_STORE_CTX *ctx) {
     ::SSL *ssl = static_cast<::SSL *>(

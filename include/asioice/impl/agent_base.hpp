@@ -8,6 +8,7 @@
 #include "asioice/candidate_pair.hpp"
 #include "asioice/task.hpp"
 #include "asioice/impl/turn_interface.hpp"
+#include "asioice/detail/receiver.hpp"
 
 #if ASIOICE_USE_BOOST_ASIO > 0
 #include <boost/asio/any_io_executor.hpp>
@@ -97,12 +98,16 @@ struct agent_base {
                              void(std::span<const asioice::candidate>)>
                                  cb);
 
-    void on_data(
-        boost::compat::move_only_function<void(asioice::io_buffer_ptr, uint8_t)>
-            callback);
+    void on_data(boost::compat::move_only_function<
+                 void(asioice::io_buffer_ptr &, uint8_t)>
+                     callback);
 
     std::shared_ptr<asioice::candidate_pair>
     find_nominated_pair(uint8_t component) const noexcept;
+
+    void add_receiver(ice_receiver &receiver) noexcept;
+
+    void remove_receiver(ice_receiver &receiver) noexcept;
 
   private:
     std::shared_ptr<agent_base_impl> _impl;

@@ -4,6 +4,7 @@
 #include "asioice/candidate_pair.hpp"
 #include "asioice/agent_config.hpp"
 #include "asioice/task.hpp"
+#include "asioice/detail/receiver.hpp"
 #include "asioice/agent_state.hpp"
 
 #if ASIOICE_USE_BOOST_ASIO > 0
@@ -27,6 +28,18 @@ namespace asioice {
 
 struct agent {
     using executor_type = net::any_io_executor;
+
+    struct ice_transport_type {
+        using executor_type = net::any_io_executor;
+        virtual net::any_io_executor get_executor() const noexcept = 0;
+        virtual asioice::task<std::tuple<std::error_code, std::size_t>>
+        async_send(net::const_buffer data) = 0;
+        virtual asioice::task<std::tuple<std::error_code, std::size_t>>
+        async_send(std::span<const net::const_buffer> data) = 0;
+        virtual uint8_t component() const noexcept = 0;
+        virtual void add_receiver(asioice::datagram_receiver &receiver) = 0;
+        virtual ~ice_transport_type() = default;
+    };
 
     agent(executor_type ex, agent_config config);
 
@@ -90,14 +103,22 @@ struct agent {
     asioice::task<std::tuple<std::error_code, std::size_t>>
     sendto(net::const_buffer data, uint8_t component);
 
-    void on_data(
-        boost::compat::move_only_function<void(asioice::io_buffer_ptr, uint8_t)>
-            callback);
+    asioice::task<std::tuple<std::error_code, std::size_t>>
+    sendto(std::span<const net::const_buffer> data, uint8_t component);
+
+    void on_data(boost::compat::move_only_function<
+                 void(asioice::io_buffer_ptr &, uint8_t)>
+                     callback);
 
     void close() noexcept;
 
+    void add_receiver(ice_receiver &receiver);
+    void remove_receiver(ice_receiver &receiver) noexcept;
+
+    std::shared_ptr<ice_transport_type> create_ice_transport(uint8_t component);
+
   private:
-    void *_impl;
+    std::shared_ptr<void> _impl;
 };
 
 } // namespace asioice

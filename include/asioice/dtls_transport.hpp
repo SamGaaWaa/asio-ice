@@ -14,7 +14,7 @@ class dtls_transport {
     using handshake_type = impl_type::handshake_type;
 
     dtls_transport(std::shared_ptr<next_layer_type> transport,
-                   dtls_certificate cert)
+                   dtls_certificate &&cert)
         : _impl{std::make_shared<impl_type>(std::move(transport),
                                             std::move(cert))} {}
 

@@ -5,11 +5,13 @@
 
 #if ASIOICE_USE_BOOST_ASIO > 0
 #include <boost/asio/buffer.hpp>
+#include <boost/asio/any_io_executor.hpp>
 namespace asioice {
 namespace net = boost::asio;
 }
 #else
 #include <asio/buffer.hpp>
+#include <asio/any_io_executor.hpp>
 namespace asioice {
 namespace net = asio;
 }
@@ -25,14 +27,14 @@ namespace asioice {
 
 struct __send_receiver {
     using receiver_concept = stdexec::receiver_t;
-#if ASIOICE_USE_BOOST_ASIO
+    // #if ASIOICE_USE_BOOST_ASIO
     void
     set_value(std::tuple<boost::system::error_code, std::size_t>) && noexcept {}
     void set_value(boost::system::error_code, std::size_t) && noexcept {}
-#else
+    // #else
     void set_value(std::tuple<std::error_code, std::size_t>) && noexcept {}
     void set_value(std::error_code, std::size_t) && noexcept {}
-#endif
+    // #endif
     void set_error(std::exception_ptr) && noexcept {}
     void set_stopped() && noexcept {}
 };
@@ -48,6 +50,7 @@ concept AsyncPacketTransport =
         stdexec::connect(stdexec::starts_on(stdexec::inline_scheduler{},
                                             t->async_send_to(data_array, ep)),
                          __send_receiver{});
+        { t->get_executor() } -> std::convertible_to<net::any_io_executor>;
     };
 
 template <class T>
@@ -60,6 +63,7 @@ concept AsyncPacketConnectionTransport =
         stdexec::connect(stdexec::starts_on(stdexec::inline_scheduler{},
                                             t->async_send(data_array)),
                          __send_receiver{});
+        { t->get_executor() } -> std::convertible_to<net::any_io_executor>;
     };
 
 } // namespace asioice

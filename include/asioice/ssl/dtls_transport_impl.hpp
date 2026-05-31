@@ -119,6 +119,7 @@ struct dtls_impl : asioice::datagram_receiver,
 
     bool datagram_received(io_buffer_ptr &buffer,
                            const asioice::endpoint &endpoint) override;
+    bool datagram_received(io_buffer_ptr &buffer) override;
 
     static int verify_callback(int preverify_ok, X509_STORE_CTX *ctx);
 
