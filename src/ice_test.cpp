@@ -3,6 +3,8 @@
 #include "asioice/detail/on_scope_empty.hpp"
 #include "asioice/detail/stop_when.hpp"
 #include "asioice/dtls_transport.hpp"
+#include "asioice/sctp_transport.hpp"
+#include "asioice/socket_transport.hpp"
 
 #include <exec/start_detached.hpp>
 
@@ -105,6 +107,7 @@ inline asioice::task<void> gather_task(asioice::net::io_context &ctx,
     using Agent = asioice::agent;
     using IceTransport = typename Agent::ice_transport_type;
     using DtlsTransport = ssl::dtls_transport<IceTransport>;
+    using SctpTransport = sctp::transport<datagram_transport<DtlsTransport>>;
 
     const char *stun_servers[] = {/*"stun.l.google.com:19302",*/
                                   "14.29.112.241:20002"};
@@ -124,8 +127,11 @@ inline asioice::task<void> gather_task(asioice::net::io_context &ctx,
         .transport_policy = asioice::transport_policy::ALL};
     Agent agent1(ctx.get_executor(), config1);
     std::shared_ptr<IceTransport> transport1 = agent1.create_ice_transport(1);
-    DtlsTransport dtls_client{transport1, std::move(client_cert)};
-    dtls_client.set_expected_remote_fingerprint(server_fp);
+    auto dtls_client = std::make_shared<datagram_transport<DtlsTransport>>(
+        transport1, std::move(client_cert));
+    SctpTransport sctp_client(dtls_client);
+
+    dtls_client->socket().set_expected_remote_fingerprint(server_fp);
 
     agent_config config2 = {
         .username = "user2",
@@ -139,8 +145,11 @@ inline asioice::task<void> gather_task(asioice::net::io_context &ctx,
         .transport_policy = asioice::transport_policy::ALL};
     Agent agent2(ctx.get_executor(), config2);
     std::shared_ptr<IceTransport> transport2 = agent2.create_ice_transport(1);
-    DtlsTransport dtls_server{transport2, std::move(server_cert)};
-    dtls_server.set_expected_remote_fingerprint(client_fp);
+    auto dtls_server = std::make_shared<datagram_transport<DtlsTransport>>(
+        transport2, std::move(server_cert));
+    SctpTransport sctp_server(dtls_server);
+
+    dtls_server->socket().set_expected_remote_fingerprint(client_fp);
 
     // Trickle ICE
     exec::async_scope scope;
@@ -253,18 +262,6 @@ inline asioice::task<void> gather_task(asioice::net::io_context &ctx,
         for (const auto &p : np2) {
             std::cout << p->to_string() << '\n';
         }
-        // std::string_view rtp =
-        //     /*demultiplex with STUN*/ "\12This is RTP packet";
-        // std::string_view rtcp =
-        //     /*demultiplex with STUN*/ "\12This is RTCP packet";
-        // for (int i = 0; i < num; ++i) {
-        //     if (rand() % 2)
-        //         co_await agent1.sendto(net::buffer(rtp), 1);
-        //     else
-        //         co_await agent1.sendto(net::buffer(rtcp), 2);
-        //     timer1.expires_after(std::chrono::seconds(30));
-        //     co_await timer1.async_wait(asio2exec::use_sender);
-        // }
     } else {
         std::cout << "Agent1 connect "
                   << (agent1_connected ? "success, " : "failed, ")
@@ -274,79 +271,76 @@ inline asioice::task<void> gather_task(asioice::net::io_context &ctx,
     }
     std::tuple<std::tuple<std::error_code>, std::tuple<std::error_code>>
         dtls_handshake_res = co_await stdexec::when_all(
-            dtls_client.async_handshake(DtlsTransport::handshake_type::client),
-            dtls_server.async_handshake(DtlsTransport::handshake_type::server));
+            dtls_client->socket().async_handshake(
+                DtlsTransport::handshake_type::client),
+            dtls_server->socket().async_handshake(
+                DtlsTransport::handshake_type::server));
     if (std::get<0>(std::get<0>(dtls_handshake_res)) != std::error_code{} ||
         std::get<0>(std::get<1>(dtls_handshake_res)) != std::error_code{}) {
         std::cout << "DTLS handshake failed\n";
     } else {
         std::cout << "DTLS handshake success\n";
     }
-    scope.spawn([](DtlsTransport &dtls_client) -> asioice::task<void> {
+
+    sctp_server.start();
+    sctp_client.start();
+    std::tuple<std::tuple<bool>, std::tuple<bool>> sctp_connect_res =
+        co_await stdexec::when_all(sctp_client.connect(), sctp_server.accept());
+    if (!std::get<0>(std::get<0>(sctp_connect_res)) ||
+        !std::get<0>(std::get<1>(sctp_connect_res))) {
+        std::cout << "SCTP connect failed\n";
+    } else {
+        std::cout << "SCTP connect success\n";
+    }
+    scope.spawn([](SctpTransport &sctp_client) -> asioice::task<void> {
         std::string msg;
-        char recv_buf[1024];
         while (true) {
             std::cout << ">>>";
             std::getline(std::cin, msg);
             if (msg == "quit") {
-                auto ec = co_await dtls_client.async_shutdown(false);
-                if (ec)
-                    std::cerr << "Shutdown failed: " << ec.message() << '\n';
+                bool closed = co_await sctp_client.shutdown();
+                if (!closed)
+                    std::cerr << "Shutdown failed\n";
                 else
                     std::cout << "Shutdown success\n";
                 co_return;
             }
-            auto [ec, n] = co_await dtls_client.async_send(net::buffer(msg));
-            if (ec) {
-                std::cerr << "Send failed: " << ec.message() << '\n';
+            exsctp::message smsg{0, 0,
+                                 std::span<const uint8_t>{
+                                     (const uint8_t *)msg.data(), msg.size()}};
+            auto sent = co_await sctp_client.send(smsg, exsctp::send_options{});
+            if (!sent) {
+                std::cerr << "Send failed\n";
                 co_return;
             }
-            std::tie(ec, n) = co_await dtls_client.async_receive(
-                net::buffer(recv_buf, sizeof(recv_buf)));
-            if (ec) {
-                std::cerr << "Read failed: " << ec.message() << '\n';
+            std::optional<dcsctp::DcSctpMessage> echo =
+                co_await sctp_client.read();
+            if (!echo) {
+                std::cerr << "Client read failed\n";
                 co_return;
             }
-            if (n == 0) {
-                std::cerr << "Peer closed\n";
-                co_return;
-            }
-            std::cout << std::string_view{recv_buf, n} << '\n';
+            std::cout << std::string_view{(const char *)echo->payload().data(),
+                                          echo->payload().size()}
+                      << '\n';
         }
-    }(dtls_client));
-    scope.spawn([](DtlsTransport &dtls_server) -> asioice::task<void> {
+    }(sctp_client));
+    scope.spawn([](SctpTransport &sctp_server) -> asioice::task<void> {
         std::cout << "Waiting for data from client...\n";
-        char buffer[MAX_BUFFER];
         while (true) {
-            auto [ec, n] = co_await dtls_server.async_receive(
-                net::buffer(buffer, sizeof(buffer) - 1));
-            if (ec) {
-                std::cout << "Server read error: " << ec.message() << '\n';
+            std::optional<dcsctp::DcSctpMessage> msg =
+                co_await sctp_server.read();
+            if (!msg) {
+                std::cerr << "Server read failed\n";
                 co_return;
-            } else if (n > 0) {
-                buffer[n] = '\0';
-                std::tie(ec, n) =
-                    co_await dtls_server.async_send(net::buffer(buffer, n));
-                if (ec || n == 0) {
-                    std::cout << "Sent response failed\n";
-                    co_return;
-                }
-            } else if (n == 0) {
-                std::cout << "Client closed the connection\n";
-                // test fast shutdown
-                net::steady_timer timer{dtls_server.get_executor(),
-                                        std::chrono::seconds(5)};
-                co_await timer.async_wait(asio2exec::use_sender);
-                ec = co_await dtls_server.async_shutdown(false);
-                if (ec)
-                    std::cerr << "Server shutdown failed: " << ec.message()
-                              << '\n';
-                else
-                    std::cout << "Server shutdown success\n";
+            }
+            exsctp::message echo{0, 0, msg->payload()};
+            bool sent = co_await sctp_server.send(echo, exsctp::send_options{});
+            if (!sent) {
+                std::cout << "Sent response failed\n";
                 co_return;
             }
         }
-    }(dtls_server));
+    }(sctp_server));
 
     co_await (asioice::utils::on_scope_empty(scope) |
               stdexec::continues_on(sched));

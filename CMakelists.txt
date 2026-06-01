@@ -137,13 +137,13 @@ if(ASIOICE_TEST)
         src/io_buffer2_test.cpp
         src/async_queue_test.cpp
         src/candidate_test.cpp
-        src/ice_test.cpp
         src/turn_client_test.cpp
     )
     if(ASIOICE_ENABLE_DTLS)
         list(APPEND TEST_SOURCES src/dtls_test.cpp)
     endif()
     if(ASIOICE_ENABLE_SCTP_OVER_DTLS)
+        list(APPEND TEST_SOURCES src/ice_test.cpp)
         list(APPEND TEST_SOURCES src/sctp_test.cpp)
     endif()
     foreach(TEST_FILE ${TEST_SOURCES})
@@ -155,6 +155,9 @@ if(ASIOICE_TEST)
         target_link_libraries(dtls_test PRIVATE OpenSSL::SSL OpenSSL::Crypto)
     endif()
     if(ASIOICE_ENABLE_SCTP_OVER_DTLS)
+        target_link_libraries(ice_test PRIVATE OpenSSL::SSL OpenSSL::Crypto exsctp)
         target_link_libraries(sctp_test PRIVATE OpenSSL::SSL OpenSSL::Crypto exsctp)
     endif()
 endif()
+
+add_subdirectory(example/aioice)

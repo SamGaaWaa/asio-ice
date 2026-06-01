@@ -211,7 +211,9 @@ template <class... Args>
 auto dtls_impl<NextLayer>::async_shutdown(bool fast_shutdown, Args &&...self) {
     return this->perform(dtls_impl<NextLayer>::shutdown_op{fast_shutdown, this},
                          std::forward<Args>(self)...) |
-           stdexec::then([](std::tuple<std::error_code, std::size_t> ret) {
+           stdexec::then([this](std::tuple<std::error_code, std::size_t> ret) {
+               if (std::get<0>(ret) == std::error_code{})
+                   this->_closed = true;
                return std::get<0>(ret);
            });
 }
@@ -354,6 +356,15 @@ bool dtls_impl<NextLayer>::datagram_received(io_buffer_ptr &buffer) {
     auto buf = std::move(buffer);
     this->_bio.in.push(std::move(buf));
     return true;
+}
+
+template <class NextLayer> void dtls_impl<NextLayer>::close() noexcept {
+    this->_timeout_handler_promise.set_stopped();
+    if (this->_closed)
+        return;
+    this->_closed = true;
+    utils::detached_with_data(this->async_shutdown(true),
+                              this->shared_from_this());
 }
 
 template <class NextLayer>

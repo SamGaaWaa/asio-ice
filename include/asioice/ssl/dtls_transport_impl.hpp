@@ -76,12 +76,7 @@ struct dtls_impl : asioice::datagram_receiver,
         return _next_layer.get_executor();
     }
 
-    void close() noexcept {
-        if (_closed)
-            return;
-        _closed = true;
-        _timeout_handler_promise.set_stopped();
-    }
+    void close() noexcept;
 
     bool is_open() const noexcept { return !_closed && !_peer_closed; }
 

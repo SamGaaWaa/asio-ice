@@ -43,6 +43,12 @@ template <asioice::AsyncPacketConnectionTransport Layer> struct io_interface {
         return _next_layer->get_executor();
     }
 
+    void start() {
+        if constexpr (requires { _next_layer->start(); }) {
+            _next_layer->start();
+        }
+    }
+
     auto scheduler() noexcept { return scheduler_type{get_executor()}; }
 
     auto send(std::span<const uint8_t> data) {

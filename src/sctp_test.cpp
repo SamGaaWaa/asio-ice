@@ -75,9 +75,9 @@ void ping_pong(size_t n) {
                 co_return;
             }
             std::cout << "Client sent " << data.size() << " bytes\n";
-            dcsctp::DcSctpMessage echo = co_await client.read();
+            std::optional<dcsctp::DcSctpMessage> echo = co_await client.read();
             if (!std::ranges::equal(
-                    echo.payload(),
+                    echo->payload(),
                     std::span<const uint8_t>{(const uint8_t *)data.data(),
                                              data.size()})) {
                 std::cerr << "Invalid message\n";
@@ -98,9 +98,13 @@ void ping_pong(size_t n) {
 
         net::steady_timer timer{server.get_executor()};
         for (size_t i = 0; i < n; ++i) {
-            dcsctp::DcSctpMessage data = co_await server.read();
-            std::cout << "Server read " << data.payload().size() << " bytes\n";
-            exsctp::message msg{0, 0, data.payload()};
+            std::optional<dcsctp::DcSctpMessage> data = co_await server.read();
+            if (!data) {
+                std::cerr << "Server read failed\n";
+                co_return;
+            }
+            std::cout << "Server read " << data->payload().size() << " bytes\n";
+            exsctp::message msg{0, 0, data->payload()};
             bool ret = co_await server.send(msg, exsctp::send_options{});
             if (!ret) {
                 std::cerr << "Server send failed\n";

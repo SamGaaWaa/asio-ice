@@ -279,7 +279,7 @@ asioice::task<void> agent_base_impl::create_relayed_candidate(
         .transport = std::move(turn_transport)});
     if (this->_on_local_candidates)
         this->_on_local_candidates(tmp);
-    this->pair_local_candidate(tmp.back());
+    // this->pair_local_candidate(tmp.back());
     std::move(tmp.begin(), tmp.end(), std::back_inserter(component_candidates));
     co_return;
 }

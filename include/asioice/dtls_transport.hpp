@@ -11,6 +11,7 @@ class dtls_transport {
     using next_layer_type = NextLayer;
     using impl_type = asioice::ssl::impl::dtls_impl<next_layer_type>;
     using executor_type = typename impl_type::executor_type;
+    using endpoint_type = asioice::endpoint;
     using handshake_type = impl_type::handshake_type;
 
     dtls_transport(std::shared_ptr<next_layer_type> transport,
@@ -38,6 +39,8 @@ class dtls_transport {
     executor_type get_executor() const noexcept {
         return _impl->get_executor();
     }
+
+    endpoint_type local_endpoint() const noexcept { return {}; }
 
     void close() noexcept {
         if (_impl)

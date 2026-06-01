@@ -45,6 +45,7 @@ struct transport_impl final
     transport_impl &operator=(transport_impl &&) = delete;
 
     void start() {
+        _interface->start();
         utils::detached_with_data(
             utils::stop_when(stdexec::starts_on(this->_interface->scheduler(),
                                                 this->timeout_handler()),

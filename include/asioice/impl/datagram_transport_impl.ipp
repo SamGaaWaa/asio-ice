@@ -24,16 +24,37 @@ asioice::task<void> datagram_transport_impl<Socket>::recv_loop() {
     while (true) {
         io_buffer_ptr buf(&this->_pool, 64, this->max_buffer_size());
         typename datagram_transport_impl<Socket>::endpoint_type ep;
-        auto [ec, n] = co_await this->socket().async_receive_from(
-            buf->prepare_back(this->max_buffer_size()), ep,
-            asio2exec::use_sender);
-        if (ec) {
-            ICE_IN_DEBUG { std::cerr << "recv_loop: " << ec.message() << "\n"; }
-            co_return;
+        if constexpr (requires {
+                          this->socket().async_receive_from(
+                              buf->prepare_back(this->max_buffer_size()), ep,
+                              asio2exec::use_sender);
+                      }) {
+            auto [ec, n] = co_await this->socket().async_receive_from(
+                buf->prepare_back(this->max_buffer_size()), ep,
+                asio2exec::use_sender);
+            if (ec) {
+                ICE_IN_DEBUG {
+                    std::cerr << "recv_loop: " << ec.message() << "\n";
+                }
+                co_return;
+            }
+            if (n == 0)
+                co_return;
+            buf->commit_back(n);
+        } else {
+            auto [ec, n] = co_await this->socket().async_receive(
+                buf->prepare_back(this->max_buffer_size()),
+                asio2exec::use_sender);
+            if (ec) {
+                ICE_IN_DEBUG {
+                    std::cerr << "recv_loop: " << ec.message() << "\n";
+                }
+                co_return;
+            }
+            if (n == 0)
+                co_return;
+            buf->commit_back(n);
         }
-        if (n == 0)
-            co_return;
-        buf->commit_back(n);
         if (!dispatch_receivers(this->receivers(), buf, ep) &&
             !this->_stop_cache_early_data) {
             this->_early_data.put(buf, ep);

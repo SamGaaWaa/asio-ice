@@ -136,17 +136,20 @@ template <class Interface> auto transport_impl<Interface>::read() noexcept {
                    }) |
                    stdexec::let_value([this](bool has_msg) {
                        return utils::if_else(
-                           stdexec::just(has_msg),
+                           stdexec::just(has_msg || this->closed()),
                            [] { return stdexec::just(true); },
                            [this] {
-                               return this->_notify_reader.get_future() |
+                               return exec::when_any(
+                                          this->_notify_reader.get_future(),
+                                          this->_on_state_changed
+                                              .get_future()) |
                                       stdexec::continues_on(
                                           this->_interface->scheduler()) |
                                       stdexec::then([] { return false; });
                            });
                    }) |
                    exec::repeat_until() |
-                   stdexec::then([&res] { return std::move(*res); });
+                   stdexec::then([&res] { return std::move(res); });
         });
     return this->_read_mtx.lock() |
            stdexec::let_value([work = std::move(work)](auto &lk) mutable {
