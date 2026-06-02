@@ -58,6 +58,8 @@ template <IOInterface Interface = any_io_interface> class basic_transport {
         res.enable_message_interleaving = opt.enable_message_interleaving;
         res.heartbeat_interval_include_rtt = opt.heartbeat_interval_include_rtt;
         res.disable_checksum_verification = opt.disable_checksum_verification;
+        res.zero_checksum_alternate_error_detection_method =
+            opt.zero_checksum_alternate_error_detection_method;
 
         return res;
     }

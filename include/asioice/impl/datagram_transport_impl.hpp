@@ -80,7 +80,6 @@ struct datagram_transport_impl
 
     Socket _sock;
     endpoint_type _local_endpoint;
-    io_buffer_pool _pool{};
     early_data_cache _early_data;
     bool _stop_cache_early_data{false};
     receiver_list_t _receivers{};

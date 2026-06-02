@@ -65,7 +65,23 @@ exsctp::task<void> transport_impl<Interface>::packet_sender() {
         }
         bool buffered_high = this->send_queue_buffered_high();
         auto packet = this->_send_q.peek();
-        co_await this->_interface->send(packet);
+        auto [ec, n] = co_await this->_interface->send(packet);
+        if (ec) {
+            ICE_IN_DEBUG {
+                std::cerr << "packet_sender error: " << ec.message() << "\n";
+            }
+            co_return;
+        }
+        if (n == 0) {
+            ICE_IN_DEBUG { std::cerr << "packet_sender sent 0 bytes\n"; }
+            co_return;
+        }
+        if (n < packet.size()) {
+            ICE_IN_DEBUG {
+                std::cerr << "packet_sender sent partial packet: " << n
+                          << " of " << packet.size() << " bytes\n";
+            }
+        }
         this->_send_q.pop();
         if (buffered_high && !this->send_queue_buffered_high())
             this->_notify_send_queue_buffered_low.set_value();

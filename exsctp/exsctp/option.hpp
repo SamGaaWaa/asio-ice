@@ -12,6 +12,8 @@
 #include <stddef.h>
 #include <stdint.h>
 
+#include <net/dcsctp/public/types.h>
+
 #include <optional>
 #include <chrono>
 
@@ -217,9 +219,11 @@ struct sctp_options {
   // https://www.ietf.org/archive/id/draft-ietf-tsvwg-sctp-zero-checksum-06.html.
   // To have this feature enabled, both peers must be configured to use the
   // same (defined, not "none") alternate error detection method.
-//   ZeroChecksumAlternateErrorDetectionMethod
-//       zero_checksum_alternate_error_detection_method =
-//           ZeroChecksumAlternateErrorDetectionMethod::None();
+  // Use LowerLayerDtls() when running SCTP over DTLS as the DTLS layer
+  // provides integrity protection.
+  dcsctp::ZeroChecksumAlternateErrorDetectionMethod
+      zero_checksum_alternate_error_detection_method =
+          dcsctp::ZeroChecksumAlternateErrorDetectionMethod::LowerLayerDtls();
 };
 
 struct send_options {

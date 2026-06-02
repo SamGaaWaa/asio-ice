@@ -94,7 +94,7 @@ target_compile_options(asioice_compile_flags INTERFACE
                        $<$<COMPILE_LANG_AND_ID:CXX,MSVC>:/Zc:__cplusplus /Zc:preprocessor /utf-8 /D_WIN32_WINNT=0x0601 /Zm200 /bigobj /W4 /wd4100 /wd4101 /wd4127 /wd4324 /wd4456 /wd4459>
                        )
 target_link_libraries(asioice_compile_flags INTERFACE
-                      $<$<PLATFORM_ID:Windows>:bcrypt;ws2_32;iphlpapi>
+                      $<$<PLATFORM_ID:Windows>:bcrypt;ws2_32;iphlpapi;mswsock>
                       )
 target_compile_options(asioice_compile_flags INTERFACE
                        $<$<AND:$<COMPILE_LANG_AND_ID:CXX,GNU>,$<PLATFORM_ID:Windows>>:-Wa,-mbig-obj>
@@ -104,7 +104,7 @@ if(ASIOICE_USE_OPENSSL)
     target_link_libraries(asioice PRIVATE OpenSSL::SSL OpenSSL::Crypto)
 endif()
 if(ASIOICE_ENABLE_SCTP_OVER_DTLS)
-    target_link_libraries(asioice PRIVATE exsctp)
+    target_link_libraries(asioice PUBLIC exsctp)
 endif()
 
 if(NOT ASIOICE_USE_BOOST_ASIO)
@@ -161,3 +161,6 @@ if(ASIOICE_TEST)
 endif()
 
 add_subdirectory(example/aioice)
+if(ASIOICE_ENABLE_SCTP_OVER_DTLS)
+    add_subdirectory(example/aiortc)
+endif()

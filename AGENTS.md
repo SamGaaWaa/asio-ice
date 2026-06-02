@@ -27,10 +27,10 @@ make -j$(nproc)
 
 ### Build targets
 - `asioice` — static library
-- `ice_test` — full ICE integration test
-- `stun_test`, `candidate_test`, `hash_test`, `turn_client_test`, `async_queue_test`, `io_buffer_test`, `io_buffer2_test`, `on_scope_empty_test`
+- `stun_test`, `stun_client_test`, `candidate_test`, `hash_test`, `turn_client_test`, `async_queue_test`, `io_buffer_test`, `io_buffer2_test`, `on_scope_empty_test`, `boost_fiber_test`
 - Optional (with `-DASIOICE_ENABLE_DTLS=ON`): `dtls_test`
-- Optional (with `-DASIOICE_ENABLE_SCTP_OVER_DTLS=ON`): `sctp_test`, `boost_fiber_test`
+- Optional (with `-DASIOICE_ENABLE_SCTP_OVER_DTLS=ON`): `ice_test`, `sctp_test`
+- Examples: `example/aioice`, `example/aiortc` (SCTP only), `example/web`
 
 ### CMake options
 | Option | Default | Description |
@@ -44,7 +44,7 @@ make -j$(nproc)
 
 ## Test Commands
 
-Tests are standalone executables (no framework). Each `src/*_test.cpp` contains a `main()` and plain functions that throw `std::runtime_error` on failure.
+Tests are standalone executables (no framework). Each `src/*_test.cpp` has a `main()` that calls test functions; failures throw `std::runtime_error`.
 
 ```bash
 cd clang-build
@@ -85,7 +85,7 @@ cd clang-build
 ## Project-Specific Patterns & Gotchas
 
 ### config.hpp is generated — do not edit directly
-`include/asioice/config.hpp` is generated from `include/asioice/config.hpp.in` via CMake's `configure_file()`. The `.gitignore` entry (`include/config.hpp`) has a path mismatch; `config.hpp` is currently tracked but should not be hand-edited. Always edit `config.hpp.in` for configuration changes and re-run cmake.
+`include/asioice/config.hpp` is generated from `include/asioice/config.hpp.in` via CMake's `configure_file()`. The `.gitignore` entry (`include/config.hpp`) has a path mismatch; `config.hpp` is currently tracked but should not be hand-edited. Always edit `config.hpp.in` and re-run cmake.
 
 ### Key macros
 - `ASIOICE_USE_BOOST_ASIO` — 1 for Boost.Asio, 0 for standalone Asio
@@ -103,13 +103,42 @@ The `asio2exec.hpp` header (vendored in `third_party/`) bridges Asio completion 
 CMake sets `Boost_USE_STATIC_LIBS ON` and links `Boost::boost` (not individual components). The `Boost::json` and `Boost::context` libraries must be available.
 
 ### `.ipp` files
-Template implementation files use `.ipp` extension (not `.inl`). Found in `src/ssl/` and `src/impl/`.
+Template implementation files use `.ipp` extension (not `.inl`). Found in `include/asioice/ssl/` and `include/asioice/impl/`.
 
 ### Submodule
 `exsctp/dcsctp` is a git submodule (https://github.com/samgaawaa/dcsctp). It is only built when `ASIOICE_ENABLE_SCTP_OVER_DTLS=ON`.
 
 ### Coroutine type
 `asioice::task<T>` is an alias for `exec::basic_task<T, exec::__task::inline_task_context<T>>` from stdexec.
+
+### `agent::_impl` is `shared_ptr<void>`
+- `_impl` is `std::shared_ptr<void>` (agent.hpp:121). All casts use `_impl.get()`.
+- `agent` destructor is defaulted (shared_ptr handles cleanup).
+
+### IceTransport
+- `agent::create_ice_transport(uint8_t component)` → `shared_ptr<ice_transport_type>` — returns an object satisfying `AsyncPacketConnectionTransport` for use as the next layer for `ssl::dtls_transport<IceTransport>` or `sctp::transport<IceTransport>`.
+- `ice_transport_type` is a nested abstract class inside `agent` (agent.hpp:32) with: `get_executor()`, `async_send(const_buffer)`, `async_send(span<const_buffer>)`, `component()`, `add_receiver(datagram_receiver&)`.
+- Internally, `impl::ice_transport<Agent>` (imple/ice_transport.hpp) registers as `ice_receiver` on the agent and dispatches received data to its own `datagram_receiver` chain.
+
+### `on_data` acts as a filter
+- Signature: `on_data(boost::compat::move_only_function<void(io_buffer_ptr&, uint8_t)>)` — note `io_buffer_ptr&` (mutable ref).
+- If the callback does NOT consume the buffer (leaves `buffer` non-null), the data continues to `ice_receiver` dispatch.
+- If no `on_data` is set, all application data goes to `ice_receiver` dispatch.
+
+### `ice_receiver` and `datagram_receiver`
+- `ice_receiver`: `virtual void data_received(io_buffer_ptr buffer)` and `virtual uint8_t component() const noexcept`.
+- `agent` has `add_receiver(ice_receiver&)` / `remove_receiver(ice_receiver&)`.
+- `datagram_receiver` has two overloads: `datagram_received(buffer, endpoint)` and `datagram_received(buffer)` (no endpoint). Both default to returning `false`.
+
+### DataChannel (DCEP)
+- `include/asioice/data_channel.hpp` — `data_channel` class and `data_channel_manager<Layer>` template.
+- `data_channel_manager` wraps `sctp::transport<Layer>` and handles DCEP (RFC 8832) for WebRTC DataChannel.
+- `data_channel_manager::start()` spawns a read loop; the user must provide an `exec::async_scope`.
+- DCEP OPEN messages arrive on SCTP stream 0 with PPID=50, data messages on assigned streams with PPID=51 (text) or 53 (binary).
+- Stream IDs are assigned sequentially starting from 1 (both incoming and outgoing).
+- **Pull-mode API**: `data_channel::async_read()` returns `task<optional<data_channel_message>>` (nullopt when closed). Internal bounded queue (256 msg) provides backpressure — if the app doesn't read, the SCTP read loop blocks.
+- Send via `data_channel_manager::send(ch, data, binary)` or `send_text(ch, text)`.
+- Remote channels discovered via `on_remote_channel` callback.
 
 ### When adding files
 - New `.cpp` source: add to `ICE_SRC_FILES` in `CMakeLists.txt`

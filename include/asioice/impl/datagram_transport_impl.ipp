@@ -22,7 +22,7 @@ template <class Socket>
 asioice::task<void> datagram_transport_impl<Socket>::recv_loop() {
     utils::scope_guard on_exit([this]() noexcept { this->_running = false; });
     while (true) {
-        io_buffer_ptr buf(&this->_pool, 64, this->max_buffer_size());
+        io_buffer_ptr buf(nullptr, 64, this->max_buffer_size());
         typename datagram_transport_impl<Socket>::endpoint_type ep;
         if constexpr (requires {
                           this->socket().async_receive_from(

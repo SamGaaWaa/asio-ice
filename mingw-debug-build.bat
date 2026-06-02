@@ -1,3 +1,4 @@
+mkdir .\mingw-build
 pushd .\mingw-build
 
 cmake -G "MinGW Makefiles" .. ^
