@@ -11,3 +11,4 @@ include/config.hpp
 out
 mingw-build
 example/aioice/__pychache__
+venv

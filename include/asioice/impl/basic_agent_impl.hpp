@@ -4,6 +4,7 @@
 #include "asioice/impl/agent_base.hpp"
 #include "asioice/turn_client.hpp"
 #include "asioice/detail/switch_case.hpp"
+#include "asioice/detail/if_else.hpp"
 #include "asioice/socket_transport.hpp"
 
 namespace asioice::impl {
@@ -25,61 +26,66 @@ template <class Sock> struct basic_agent_impl final : agent_base {
     template <class ConstBufferSequence>
     auto sendto(ConstBufferSequence data, uint8_t component) {
         auto p = this->find_nominated_pair(component);
-        if (!p) {
-            throw std::runtime_error(
-                "No nominated candidate pair for component " +
-                std::to_string(component));
-        }
-        return stdexec::just(std::move(p)) |
-               stdexec::let_value([data](auto &pair) {
-                   return utils::switch_case<
-                              candidate_type::host, candidate_type::srflx,
-                              candidate_type::prflx, candidate_type::relay>(
-                              pair->local_candidate().type,
-                              [data, &pair] {
-                                  auto *sock =
-                                      pair->local_candidate()
-                                          .transport
-                                          .template get<raw_transport>();
-                                  assert(sock);
-                                  return sock->async_send_to(
-                                             data, pair->remote_candidate()
-                                                       .endpoint) |
-                                         __transform_sndr();
-                              },
-                              [data, &pair] {
-                                  auto *sock =
-                                      pair->local_candidate()
-                                          .transport
-                                          .template get<raw_transport>();
-                                  assert(sock);
-                                  return sock->async_send_to(
-                                             data, pair->remote_candidate()
-                                                       .endpoint) |
-                                         __transform_sndr();
-                              },
-                              [data, &pair] {
-                                  // TODO: Get the actual transport for prflx
-                                  // candidate
-                                  return pair->send(data);
-                              },
-                              [data, &pair] {
-                                  auto *turn_client =
-                                      pair->local_candidate()
-                                          .transport
-                                          .template get<turn_client_type>();
-                                  assert(turn_client);
-                                  return turn_client->async_send_to(
-                                      data, pair->remote_candidate().endpoint);
-                              }) |
-                          stdexec::then(
-                              [&pair](std::tuple<std::error_code, std::size_t>
-                                          res) {
-                                  if (!std::get<0>(res))
-                                      pair->update_keepalive_time();
-                                  return std::move(res);
-                              });
-               });
+        bool no_pair = p == nullptr;
+        auto work =
+            stdexec::just(std::move(p)) |
+            stdexec::let_value([data](auto &pair) {
+                return utils::switch_case<
+                           candidate_type::host, candidate_type::srflx,
+                           candidate_type::prflx, candidate_type::relay>(
+                           pair->local_candidate().type,
+                           [data, &pair] {
+                               auto *sock =
+                                   pair->local_candidate()
+                                       .transport.template get<raw_transport>();
+                               assert(sock);
+                               return sock->async_send_to(
+                                          data,
+                                          pair->remote_candidate().endpoint) |
+                                      __transform_sndr();
+                           },
+                           [data, &pair] {
+                               auto *sock =
+                                   pair->local_candidate()
+                                       .transport.template get<raw_transport>();
+                               assert(sock);
+                               return sock->async_send_to(
+                                          data,
+                                          pair->remote_candidate().endpoint) |
+                                      __transform_sndr();
+                           },
+                           [data, &pair] {
+                               // TODO: Get the actual transport for prflx
+                               // candidate
+                               return pair->send(data);
+                           },
+                           [data, &pair] {
+                               auto *turn_client =
+                                   pair->local_candidate()
+                                       .transport
+                                       .template get<turn_client_type>();
+                               assert(turn_client);
+                               return turn_client->async_send_to(
+                                   data, pair->remote_candidate().endpoint);
+                           }) |
+                       stdexec::then(
+                           [&pair](
+                               std::tuple<std::error_code, std::size_t> res) {
+                               if (!std::get<0>(res))
+                                   pair->update_keepalive_time();
+                               return std::move(res);
+                           });
+            });
+        return utils::if_else(
+            stdexec::just(no_pair),
+            [this] {
+                return stdexec::just(std::tuple<std::error_code, std::size_t>{
+                    state() == agent_state_t::CLOSED
+                        ? std::make_error_code(std::errc::bad_file_descriptor)
+                        : std::make_error_code(std::errc::invalid_argument),
+                    0});
+            },
+            [work = std::move(work)]() mutable { return std::move(work); });
     }
 
   private:

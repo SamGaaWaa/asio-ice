@@ -160,7 +160,7 @@ if(ASIOICE_TEST)
     endif()
 endif()
 
-add_subdirectory(example/aioice)
+# add_subdirectory(example/aioice)
 if(ASIOICE_ENABLE_SCTP_OVER_DTLS)
     add_subdirectory(example/aiortc)
 endif()
