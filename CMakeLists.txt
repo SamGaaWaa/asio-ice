@@ -134,7 +134,6 @@ if(ASIOICE_TEST)
         src/hash_test.cpp
         src/stun_client_test.cpp
         src/stun_test.cpp
-        src/io_buffer2_test.cpp
         src/async_queue_test.cpp
         src/candidate_test.cpp
         src/turn_client_test.cpp
@@ -163,4 +162,5 @@ endif()
 # add_subdirectory(example/aioice)
 if(ASIOICE_ENABLE_SCTP_OVER_DTLS)
     add_subdirectory(example/aiortc)
+    add_subdirectory(example/pion)
 endif()

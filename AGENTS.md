@@ -27,10 +27,11 @@ make -j$(nproc)
 
 ### Build targets
 - `asioice` — static library
-- `stun_test`, `stun_client_test`, `candidate_test`, `hash_test`, `turn_client_test`, `async_queue_test`, `io_buffer_test`, `io_buffer2_test`, `on_scope_empty_test`, `boost_fiber_test`
+- `stun_test`, `stun_client_test`, `candidate_test`, `hash_test`, `turn_client_test`, `async_queue_test`, `io_buffer_test`, `on_scope_empty_test`, `boost_fiber_test`
 - Optional (with `-DASIOICE_ENABLE_DTLS=ON`): `dtls_test`
 - Optional (with `-DASIOICE_ENABLE_SCTP_OVER_DTLS=ON`): `ice_test`, `sctp_test`
-- Examples: `example/aioice`, `example/aiortc` (SCTP only), `example/web`
+- Examples (SCTP only): `aiortc_example` (`example/aiortc/`), `pion_example` (`example/pion/`)
+- The pion example includes a Go peer (`example/pion/gopeer/`) using pion/webrtc
 
 ### CMake options
 | Option | Default | Description |
@@ -107,6 +108,12 @@ Template implementation files use `.ipp` extension (not `.inl`). Found in `inclu
 
 ### Submodule
 `exsctp/dcsctp` is a git submodule (https://github.com/samgaawaa/dcsctp). It is only built when `ASIOICE_ENABLE_SCTP_OVER_DTLS=ON`.
+- dcsctp CRC32c output uses `std::byteswap` to produce little-endian checksums compatible with pion/sctp (Go).
+- `exsctp::sctp_options` default sets `zero_checksum_alternate_error_detection_method = LowerLayerDtls()` which adds a ZeroChecksumAcceptableChunkParameter (type 0x8001) to INIT/INIT-ACK. Set to `None()` if the peer doesn't support this experimental parameter.
+- `disable_checksum_verification = true` skips CRC32c validation on incoming packets; useful when interoping with peers that use a different CRC32c byte order (e.g., usrsctp).
+
+### Third-party headers
+`third_party/json.hpp` (nlohmann JSON) is accessible to all code linking `asioice_test_flags` or `asioice` (private include). Use `#include "json.hpp"` without a path prefix. Pion and aiortc examples use it for SDP/JSON serialization.
 
 ### Coroutine type
 `asioice::task<T>` is an alias for `exec::basic_task<T, exec::__task::inline_task_context<T>>` from stdexec.
@@ -114,6 +121,13 @@ Template implementation files use `.ipp` extension (not `.inl`). Found in `inclu
 ### `agent::_impl` is `shared_ptr<void>`
 - `_impl` is `std::shared_ptr<void>` (agent.hpp:121). All casts use `_impl.get()`.
 - `agent` destructor is defaulted (shared_ptr handles cleanup).
+
+### Agent state
+- `agent_state_t` enum (`include/asioice/agent_state.hpp`): `INIT`, `GATHERING`, `CONNECTING`, `CONNECTED`, `CLOSED`.
+- `agent::state()` returns current state.
+- `agent::on_state_change()` — returns a task that completes on any state change.
+- `agent::on_closed()` — returns a task that completes when state becomes `CLOSED`.
+- `agent::on_connected_or_closed()` — returns a task that completes on `CONNECTED` or `CLOSED`.
 
 ### IceTransport
 - `agent::create_ice_transport(uint8_t component)` → `shared_ptr<ice_transport_type>` — returns an object satisfying `AsyncPacketConnectionTransport` for use as the next layer for `ssl::dtls_transport<IceTransport>` or `sctp::transport<IceTransport>`.
@@ -131,14 +145,17 @@ Template implementation files use `.ipp` extension (not `.inl`). Found in `inclu
 - `datagram_receiver` has two overloads: `datagram_received(buffer, endpoint)` and `datagram_received(buffer)` (no endpoint). Both default to returning `false`.
 
 ### DataChannel (DCEP)
-- `include/asioice/data_channel.hpp` — `data_channel` class and `data_channel_manager<Layer>` template.
-- `data_channel_manager` wraps `sctp::transport<Layer>` and handles DCEP (RFC 8832) for WebRTC DataChannel.
-- `data_channel_manager::start()` spawns a read loop; the user must provide an `exec::async_scope`.
+- `include/asioice/data_channel.hpp` — thin `data_channel_manager<Layer>` wrapper delegating to `impl::data_channel_manager_impl<Layer>` (`include/asioice/impl/data_channel_impl.hpp`).
+- **Constructor**: `data_channel_manager` takes `shared_ptr<sctp::transport<Layer>>` in its constructor (not a default-constructed empty object).
+- **`start()`**: takes no arguments; spawns the internal read loop using `detached_with_data` and the sctp transport's executor.
+- **`stop()`**: sets a stop promise and clears the `on_remote_channel` callback.
 - DCEP OPEN messages arrive on SCTP stream 0 with PPID=50, data messages on assigned streams with PPID=51 (text) or 53 (binary).
-- Stream IDs are assigned sequentially starting from 1 (both incoming and outgoing).
-- **Pull-mode API**: `data_channel::async_read()` returns `task<optional<data_channel_message>>` (nullopt when closed). Internal bounded queue (256 msg) provides backpressure — if the app doesn't read, the SCTP read loop blocks.
-- Send via `data_channel_manager::send(ch, data, binary)` or `send_text(ch, text)`.
-- Remote channels discovered via `on_remote_channel` callback.
+- Stream IDs are assigned sequentially starting from 0 (both incoming and outgoing).
+- **`data_channel::read()`**: returns a sender producing `std::optional<data_channel_message>` (nullopt when closed). Uses `async_mutex` for serialization. Internal queue provides backpressure.
+- **`data_channel::send(data, binary)`**: returns a sender; wraps data in `exsctp::message` and sends via the sctp transport.
+- **`data_channel::send_text(string_view)`**: convenience wrapper around `send()` with `binary=false`.
+- Remote channels discovered via `on_remote_channel` callback receiving `shared_ptr<data_channel>`.
+- Note: `send_text` and `read` are on `data_channel` itself, **not** on `data_channel_manager`. The old API (`async_read()`, manager-level `send_text()`) is removed.
 
 ### When adding files
 - New `.cpp` source: add to `ICE_SRC_FILES` in `CMakeLists.txt`
