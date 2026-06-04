@@ -6,9 +6,9 @@ namespace asioice {
 
 using impl::data_channel_message;
 
-template <AsyncPacketConnectionTransport Layer> struct data_channel_manager {
-    using impl_type = impl::data_channel_manager_impl<Layer>;
-    using sctp_type = typename impl_type::sctp_type;
+template <class Sctp> struct data_channel_manager {
+    using impl_type = impl::data_channel_manager_impl<Sctp>;
+    using sctp_type = Sctp;
     using data_channel = typename impl_type::data_channel;
     using channel_callback = typename impl_type::channel_callback;
 

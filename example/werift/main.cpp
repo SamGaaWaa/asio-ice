@@ -53,8 +53,8 @@ static task<void> ws_send(ws_t &ws, const nlohmann::json &msg) {
 
 static task<nlohmann::json> ws_recv(ws_t &ws) {
     beast::flat_buffer buf;
-    auto [ec, n] = co_await ws.async_read(
-        buf, net::as_tuple(asio2exec::use_sender));
+    auto [ec, n] =
+        co_await ws.async_read(buf, net::as_tuple(asio2exec::use_sender));
     if (ec)
         throw std::runtime_error("ws recv: " + ec.message());
     auto j = nlohmann::json::parse(beast::buffers_to_string(buf.data()));
@@ -75,11 +75,10 @@ static remote_sdp parse_sdp(std::string_view s) {
         if (p == std::string_view::npos)
             p = r.find('\n');
         auto l = r.substr(0, p);
-        r.remove_prefix(p == std::string_view::npos
-                            ? r.size()
-                            : p + (l.size() < r.size() && r[l.size()] == '\r'
-                                       ? 2
-                                       : 1));
+        r.remove_prefix(
+            p == std::string_view::npos
+                ? r.size()
+                : p + (l.size() < r.size() && r[l.size()] == '\r' ? 2 : 1));
         if (l.starts_with("a=ice-ufrag:"))
             d.ufrag = l.substr(12);
         else if (l.starts_with("a=ice-pwd:"))
@@ -88,33 +87,28 @@ static remote_sdp parse_sdp(std::string_view s) {
             d.fp = l.substr(22);
         else if (l.starts_with("a=setup:"))
             d.setup = l.substr(8);
-        else if (l.starts_with("a=") &&
-                 l.substr(2).starts_with("candidate:"))
+        else if (l.starts_with("a=") && l.substr(2).starts_with("candidate:"))
             d.cands.emplace_back(l.substr(2));
     }
     return d;
 }
 
-static task<void>
-ice_dtls_sctp_session(net::io_context &ctx, ws_ptr ws) {
+static task<void> ice_dtls_sctp_session(net::io_context &ctx, ws_ptr ws) {
     std::cout << "WS connected\n";
     asio2exec::scheduler sched{ctx};
     ssl::dtls_certificate cert;
     std::string local_fp = cert.get_fingerprint_sha256();
     std::cout << "DTLS fp: " << local_fp << '\n';
 
-    auto offer = parse_sdp(
-        (co_await ws_recv(*ws))["sdp"].get<std::string>());
+    auto offer = parse_sdp((co_await ws_recv(*ws))["sdp"].get<std::string>());
     std::cout << "Offer: ufrag=" << offer.ufrag << " fp=" << offer.fp
               << " cands=" << offer.cands.size() << '\n';
 
-    agent_config cfg = {
-        .username = "asioice_werift",
-        .password = "werift_pwd",
-        .ice_controlling = false,
-        .use_loopback = true,
-        .component_count = 1
-    };
+    agent_config cfg = {.username = "asioice_werift",
+                        .password = "werift_pwd",
+                        .ice_controlling = false,
+                        .use_loopback = true,
+                        .component_count = 1};
     cfg.trickle_ice = false;
     cfg.connectivity_check_timeout = std::chrono::seconds(15);
 
@@ -124,14 +118,13 @@ ice_dtls_sctp_session(net::io_context &ctx, ws_ptr ws) {
 
     using IceT = agent::ice_transport_type;
     using DtlsT = ssl::dtls_transport<IceT>;
-    using DgramT = datagram_transport<DtlsT>;
-    using SctpT = sctp::transport<DgramT>;
-    using DcMgr = data_channel_manager<DgramT>;
+    using SctpT = sctp::transport<DtlsT>;
+    using DcMgr = data_channel_manager<SctpT>;
     using Datachannel = typename DcMgr::data_channel;
 
     auto ice = ag.create_ice_transport(1);
-    auto dgram = std::make_shared<DgramT>(ice, std::move(cert));
-    dgram->socket().set_expected_remote_fingerprint(offer.fp);
+    auto dtls = std::make_shared<DtlsT>(ice, std::move(cert));
+    dtls->set_expected_remote_fingerprint(offer.fp);
 
     for (const auto &line : offer.cands) {
         auto c = candidate::from_sdp(line);
@@ -141,9 +134,8 @@ ice_dtls_sctp_session(net::io_context &ctx, ws_ptr ws) {
     co_await ag.add_remote_candidate();
 
     net::steady_timer timer(ctx, std::chrono::seconds(5));
-    co_await utils::stop_when(
-        ag.gather_candidates(),
-        timer.async_wait(asio2exec::use_sender));
+    co_await utils::stop_when(ag.gather_candidates(),
+                              timer.async_wait(asio2exec::use_sender));
 
     std::ostringstream sdp;
     sdp << "v=0\r\no=- 0 0 IN IP4 0.0.0.0\r\ns=-\r\nt=0 0\r\n"
@@ -173,17 +165,15 @@ ice_dtls_sctp_session(net::io_context &ctx, ws_ptr ws) {
     co_await timer.async_wait(asio2exec::use_sender);
 
     std::cout << "DTLS handshake (client)...\n";
-    auto hs_ec = co_await dgram->socket().async_handshake(
-        DtlsT::handshake_type::client);
+    auto hs_ec = co_await dtls->async_handshake(DtlsT::handshake_type::client);
     if (hs_ec) {
         std::cerr << "DTLS failed: " << hs_ec.message() << '\n';
         co_return;
     }
-    std::cout << "DTLS OK, fp: "
-              << dgram->socket().get_remote_fingerprint_sha256()
+    std::cout << "DTLS OK, fp: " << dtls->get_remote_fingerprint_sha256()
               << '\n';
 
-    auto sctp = std::make_shared<SctpT>(dgram, exsctp::sctp_options{});
+    auto sctp = std::make_shared<SctpT>(dtls, exsctp::sctp_options{});
 
     sctp->start();
 
@@ -201,31 +191,27 @@ ice_dtls_sctp_session(net::io_context &ctx, ws_ptr ws) {
     exec::async_scope scope;
     DcMgr dc_mgr(sctp);
 
-    dc_mgr.on_remote_channel(
-        [&scope](std::shared_ptr<Datachannel> ch) {
-            std::cout << "Remote DataChannel: " << ch->label()
-                      << " (stream " << ch->stream_id() << ")\n";
-            scope.spawn(
-                [](std::shared_ptr<Datachannel> ch) -> task<void> {
-                    while (true) {
-                        std::optional<data_channel_message> msg =
-                            co_await ch->read();
-                        if (!msg)
-                            break;
-                        std::string_view text(
-                            reinterpret_cast<const char *>(
-                                msg->data.data()),
-                            msg->data.size());
-                        std::cout << "Recv on '" << ch->label()
-                                  << "': " << text << '\n';
+    dc_mgr.on_remote_channel([&scope](std::shared_ptr<Datachannel> ch) {
+        std::cout << "Remote DataChannel: " << ch->label() << " (stream "
+                  << ch->stream_id() << ")\n";
+        scope.spawn([](std::shared_ptr<Datachannel> ch) -> task<void> {
+            while (true) {
+                std::optional<data_channel_message> msg = co_await ch->read();
+                if (!msg)
+                    break;
+                std::string_view text(
+                    reinterpret_cast<const char *>(msg->data.data()),
+                    msg->data.size());
+                std::cout << "Recv on '" << ch->label() << "': " << text
+                          << '\n';
 
-                        if (text == "ping") {
-                            co_await ch->send_text("pong");
-                            std::cout << "Sent pong\n";
-                        }
-                    }
-                }(std::move(ch)));
-        });
+                if (text == "ping") {
+                    co_await ch->send_text("pong");
+                    std::cout << "Sent pong\n";
+                }
+            }
+        }(std::move(ch)));
+    });
 
     dc_mgr.start();
     std::cout << "Waiting 30s for DataChannel ping-pong...\n";
@@ -243,8 +229,8 @@ ice_dtls_sctp_session(net::io_context &ctx, ws_ptr ws) {
     co_await (scope.on_empty() | stdexec::continues_on(sched));
 }
 
-static task<void>
-http_session(net::io_context &ctx, net::ip::tcp::socket sock) {
+static task<void> http_session(net::io_context &ctx,
+                               net::ip::tcp::socket sock) {
     beast::flat_buffer buf;
     http::request<http::string_body> req;
     auto [ec, n] = co_await http::async_read(
@@ -253,9 +239,8 @@ http_session(net::io_context &ctx, net::ip::tcp::socket sock) {
         co_return;
     if (websocket::is_upgrade(req)) {
         auto ws = std::make_shared<ws_t>(std::move(sock));
-        ws->set_option(
-            websocket::stream_base::timeout::suggested(
-                beast::role_type::server));
+        ws->set_option(websocket::stream_base::timeout::suggested(
+            beast::role_type::server));
         auto [wec] = co_await ws->async_accept(
             req, net::as_tuple(asio2exec::use_sender));
         if (wec)
@@ -263,14 +248,12 @@ http_session(net::io_context &ctx, net::ip::tcp::socket sock) {
         co_await ice_dtls_sctp_session(ctx, ws);
         co_return;
     }
-    http::response<http::string_body> res{http::status::ok,
-                                          req.version()};
+    http::response<http::string_body> res{http::status::ok, req.version()};
     res.set(http::field::server, "asio-ice");
     res.set(http::field::content_type, "text/plain");
     res.body() = "OK";
     res.prepare_payload();
-    co_await http::async_write(
-        sock, res, net::as_tuple(asio2exec::use_sender));
+    co_await http::async_write(sock, res, net::as_tuple(asio2exec::use_sender));
 }
 
 static task<void> listener(net::io_context &ctx) {
@@ -278,8 +261,8 @@ static task<void> listener(net::io_context &ctx) {
         ctx, net::ip::tcp::endpoint(net::ip::make_address("127.0.0.1"), PORT));
     std::cout << "Server on ws://localhost:" << PORT << "/ws\n";
     while (true) {
-        auto [ec, sock] = co_await acc.async_accept(
-            net::as_tuple(asio2exec::use_sender));
+        auto [ec, sock] =
+            co_await acc.async_accept(net::as_tuple(asio2exec::use_sender));
         if (ec)
             continue;
         exec::start_detached(http_session(ctx, std::move(sock)));

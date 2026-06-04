@@ -25,7 +25,7 @@ namespace net = asio;
 
 namespace asioice {
 
-struct __send_receiver {
+struct __asio_receiver {
     using receiver_concept = stdexec::receiver_t;
     // #if ASIOICE_USE_BOOST_ASIO
     void
@@ -46,10 +46,10 @@ concept AsyncPacketTransport =
              asioice::endpoint ep) {
         stdexec::connect(stdexec::starts_on(stdexec::inline_scheduler{},
                                             t->async_send_to(data, ep)),
-                         __send_receiver{});
+                         __asio_receiver{});
         stdexec::connect(stdexec::starts_on(stdexec::inline_scheduler{},
                                             t->async_send_to(data_array, ep)),
-                         __send_receiver{});
+                         __asio_receiver{});
         { t->get_executor() } -> std::convertible_to<net::any_io_executor>;
     };
 
@@ -59,11 +59,24 @@ concept AsyncPacketConnectionTransport =
              std::span<const net::const_buffer> data_array) {
         stdexec::connect(stdexec::starts_on(stdexec::inline_scheduler{},
                                             t->async_send(data)),
-                         __send_receiver{});
+                         __asio_receiver{});
         stdexec::connect(stdexec::starts_on(stdexec::inline_scheduler{},
                                             t->async_send(data_array)),
-                         __send_receiver{});
+                         __asio_receiver{});
         { t->get_executor() } -> std::convertible_to<net::any_io_executor>;
     };
+
+template <class T>
+concept UniqueAsyncPacketConnectionTransport =
+    requires(T *t, net::mutable_buffer buf,
+             std::span<net::mutable_buffer> buf_array) {
+        stdexec::connect(stdexec::starts_on(stdexec::inline_scheduler{},
+                                            t->async_receive(buf)),
+                         __asio_receiver{});
+        stdexec::connect(stdexec::starts_on(stdexec::inline_scheduler{},
+                                            t->async_receive(buf_array)),
+                         __asio_receiver{});
+    } &&
+    AsyncPacketConnectionTransport<T>;
 
 } // namespace asioice

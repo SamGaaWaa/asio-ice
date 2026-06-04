@@ -1,2 +1,0 @@
-add_executable(aioice_example main.cpp)
-target_link_libraries(aioice_example PRIVATE asioice_test_flags)

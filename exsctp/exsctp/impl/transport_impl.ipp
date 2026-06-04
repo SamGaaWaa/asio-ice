@@ -196,7 +196,8 @@ template <class Interface> auto transport_impl<Interface>::accept() noexcept {
 }
 
 template <class Interface> auto transport_impl<Interface>::shutdown() noexcept {
-    if (!this->closed())
+    if (this->_dcsctp->state() != dcsctp::SocketState::kShuttingDown &&
+        this->_dcsctp->state() != dcsctp::SocketState::kClosed)
         this->_dcsctp->Shutdown();
     return utils::if_else(
         stdexec::just(this->closed()), [] { return stdexec::just(true); },

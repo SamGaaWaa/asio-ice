@@ -107,7 +107,7 @@ inline asioice::task<void> gather_task(asioice::net::io_context &ctx,
     using Agent = asioice::agent;
     using IceTransport = typename Agent::ice_transport_type;
     using DtlsTransport = ssl::dtls_transport<IceTransport>;
-    using SctpTransport = sctp::transport<datagram_transport<DtlsTransport>>;
+    using SctpTransport = sctp::transport<DtlsTransport>;
 
     const char *stun_servers[] = {/*"stun.l.google.com:19302",*/
                                   "14.29.112.241:20002"};
@@ -127,11 +127,11 @@ inline asioice::task<void> gather_task(asioice::net::io_context &ctx,
         .transport_policy = asioice::transport_policy::ALL};
     Agent agent1(ctx.get_executor(), config1);
     std::shared_ptr<IceTransport> transport1 = agent1.create_ice_transport(1);
-    auto dtls_client = std::make_shared<datagram_transport<DtlsTransport>>(
-        transport1, std::move(client_cert));
+    auto dtls_client =
+        std::make_shared<DtlsTransport>(transport1, std::move(client_cert));
     SctpTransport sctp_client(dtls_client);
 
-    dtls_client->socket().set_expected_remote_fingerprint(server_fp);
+    dtls_client->set_expected_remote_fingerprint(server_fp);
 
     agent_config config2 = {
         .username = "user2",
@@ -145,11 +145,11 @@ inline asioice::task<void> gather_task(asioice::net::io_context &ctx,
         .transport_policy = asioice::transport_policy::ALL};
     Agent agent2(ctx.get_executor(), config2);
     std::shared_ptr<IceTransport> transport2 = agent2.create_ice_transport(1);
-    auto dtls_server = std::make_shared<datagram_transport<DtlsTransport>>(
-        transport2, std::move(server_cert));
+    auto dtls_server =
+        std::make_shared<DtlsTransport>(transport2, std::move(server_cert));
     SctpTransport sctp_server(dtls_server);
 
-    dtls_server->socket().set_expected_remote_fingerprint(client_fp);
+    dtls_server->set_expected_remote_fingerprint(client_fp);
 
     // Trickle ICE
     exec::async_scope scope;
@@ -271,9 +271,8 @@ inline asioice::task<void> gather_task(asioice::net::io_context &ctx,
     }
     std::tuple<std::tuple<std::error_code>, std::tuple<std::error_code>>
         dtls_handshake_res = co_await stdexec::when_all(
-            dtls_client->socket().async_handshake(
-                DtlsTransport::handshake_type::client),
-            dtls_server->socket().async_handshake(
+            dtls_client->async_handshake(DtlsTransport::handshake_type::client),
+            dtls_server->async_handshake(
                 DtlsTransport::handshake_type::server));
     if (std::get<0>(std::get<0>(dtls_handshake_res)) != std::error_code{} ||
         std::get<0>(std::get<1>(dtls_handshake_res)) != std::error_code{}) {

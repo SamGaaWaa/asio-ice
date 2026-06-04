@@ -35,9 +35,9 @@ struct data_channel_message {
     bool binary;
 };
 
-template <AsyncPacketConnectionTransport Layer>
+template <class Sctp>
 class data_channel_manager_impl
-    : public std::enable_shared_from_this<data_channel_manager_impl<Layer>> {
+    : public std::enable_shared_from_this<data_channel_manager_impl<Sctp>> {
     static constexpr uint32_t kPpidDcep = 50;
     static constexpr uint32_t kPpidString = 51;
     static constexpr uint32_t kPpidBinary = 53;
@@ -46,7 +46,7 @@ class data_channel_manager_impl
     static constexpr uint8_t kChannelTypeReliable = 0x00;
 
   public:
-    using sctp_type = asioice::sctp::transport<Layer>;
+    using sctp_type = Sctp;
 
     struct data_channel : std::enable_shared_from_this<data_channel> {
         enum state_t : char { connecting, open, closing, closed };
@@ -252,26 +252,26 @@ class data_channel_manager_impl
     asioice::shared_promise<void> _not_full{};
 };
 
-template <AsyncPacketConnectionTransport Layer>
-data_channel_manager_impl<Layer>::data_channel::~data_channel() {
+template <class Sctp>
+data_channel_manager_impl<Sctp>::data_channel::~data_channel() {
     this->_manager->_channels.erase(this->stream_id());
     this->_manager->_waiting_channels.erase(this->stream_id());
 }
 
-template <AsyncPacketConnectionTransport Layer>
-auto data_channel_manager_impl<Layer>::data_channel::send(
+template <class Sctp>
+auto data_channel_manager_impl<Sctp>::data_channel::send(
     std::span<const uint8_t> data, bool binary) {
     return this->_manager->send(*this, data, binary);
 }
 
-template <AsyncPacketConnectionTransport Layer>
-auto data_channel_manager_impl<Layer>::data_channel::send_binary(
+template <class Sctp>
+auto data_channel_manager_impl<Sctp>::data_channel::send_binary(
     std::span<const uint8_t> data) {
     return this->send(data, true);
 }
 
-template <AsyncPacketConnectionTransport Layer>
-auto data_channel_manager_impl<Layer>::data_channel::send_text(
+template <class Sctp>
+auto data_channel_manager_impl<Sctp>::data_channel::send_text(
     std::string_view text) {
     return this->send(
         std::span<const uint8_t>{reinterpret_cast<const uint8_t *>(text.data()),
@@ -279,8 +279,8 @@ auto data_channel_manager_impl<Layer>::data_channel::send_text(
         false);
 }
 
-template <AsyncPacketConnectionTransport Layer>
-auto data_channel_manager_impl<Layer>::data_channel::read() {
+template <class Sctp>
+auto data_channel_manager_impl<Sctp>::data_channel::read() {
     uint16_t sid = this->stream_id();
 
     auto work =

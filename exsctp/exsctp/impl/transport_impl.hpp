@@ -69,6 +69,7 @@ struct transport_impl final
         assert(_timeout_set.empty());
 
         _notify_sender.set_value();
+        _interface->stop();
     }
 
     auto &interface() noexcept { return *_interface; }

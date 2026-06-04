@@ -2,10 +2,15 @@
 
 #include <memory>
 #include <stdexcept>
+#include <vector>
 
 #include "asioice/config.hpp"
 #include "asioice/concepts.hpp"
 #include "asioice/detail/receiver.hpp"
+#include "asioice/task.hpp"
+#include "asioice/detail/detached_with_data.hpp"
+#include "asioice/detail/stop_when.hpp"
+#include "asioice/detail/shared_promise.hpp"
 #include "exsctp/transport.hpp"
 
 #if ASIOICE_USE_BOOST_ASIO > 0
@@ -24,7 +29,8 @@ namespace net = asio;
 
 namespace asioice::sctp::impl {
 
-template <asioice::AsyncPacketConnectionTransport Layer> struct io_interface {
+template <asioice::UniqueAsyncPacketConnectionTransport Layer>
+struct io_interface : std::enable_shared_from_this<io_interface<Layer>> {
     using executor_type = typename Layer::executor_type;
     using scheduler_type = asio2exec::basic_scheduler<executor_type>;
 
@@ -47,6 +53,17 @@ template <asioice::AsyncPacketConnectionTransport Layer> struct io_interface {
         if constexpr (requires { _next_layer->start(); }) {
             _next_layer->start();
         }
+        utils::detached_with_data(
+            utils::stop_when(this->read_loop(),
+                             this->_stop.get_future() |
+                                 stdexec::continues_on(scheduler())),
+            this->shared_from_this());
+    }
+
+    void stop() noexcept {
+        _ptr = nullptr;
+        _on_data = nullptr;
+        this->_stop.set_value();
     }
 
     auto scheduler() noexcept { return scheduler_type{get_executor()}; }
@@ -79,27 +96,73 @@ template <asioice::AsyncPacketConnectionTransport Layer> struct io_interface {
         return 1200;
     }
 
-    void add_receiver(asioice::datagram_receiver &r) noexcept {
-        _next_layer->add_receiver(r);
+    void set_data_callback(void *ptr,
+                           void (*on_data)(const void *data, size_t n,
+                                           void *user_data)) noexcept {
+        _ptr = ptr;
+        _on_data = on_data;
     }
 
   private:
+    asioice::task<void> read_loop() {
+        std::vector<uint8_t> buf(mtu());
+        while (true) {
+            auto [ec, n] = co_await _next_layer->async_receive(
+                net::buffer(buf), asio2exec::use_sender);
+            if (ec) {
+                ICE_IN_DEBUG {
+                    std::cerr
+                        << "sctp::impl::io_interface::read_loop async_receive: "
+                        << ec.message() << '\n';
+                }
+                co_return;
+            }
+            if (n == 0) {
+                ICE_IN_DEBUG {
+                    std::cerr
+                        << "sctp::impl::io_interface::read_loop: closed\n";
+                }
+                co_return;
+            }
+            if (_on_data) [[likely]]
+                _on_data(buf.data(), n, _ptr);
+        }
+    }
+
     std::shared_ptr<Layer> _next_layer;
+    asioice::shared_promise<void> _stop{};
+    void *_ptr = nullptr;
+    void (*_on_data)(const void *data, size_t n, void *user_data) = nullptr;
 };
 
-template <class Layer> struct sctp_impl final : asioice::datagram_receiver {
+template <class Layer> struct sctp_impl {
     using next_layer_type = Layer;
     using interface_type = io_interface<next_layer_type>;
     static_assert(exsctp::IOInterface<interface_type>);
     using exsctp_transport = exsctp::basic_transport<interface_type>;
     using executor_type = typename next_layer_type::executor_type;
 
+  private:
+    static void on_data_received(const void *data, size_t n, void *user_data) {
+        auto *self = static_cast<sctp_impl *>(user_data);
+        self->_transport.dispatch_packet(
+            {static_cast<const uint8_t *>(data), n});
+    }
+
+  public:
     sctp_impl(std::shared_ptr<next_layer_type> next_layer,
               const exsctp::sctp_options &options) noexcept
         : _transport(std::make_shared<interface_type>(std::move(next_layer)),
                      options) {
-        _transport.interface().add_receiver(*this);
+        _transport.interface().set_data_callback(this, on_data_received);
     }
+
+    sctp_impl(const sctp_impl &) = delete;
+    sctp_impl(sctp_impl &&) = delete;
+    sctp_impl &operator=(const sctp_impl &) = delete;
+    sctp_impl &operator=(sctp_impl &&) = delete;
+
+    ~sctp_impl() {}
 
     executor_type get_executor() const noexcept {
         return _transport.interface().get_executor();
@@ -107,11 +170,7 @@ template <class Layer> struct sctp_impl final : asioice::datagram_receiver {
 
     void start() { _transport.start(); }
 
-    void stop() {
-        // make sure datagram_received will not invoke
-        detach();
-        _transport.stop();
-    }
+    void stop() { _transport.stop(); }
 
     auto send(const exsctp::message &msg,
               const exsctp::send_options &send_options) noexcept {
@@ -135,21 +194,6 @@ template <class Layer> struct sctp_impl final : asioice::datagram_receiver {
     void close() noexcept { _transport.close(); }
 
   private:
-    bool datagram_received(asioice::io_buffer_ptr &buffer,
-                           const asioice::endpoint &endpoint) override {
-        if (!buffer || buffer->size() < 1)
-            return false;
-        _transport.dispatch_packet({buffer->data(), buffer->size()});
-        return true;
-    }
-
-    bool datagram_received(asioice::io_buffer_ptr &buffer) override {
-        if (!buffer || buffer->size() < 1)
-            return false;
-        _transport.dispatch_packet({buffer->data(), buffer->size()});
-        return true;
-    }
-
     exsctp_transport _transport;
 };
 

@@ -6,7 +6,7 @@
 
 namespace asioice::sctp {
 
-template <AsyncPacketConnectionTransport Layer> struct transport {
+template <UniqueAsyncPacketConnectionTransport Layer> struct transport {
     using next_layer_type = Layer;
     using impl_type = asioice::sctp::impl::sctp_impl<next_layer_type>;
     using executor_type = typename impl_type::executor_type;

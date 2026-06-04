@@ -25,6 +25,7 @@ struct any_io_interface {
         exec::any_scheduler<any_sender_t, exec::queries<fwd_progress_query_t>>;
 
     void start() {}
+    void stop() noexcept {}
 
     virtual exsctp::task<std::tuple<std::error_code, std::size_t>>
     send(std::span<const uint8_t> data) = 0;
@@ -90,8 +91,9 @@ concept IOInterface = requires(
     std::chrono::milliseconds ms, std::chrono::seconds sec) {
     interface->start();
     {
-        interface->scheduler()
-    } -> stdexec::scheduler;
+        interface->stop()
+    } noexcept;
+    { interface->scheduler() } -> stdexec::scheduler;
     stdexec::connect(
         stdexec::starts_on(stdexec::inline_scheduler{}, interface->send(data)),
         __send_receiver{});

@@ -22,36 +22,28 @@ namespace net = asio;
 
 void ping_pong(size_t n) {
     using namespace asioice;
+    using UdpSocket =
+        asio2exec::use_sender_t::as_default_on_t<net::ip::udp::socket>;
+    static_assert(UniqueAsyncPacketConnectionTransport<UdpSocket>);
 
     net::io_context ctx;
 
-    net::ip::udp::socket client_sock{ctx.get_executor()};
-    client_sock.open(net::ip::udp::v4());
-    client_sock.bind(
+    auto client_sock = std::make_shared<UdpSocket>(ctx);
+    client_sock->open(net::ip::udp::v4());
+    client_sock->bind(
         net::ip::udp::endpoint(net::ip::make_address("127.0.0.1"), 0));
 
-    net::ip::udp::socket server_sock{ctx.get_executor()};
-    server_sock.open(net::ip::udp::v4());
-    server_sock.bind(
+    auto server_sock = std::make_shared<UdpSocket>(ctx);
+    server_sock->open(net::ip::udp::v4());
+    server_sock->bind(
         net::ip::udp::endpoint(net::ip::make_address("127.0.0.1"), 0));
 
-    client_sock.connect(server_sock.local_endpoint());
-    server_sock.connect(client_sock.local_endpoint());
+    client_sock->connect(server_sock->local_endpoint());
+    server_sock->connect(client_sock->local_endpoint());
 
-    auto client_transport =
-        std::make_shared<datagram_transport<net::ip::udp::socket>>(
-            std::move(client_sock));
-    auto server_transport =
-        std::make_shared<datagram_transport<net::ip::udp::socket>>(
-            std::move(server_sock));
-
-    client_transport->start();
-    server_transport->start();
-
-    using SctpTransport =
-        sctp::transport<datagram_transport<net::ip::udp::socket>>;
-    SctpTransport sctp_client{std::move(client_transport)};
-    SctpTransport sctp_server{std::move(server_transport)};
+    using SctpTransport = sctp::transport<UdpSocket>;
+    SctpTransport sctp_client{client_sock};
+    SctpTransport sctp_server{server_sock};
     sctp_client.start();
     sctp_server.start();
 
