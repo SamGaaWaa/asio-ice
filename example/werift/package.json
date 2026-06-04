@@ -1,0 +1,16 @@
+{
+    "name": "asioice-werift-peer",
+    "version": "1.0.0",
+    "private": true,
+    "scripts": {
+        "start": "tsx werift_peer.ts"
+    },
+    "dependencies": {
+        "werift": "^0.22.0",
+        "ws": "^8.18.0"
+    },
+    "devDependencies": {
+        "tsx": "^4.19.0",
+        "typescript": "^5.6.0"
+    }
+}
