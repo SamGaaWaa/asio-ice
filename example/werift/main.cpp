@@ -189,19 +189,17 @@ static task<void> ice_dtls_sctp_session(net::io_context &ctx, ws_ptr ws) {
     std::cout << "SCTP connected!\n";
 
     exec::async_scope scope;
-    DcMgr dc_mgr(sctp);
+    DcMgr dc_mgr(sctp, true);
 
     dc_mgr.on_remote_channel([&scope](std::shared_ptr<Datachannel> ch) {
         std::cout << "Remote DataChannel: " << ch->label() << " (stream "
                   << ch->stream_id() << ")\n";
         scope.spawn([](std::shared_ptr<Datachannel> ch) -> task<void> {
             while (true) {
-                std::optional<data_channel_message> msg = co_await ch->read();
-                if (!msg)
-                    break;
+                data_channel_message msg = co_await ch->read();
                 std::string_view text(
-                    reinterpret_cast<const char *>(msg->data.data()),
-                    msg->data.size());
+                    reinterpret_cast<const char *>(msg.data.data()),
+                    msg.data.size());
                 std::cout << "Recv on '" << ch->label() << "': " << text
                           << '\n';
 

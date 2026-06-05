@@ -187,7 +187,7 @@ static task<void> ice_dtls_sctp_session(net::io_context &ctx, ws_ptr ws) {
     std::cout << "SCTP connected!\n";
 
     exec::async_scope scope;
-    DcMgr dc_mgr(sctp);
+    DcMgr dc_mgr(sctp, true);
 
     dc_mgr.on_remote_channel([&dc_mgr,
                               &scope](std::shared_ptr<Datachannel> ch) {
@@ -199,18 +199,12 @@ static task<void> ice_dtls_sctp_session(net::io_context &ctx, ws_ptr ws) {
                     std::cerr << "Send failed\n";
                     co_return;
                 }
-                std::optional<data_channel_message> msg = co_await ch->read();
-                if (!msg) {
-                    std::cerr << "channel \"" << ch->label()
-                              << "\" read failed\n";
-                    co_return;
-                }
-                if (!msg->binary)
-                    std::cout
-                        << "channel \"" << ch->label() << "\" received: "
-                        << std::string_view{(const char *)msg->data.data(),
-                                            msg->data.size()}
-                        << '\n';
+                data_channel_message msg = co_await ch->read();
+                if (!msg.binary)
+                    std::cout << "channel \"" << ch->label() << "\" received: "
+                              << std::string_view{(const char *)msg.data.data(),
+                                                  msg.data.size()}
+                              << '\n';
             }
         }(std::move(ch)));
     });

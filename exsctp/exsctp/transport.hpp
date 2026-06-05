@@ -118,6 +118,12 @@ template <IOInterface Interface = any_io_interface> class basic_transport {
 
     const auto &interface() const noexcept { return _impl->interface(); }
 
+    const dcsctp::DcSctpSocketInterface &socket() const noexcept {
+        return _impl->socket();
+    }
+
+    dcsctp::DcSctpSocketInterface &socket() noexcept { return _impl->socket(); }
+
     void dispatch_packet(std::span<const uint8_t> data) {
         _impl->dispatch_packet(data);
     }

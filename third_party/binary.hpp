@@ -1543,24 +1543,24 @@ namespace binary {
     template<fixed_string Fmt>
     inline constexpr __detail::pack_t<Fmt> pack{};
 
-    template<std::integral T>
+    template<std::integral T, std::size_t Offset = 0>
     constexpr T read_big(const void* buf)noexcept {
-        return __detail::read_bytes<T, 0, true>(buf);
+        return __detail::read_bytes<T, Offset, true>(buf);
     }
 
-    template<std::integral T>
+    template<std::integral T, std::size_t Offset = 0>
     constexpr T read_little(const void* buf)noexcept {
-        return __detail::read_bytes<T, 0, false>(buf);
+        return __detail::read_bytes<T, Offset, false>(buf);
     }
 
-    template<std::integral T>
+    template<std::integral T, std::size_t Offset = 0>
     constexpr void write_big(void* buf, typename std::remove_reference<T>::type value)noexcept {
-        __detail::write_bytes<T, 0, true>(buf, value);
+        __detail::write_bytes<T, Offset, true>(buf, value);
     }
 
-    template<std::integral T>
+    template<std::integral T, std::size_t Offset = 0>
     constexpr void write_little(void* buf, typename std::remove_reference<T>::type value)noexcept {
-        __detail::write_bytes<T, 0, false>(buf, value);
+        __detail::write_bytes<T, Offset, false>(buf, value);
     }
 
     template<std::integral T>

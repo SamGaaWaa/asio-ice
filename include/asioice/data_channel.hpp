@@ -5,6 +5,7 @@
 namespace asioice {
 
 using impl::data_channel_message;
+using impl::data_channel_options;
 
 template <class Sctp> struct data_channel_manager {
     using impl_type = impl::data_channel_manager_impl<Sctp>;
@@ -12,8 +13,8 @@ template <class Sctp> struct data_channel_manager {
     using data_channel = typename impl_type::data_channel;
     using channel_callback = typename impl_type::channel_callback;
 
-    data_channel_manager(std::shared_ptr<sctp_type> sctp)
-        : _impl(std::make_shared<impl_type>(std::move(sctp))) {}
+    data_channel_manager(std::shared_ptr<sctp_type> sctp, bool is_client)
+        : _impl(std::make_shared<impl_type>(std::move(sctp), is_client)) {}
 
     data_channel_manager(const data_channel_manager &) = delete;
     data_channel_manager &operator=(const data_channel_manager &) = delete;
@@ -48,8 +49,10 @@ template <class Sctp> struct data_channel_manager {
         _impl->on_remote_channel(std::move(cb));
     }
 
-    auto create_data_channel(std::string label, bool ordered = true) {
-        return _impl->create_data_channel(std::move(label), ordered);
+    auto
+    create_data_channel(std::string label,
+                        data_channel_options options = data_channel_options{}) {
+        return _impl->create_data_channel(std::move(label), std::move(options));
     }
 
   private:

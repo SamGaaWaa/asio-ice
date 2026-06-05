@@ -36,6 +36,10 @@ template <UniqueAsyncPacketConnectionTransport Layer> struct transport {
         return _impl->get_executor();
     }
 
+    const auto &socket() const noexcept { return _impl->socket(); }
+
+    auto &socket() noexcept { return _impl->socket(); }
+
     void start() { _impl->start(); }
 
     void stop() {

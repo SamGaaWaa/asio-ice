@@ -76,6 +76,12 @@ struct transport_impl final
 
     const auto &interface() const noexcept { return *_interface; }
 
+    const dcsctp::DcSctpSocketInterface &socket() const noexcept {
+        return *_dcsctp;
+    }
+
+    dcsctp::DcSctpSocketInterface &socket() noexcept { return *_dcsctp; }
+
     void dispatch_packet(std::span<const uint8_t> data) {
         _dcsctp->ReceivePacket(data);
     }

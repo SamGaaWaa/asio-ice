@@ -9,7 +9,7 @@
 #include "asioice/task.hpp"
 #include "asioice/detail/stop_when.hpp"
 #include "asioice/detail/stun_transaction.hpp"
-#include "property.hpp"
+#include "asioice/detail/property.hpp"
 #include "asioice/detail/if_else.hpp"
 #include "asioice/impl/turn_interface.hpp"
 

@@ -168,6 +168,10 @@ template <class Layer> struct sctp_impl {
         return _transport.interface().get_executor();
     }
 
+    const auto &socket() const noexcept { return _transport.socket(); }
+
+    auto &socket() noexcept { return _transport.socket(); }
+
     void start() { _transport.start(); }
 
     void stop() { _transport.stop(); }
