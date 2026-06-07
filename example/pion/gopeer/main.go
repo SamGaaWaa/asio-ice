@@ -10,7 +10,7 @@ import (
 	"time"
 
 	"github.com/gorilla/websocket"
-	"github.com/pion/ice/v4"
+	// "github.com/pion/ice/v4"
 	"github.com/pion/webrtc/v4"
 )
 
@@ -32,8 +32,8 @@ func main() {
 	log.Println("Connected to signaling server")
 
 	settingEngine := webrtc.SettingEngine{}
-	settingEngine.SetICEMulticastDNSMode(
-		ice.MulticastDNSModeDisabled)
+	// settingEngine.SetICEMulticastDNSMode(
+	// 	ice.MulticastDNSModeDisabled)
 
 	api := webrtc.NewAPI(webrtc.WithSettingEngine(settingEngine))
 

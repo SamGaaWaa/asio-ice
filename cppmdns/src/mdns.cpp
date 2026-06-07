@@ -1,11 +1,12 @@
 #include "mdns.hpp"
 
 #include "packet.hpp"
-#include "shared_promise_v2.hpp"
+#include "shared_promise.hpp"
 #include "inline_task.hpp"
 #include "scope_guard.hpp"
 #include "random.hpp"
 #include "log.hpp"
+#include "detached_with_data.hpp"
 
 #if CPPMDNS_USE_BOOST_ASIO > 0
 #define ASIO_TO_EXEC_USE_BOOST
@@ -24,17 +25,22 @@
 
 #include "asio2exec.hpp"
 
-#include "exec/task.hpp"
-#include "exec/when_any.hpp"
+#include <exec/task.hpp>
+#include <exec/when_any.hpp>
+#include <exec/start_detached.hpp>
 
 #include <boost/intrusive/set.hpp>
 #include <boost/intrusive/list.hpp>
+#include <boost/uuid/uuid.hpp>
+#include <boost/uuid/uuid_generators.hpp>
+#include <boost/uuid/uuid_io.hpp>
 
 #include <atomic>
 #include <optional>
 #include <cassert>
 #include <cstdlib>
 #include <vector>
+#include <ranges>
 
 static const auto MDNS_ADDR = mdns::net::ip::make_address_v4("224.0.0.251");
 static constexpr uint16_t MDNS_PORT = 5353;
@@ -122,7 +128,7 @@ struct query :
         }
     };
 private:
-    static inline_task<void> query_loop(std::shared_ptr<query> self);
+    inline_task<void> query_loop();
 
     dns::question_t _question;
     utils::shared_promise<std::expected<dns::record_t, std::error_code>> _result;
@@ -138,12 +144,11 @@ using query_set = boost::intrusive::multiset<query, boost::intrusive::key_of_val
 static query_ptr find_match_query(
     query_set& queries, 
     const std::string_view& name, 
-    dns::record_type type,
     bool is_probing = false
 ) {
     auto [begin, end] = queries.equal_range(name);
     for (; begin != end; ++begin) {
-        if(begin->type() == type && begin->is_probing() == is_probing)
+        if(begin->is_probing() == is_probing)
             return begin->shared_from_this();
     }
     return nullptr;
@@ -172,7 +177,7 @@ struct service_t :
 
     dns::record_t record;
 private:
-    static exec::task<void> time_out_control(std::shared_ptr<service_t> self);
+    exec::task<void> time_out_control();
 
     std::shared_ptr<server::impl_t> _server_impl;
     net::steady_timer _timer;
@@ -183,10 +188,10 @@ using service_set = boost::intrusive::list<service_t>;
 
 struct server::impl_t: std::enable_shared_from_this<server::impl_t>
 {
-    impl_t(net::io_context& c)noexcept :
-        ctx{ c },
-        sock_s4{ c, net::ip::udp::v4() },
-        sock_r4{ c, net::ip::udp::v4() }
+    impl_t(net::any_io_executor ex)noexcept :
+        executor{ std::move(ex) },
+        sock_s4{ executor, net::ip::udp::v4() },
+        sock_r4{ executor, net::ip::udp::v4() }
     {
         sock_s4.bind(net::ip::udp::endpoint(net::ip::udp::v4(), 0));
         {
@@ -203,42 +208,39 @@ struct server::impl_t: std::enable_shared_from_this<server::impl_t>
     void start();
     void stop()noexcept;
 
-    ~impl_t()noexcept {
-        // stop();
-    }
-
     exec::task<std::expected<std::string, std::error_code>>
-    queryAddr(std::string name, bool is_v4, std::shared_ptr<server::impl_t> self = {});
+    queryAddr(std::string name, std::shared_ptr<server::impl_t> self = {});
 
     exec::task<std::expected<dns::record_t, std::error_code>>
     probe(std::string name);
 
-    exec::task<std::error_code>
-    publishAddr(std::string name, std::string ip, int seconds = 3600, std::shared_ptr<server::impl_t> self = {});
+    exec::task<std::expected<std::string, std::error_code>>
+    publishAddr(std::string ip, int seconds = 3600, std::shared_ptr<server::impl_t> self = {});
 
     exec::task<void>
     remove(std::string name, std::shared_ptr<server::impl_t> self = {});
 
-    net::io_context& ctx;
+    net::any_io_executor executor;
     net::ip::udp::socket sock_s4;
     net::ip::udp::socket sock_r4;
     //std::optional<net::ip::udp::socket> sock_v6;
     query_set queries{};
     service_set services;
 private:
-    static inline_task<void> server_loop(std::shared_ptr<server::impl_t> self);
-    static inline_task<void> receive_loop(std::shared_ptr<server::impl_t> self);
+    inline_task<void> server_loop();
+    inline_task<void> receive_loop();
+    const service_t *find_service_by_ip(std::string_view) const;
 
     utils::shared_promise<void> _stop;
     std::atomic_bool _stopped = false;
 };
 
 void query::start() {
-    auto sched = asio2exec::scheduler{ _server_impl->ctx };
-    stdexec::start_detached(stdexec::starts_on(sched, stdexec::when_all(
-        query_loop(shared_from_this()),
+    auto sched = asio2exec::scheduler{ _server_impl->executor };
+    utils::detached_with_data(stdexec::starts_on(sched, stdexec::when_all(
+        this->query_loop(),
         _cancel.get_future() | stdexec::continues_on(sched)
-    ) | stdexec::into_variant()));
+    ) | stdexec::into_variant()), this->shared_from_this());
 }
 
 void query::set_result(const dns::record_t& record) {
@@ -254,20 +256,20 @@ query::~query() {
     // stop(); // Guarantee be called by the user
 }
 
-inline_task<void> query::query_loop(std::shared_ptr<query> q) {
-    auto& impl = *q->_server_impl;
+inline_task<void> query::query_loop() {
+    auto& impl = *this->_server_impl;
     utils::scope_guard on_exit([&]()noexcept{
-        if(q->is_linked())
-            impl.queries.erase(impl.queries.iterator_to(*q));
-        q->_result.set_stopped(); // no effect if already stopped
+        if(this->is_linked())
+            impl.queries.erase(impl.queries.iterator_to(*this));
+        this->_result.set_stopped(); // no effect if already stopped
     });
 
     dns::message_t msg;
     // Require a unicast response
-    msg.questions.emplace_back(q->_question);
+    msg.questions.emplace_back(this->_question);
     msg.questions.back().cls |= (uint16_t{ 1 } << 15);
 
-    net::steady_timer timer{ impl.ctx };
+    net::steady_timer timer{ impl.executor };
     char buf[4096];
 
     const auto n = msg.write(buf, sizeof(buf));
@@ -275,21 +277,26 @@ inline_task<void> query::query_loop(std::shared_ptr<query> q) {
         CPPMDNS_IN_DEBUG{
             LOG_ERROR() << "Error while serializing query: " << n.error() << std::endl;
         }
-        q->_result.set_value(std::unexpected(n.error()));
+        this->_result.set_value(std::unexpected(n.error()));
         co_return;
     }
 
-    int first_delay = q->_is_probing ? utils::rand(0, 250) : utils::rand(20, 120);
+    if (this->_result.empty()) {
+        // no waiters
+        co_return;
+    }
+
+    int first_delay = this->_is_probing ? utils::rand(0, 250) : utils::rand(20, 120);
     timer.expires_after(std::chrono::milliseconds{ first_delay });
     auto err = co_await timer.async_wait(asio2exec::use_sender);
     if (err) {
-        q->_result.set_value(std::unexpected(err));
+        this->_result.set_value(std::unexpected(err));
         co_return;
     }
 
-    int query_interval = q->_is_probing ? 250 : 1000;
+    int query_interval = this->_is_probing ? 250 : 1000;
     std::size_t q_count = 0;
-    while (true) {
+    while (!this->_result.empty()) {
         auto [err1, nsend1] = co_await impl.sock_s4.async_send_to(net::buffer(buf, *n), MDNS_ENDPOINT, asio2exec::use_sender);
         //auto [err2, nsend2] = co_await impl.sock_v6->async_send(net::buffer(buf, *n), asio2exec::use_sender);
         auto err2 = err1;
@@ -297,23 +304,25 @@ inline_task<void> query::query_loop(std::shared_ptr<query> q) {
             CPPMDNS_IN_DEBUG{
                 LOG_ERROR() << "Error while sending query: " << err1.message() << " " << err2.message() << std::endl;
             }
-            q->_result.set_value(std::unexpected(err1 ? err1 : err2));
+            this->_result.set_value(std::unexpected(err1 ? err1 : err2));
             co_return;
         }
         timer.expires_after(std::chrono::milliseconds(query_interval));
-        if (!q->_is_probing){
+        if (!this->_is_probing){
             if (query_interval < 3600000)
                 query_interval *= 2;
             if (query_interval > 3600000)
                 query_interval = 3600000;
         }
+        if (this->_result.empty())
+            co_return;
         err = co_await timer.async_wait(asio2exec::use_sender);
         if (err) {
-            q->_result.set_value(std::unexpected(err));
+            this->_result.set_value(std::unexpected(err));
             co_return;
         }
-        if (q->_is_probing && ++q_count == 3) {
-            q->_result.set_value(std::unexpected(std::make_error_code(std::errc::timed_out)));
+        if (this->_is_probing && ++q_count == 3) {
+            this->_result.set_value(std::unexpected(std::make_error_code(std::errc::timed_out)));
             co_return;
         }
     }
@@ -324,49 +333,59 @@ inline_task<void> query::query_loop(std::shared_ptr<query> q) {
 service_t::service_t(dns::record_t record, std::shared_ptr<server::impl_t> server_impl) :
     record{ std::move(record) },
     _server_impl{ std::move(server_impl) },
-    _timer{ _server_impl->ctx }
+    _timer{ _server_impl->executor }
 {}
 
 void service_t::start() {
-    auto sched = asio2exec::scheduler{ _server_impl->ctx };
-    stdexec::start_detached(stdexec::starts_on(sched, time_out_control(shared_from_this())));
+    auto sched = asio2exec::scheduler{ _server_impl->executor };
+    utils::detached_with_data(stdexec::starts_on(sched, time_out_control()), shared_from_this());
 }
 
 void service_t::update_timeout(int seconds) {
     record.ttl = seconds;
-    net::post(_server_impl->ctx,
+    net::post(_server_impl->executor,
               [self = shared_from_this()] { self->_timer.cancel(); });
 }
 
-exec::task<void> service_t::time_out_control(std::shared_ptr<service_t> self) {
-    auto& service = *self;
+exec::task<void> service_t::time_out_control() {
     utils::scope_guard on_exit([&]()noexcept {
-        if (service.is_linked())
-            service._server_impl->services.erase(service._server_impl->services.iterator_to(service));
+        if (this->is_linked())
+            this->_server_impl->services.erase(this->_server_impl->services.iterator_to(*this));
     });
     
     do {
-        service._timer.expires_after(std::chrono::seconds{ service.record.ttl });
-        co_await (service._timer.async_wait(asio2exec::use_sender) | stdexec::stopped_as_optional());
-    } while (service.record.ttl > 0);
+        this->_timer.expires_after(std::chrono::seconds{ this->record.ttl });
+        co_await (this->_timer.async_wait(asio2exec::use_sender) | stdexec::stopped_as_optional());
+    } while (this->record.ttl > 0);
 
     //TODO: Say goodbye
 }
 
 exec::task<std::expected<std::string, std::error_code>>
-server::impl_t::queryAddr(std::string name, bool is_v4, std::shared_ptr<server::impl_t> self)
+server::impl_t::queryAddr(std::string name, std::shared_ptr<server::impl_t> self)
 {
     if (_stopped) {
         co_return std::unexpected(std::make_error_code(std::errc::operation_canceled));
     }
-    co_await stdexec::schedule(asio2exec::scheduler{ ctx });
+    co_await stdexec::schedule(asio2exec::scheduler{ executor });
     if(name.empty())
         co_return std::unexpected(std::make_error_code(std::errc::invalid_argument));
     if (!name.ends_with(".local")) {
         name += ".local";
     }
+    if (auto it = std::ranges::find_if(this->services, [&name](const auto& s) {
+        return s.record.name == name;
+    }); it != this->services.end()) {
+        const auto& r = it->record;
+        auto type = dns::get_record_type(r.data);
+        assert(type == dns::record_type::A || type == dns::record_type::AAAA);
+        if (type == dns::record_type::A) {
+            co_return net::ip::address_v4{ std::get<dns::rdata::a>(r.data) }.to_string();
+        }
+        co_return net::ip::address_v6{ std::get<dns::rdata::aaaa>(r.data) }.to_string();
+    }
     // Find query
-    auto q = find_match_query(queries, name, is_v4 ? dns::record_type::A : dns::record_type::AAAA);
+    auto q = find_match_query(queries, name);
     if (q) {
 
     }
@@ -374,7 +393,7 @@ server::impl_t::queryAddr(std::string name, bool is_v4, std::shared_ptr<server::
         // Make a query
         q = query::make_query(
             std::string{ name },
-            is_v4 ? dns::record_type::A : dns::record_type::AAAA,
+            dns::record_type::ANY,
             self
         );
         queries.insert(*q);
@@ -385,7 +404,12 @@ server::impl_t::queryAddr(std::string name, bool is_v4, std::shared_ptr<server::
         co_return std::unexpected(res.error());
     const auto& addr = res->data;
     auto type = dns::get_record_type(addr);
-    assert(type == dns::record_type::A || type == dns::record_type::AAAA && "Unexpected record type");
+    if (type != dns::record_type::A && type != dns::record_type::AAAA) {
+        CPPMDNS_IN_DEBUG{
+            LOG_ERROR() << "Unexpected record type: " << type << '\n';
+        }
+        co_return std::unexpected(std::error_code((int)error::invalid_result, mdns_category()));   
+    }
     try {
         if (type == dns::record_type::A) {
             co_return net::ip::address_v4{ std::get<dns::rdata::a>(addr) }.to_string();
@@ -409,7 +433,7 @@ server::impl_t::probe(std::string name)
         name += ".local";
     }
     // Find query
-    auto q = find_match_query(queries, name, dns::record_type::ANY, true);
+    auto q = find_match_query(queries, name, true);
     if (!q) {
         // Make a query
         q = query::make_query(
@@ -424,16 +448,26 @@ server::impl_t::probe(std::string name)
     co_return co_await q->get_future();
 }
 
-exec::task<std::error_code>
-server::impl_t::publishAddr(std::string name, std::string ip, int seconds, std::shared_ptr<server::impl_t> self)
+static std::string get_uuid() {
+    static thread_local boost::uuids::random_generator gen;
+    boost::uuids::uuid id = gen();
+    return boost::uuids::to_string(id); 
+}
+
+exec::task<std::expected<std::string, std::error_code>>
+server::impl_t::publishAddr(std::string ip, int seconds, std::shared_ptr<server::impl_t> self)
 {
     if (_stopped) {
-        co_return std::make_error_code(std::errc::operation_canceled);
+        co_return std::unexpected(std::make_error_code(std::errc::operation_canceled));
     }
-    co_await stdexec::schedule(asio2exec::scheduler{ ctx });
+    co_await stdexec::schedule(asio2exec::scheduler{ executor });
+
+    if (auto srv = this->find_service_by_ip(ip); srv != nullptr) {
+        co_return srv->record.name;
+    }
 
     dns::record_t record{
-        .name = std::move(name),
+        .name = get_uuid() + ".local",
         .cls = dns::record_class::INTERNET,
         .ttl = seconds
     };
@@ -449,24 +483,17 @@ server::impl_t::publishAddr(std::string name, std::string ip, int seconds, std::
         }
     }
     catch (const std::exception& e) {
-        co_return std::make_error_code(std::errc::invalid_argument);
-    }
-    if (auto it = std::find_if(services.begin(), services.end(), [&](const auto& s) {
-        return s.record.name == service->record.name && 
-            s.record.type() == service->record.type();
-        }); it != services.end())
-    {
-        co_return std::error_code((int)error::service_already_exists, mdns_category());
+        co_return std::unexpected(std::make_error_code(std::errc::invalid_argument));
     }
     //TODO: Probe
-    {
-        auto other = co_await probe(service->record.name);
-        if (other)
-            co_return std::error_code((int)error::service_already_exists, mdns_category());
-    }
+    // {
+    //     auto other = co_await probe(service->record.name);
+    //     if (other)
+    //         co_return std::error_code((int)error::service_already_exists, mdns_category());
+    // }
     service->start();
     services.push_back(*service);
-    co_return{};
+    co_return service->record.name;
 }
 
 exec::task<void>
@@ -475,7 +502,7 @@ server::impl_t::remove(std::string name, std::shared_ptr<server::impl_t> self)
     if (_stopped) {
         co_return;
     }
-    co_await stdexec::schedule(asio2exec::scheduler{ ctx });
+    co_await stdexec::schedule(asio2exec::scheduler{ executor });
     for (auto& s : services) {
         if(s.record.name == name)
             s.stop();
@@ -483,24 +510,23 @@ server::impl_t::remove(std::string name, std::shared_ptr<server::impl_t> self)
 }
 
 void server::impl_t::start() {
-    auto sched = asio2exec::scheduler{ ctx };
-    stdexec::start_detached(stdexec::starts_on(sched, stdexec::when_all(
-        server_loop(shared_from_this()),
-        receive_loop(shared_from_this()),
+    auto sched = asio2exec::scheduler{ executor };
+    utils::detached_with_data(stdexec::starts_on(sched, stdexec::when_all(
+        server_loop(),
+        receive_loop(),
         _stop.get_future() | stdexec::continues_on(sched)
-    ) | stdexec::into_variant()));
+    ) | stdexec::into_variant()), this->shared_from_this());
 }
 
-inline_task<void> server::impl_t::server_loop(std::shared_ptr<server::impl_t> self) {
-    auto& impl = *self;
+inline_task<void> server::impl_t::server_loop() {
     char buf[4096];
     utils::scope_guard on_exit([&]()noexcept {
-        self->stop();
+        this->stop();
     });
 
     while (true) {
         net::ip::udp::endpoint remote;
-        auto [err, n] = co_await impl.sock_r4.async_receive_from(net::buffer(buf, sizeof(buf)), remote, asio2exec::use_sender);
+        auto [err, n] = co_await this->sock_r4.async_receive_from(net::buffer(buf, sizeof(buf)), remote, asio2exec::use_sender);
         if (err) {
             CPPMDNS_IN_DEBUG{
                 LOG_ERROR() << "Server loop: Error while receiving query: " << err.message() << std::endl;
@@ -516,7 +542,7 @@ inline_task<void> server::impl_t::server_loop(std::shared_ptr<server::impl_t> se
         //TODO: Check if it was send from a local network
         {
             CPPMDNS_IN_DEBUG{
-                auto local_ep = impl.sock_r4.local_endpoint();
+                auto local_ep = this->sock_r4.local_endpoint();
                 LOG_INFO() << "Local endpoint: " << local_ep.address() << ':' << local_ep.port() << std::endl;
                 LOG_INFO() << "Remote endpoint: " << remote.address() << ':' << remote.port() << std::endl;
             }
@@ -540,7 +566,7 @@ inline_task<void> server::impl_t::server_loop(std::shared_ptr<server::impl_t> se
                     answer.type() != dns::record_type::AAAA &&
                     answer.type() != dns::record_type::ANY)
                     continue;
-                auto [begin, end] = impl.queries.equal_range(answer.name);
+                auto [begin, end] = this->queries.equal_range(answer.name);
                 for (; begin != end;) {
                     // TODO Think about this, is the iterator still valid?
                     auto& q = *begin++;
@@ -569,14 +595,14 @@ inline_task<void> server::impl_t::server_loop(std::shared_ptr<server::impl_t> se
             //    question.type != dns::record_type::ANY)
             //    continue;
             if(question.is_unicast())
-                for (const auto& service : impl.services) {
+                for (const auto& service : this->services) {
                     if (service.record.name == question.name && 
                         (question.type == dns::record_type::ANY || service.record.type() == question.type)) {
                         unicast_resp.answers.push_back(service.record);
                     }
                 }
             else
-                for (const auto& service : impl.services) {
+                for (const auto& service : this->services) {
                     if (service.record.name == question.name && 
                         (question.type == dns::record_type::ANY || service.record.type() == question.type)) {
                         multicast_resp.answers.push_back(service.record);
@@ -591,7 +617,7 @@ inline_task<void> server::impl_t::server_loop(std::shared_ptr<server::impl_t> se
                 }
                 continue;
             }
-            std::tie(err, n) = co_await impl.sock_s4.async_send_to(net::buffer(buf, *len), MDNS_ENDPOINT, asio2exec::use_sender);
+            std::tie(err, n) = co_await this->sock_s4.async_send_to(net::buffer(buf, *len), MDNS_ENDPOINT, asio2exec::use_sender);
             if (err) {
                 CPPMDNS_IN_DEBUG{
                     LOG_ERROR() << "Error while sending multicast response: " << err.message() << std::endl;
@@ -606,7 +632,7 @@ inline_task<void> server::impl_t::server_loop(std::shared_ptr<server::impl_t> se
                 }
                 continue;
             }
-            std::tie(err, n) = co_await impl.sock_s4.async_send_to(net::buffer(buf, *len), remote, asio2exec::use_sender);
+            std::tie(err, n) = co_await this->sock_s4.async_send_to(net::buffer(buf, *len), remote, asio2exec::use_sender);
             if (err) {
                 CPPMDNS_IN_DEBUG{
                     LOG_ERROR() << "Error while sending unicast response: " << err.message() << std::endl;
@@ -620,17 +646,16 @@ inline_task<void> server::impl_t::server_loop(std::shared_ptr<server::impl_t> se
 /*
     Receive unicast responses
 */
-inline_task<void> server::impl_t::receive_loop(std::shared_ptr<server::impl_t> self) 
+inline_task<void> server::impl_t::receive_loop() 
 {
-    auto& impl = *self;
     char buf[4096];
     utils::scope_guard on_exit([&]()noexcept {
-        self->stop();
+        this->stop();
     });
 
     while (true) {
         net::ip::udp::endpoint remote;
-        auto [err, n] = co_await impl.sock_s4.async_receive_from(net::buffer(buf, sizeof(buf)), remote, asio2exec::use_sender);
+        auto [err, n] = co_await this->sock_s4.async_receive_from(net::buffer(buf, sizeof(buf)), remote, asio2exec::use_sender);
         if (err) {
             CPPMDNS_IN_DEBUG{
                 LOG_ERROR() << "Receive loop: Error while receiving query: " << err.message() << std::endl;
@@ -669,7 +694,7 @@ inline_task<void> server::impl_t::receive_loop(std::shared_ptr<server::impl_t> s
                 answer.type() != dns::record_type::AAAA &&
                 answer.type() != dns::record_type::ANY)
                 continue;
-            auto [begin, end] = impl.queries.equal_range(answer.name);
+            auto [begin, end] = this->queries.equal_range(answer.name);
             for (; begin != end;) {
                 // TODO: Think about this, is this iterator still valid?
                 auto& q = *begin++;
@@ -681,6 +706,24 @@ inline_task<void> server::impl_t::receive_loop(std::shared_ptr<server::impl_t> s
     }
     co_return;
 }
+
+const service_t *server::impl_t::find_service_by_ip(std::string_view ip) const {
+    for (const auto& s: this->services) {
+        const auto& r = s.record;
+        const auto& addr = r.data;
+        auto type = dns::get_record_type(addr);
+        assert(type == dns::record_type::A || type == dns::record_type::AAAA);
+
+        std::string srv_ip;
+        if (type == dns::record_type::A)
+            srv_ip = net::ip::address_v4{ std::get<dns::rdata::a>(addr) }.to_string();
+        else
+            srv_ip = net::ip::address_v6{ std::get<dns::rdata::aaaa>(r.data) }.to_string();
+        if (srv_ip == ip)
+            return &s;
+    }
+    return nullptr;
+} 
 
 void server::impl_t::stop()noexcept {
     bool exp = false;
@@ -694,8 +737,8 @@ void server::impl_t::stop()noexcept {
     _stop.set_stopped();
 }
 
-server::server(net::io_context& ctx):
-    _impl{std::make_shared<server::impl_t>(ctx)}
+server::server(net::any_io_executor ex):
+    _impl{std::make_shared<server::impl_t>(std::move(ex))}
 {
     _impl->start();
 }
@@ -716,7 +759,7 @@ server::~server()noexcept{
 }
 
 exec::task<std::expected<std::string, std::error_code>>
-server::queryA(std::string name) {
+server::query(std::string name) {
     if (!_impl) {
         CPPMDNS_IN_DEBUG{
             LOG_ERROR() << "Server is stopped" << '\n';
@@ -724,22 +767,11 @@ server::queryA(std::string name) {
         throw std::runtime_error("Server is stopped");
     }
     std::lock_guard lk{_mtx};
-    return _impl->queryAddr(std::move(name), true, _impl);
+    return _impl->queryAddr(std::move(name), _impl);
 }
 
 exec::task<std::expected<std::string, std::error_code>>
-server::queryAAAA(std::string name) {
-    if (!_impl) {
-        CPPMDNS_IN_DEBUG{
-            LOG_ERROR() << "Server is stopped" << '\n';
-        }
-        throw std::runtime_error("Server is stopped");
-    }
-    co_return{};
-}
-
-exec::task<std::error_code>
-server::publish(std::string name, std::string ip, int seconds) {
+server::publish(std::string ip, int seconds) {
     if (!_impl) {
         CPPMDNS_IN_DEBUG{
             LOG_ERROR() << "Server is stopped" << '\n';
@@ -747,7 +779,7 @@ server::publish(std::string name, std::string ip, int seconds) {
         throw std::runtime_error("Server is stopped");
     }
     std::lock_guard lk{ _mtx };
-    return _impl->publishAddr(std::move(name), std::move(ip), seconds, _impl);
+    return _impl->publishAddr(std::move(ip), seconds, _impl);
 }
 
 exec::task<void>
@@ -766,6 +798,10 @@ server::remove(std::string name)
 void server::stop()noexcept {
     if (_impl)
         _impl->stop();
+}
+
+net::any_io_executor server::get_executor() const noexcept {
+    return _impl->executor;
 }
 
 } // namespace mdns

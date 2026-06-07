@@ -88,7 +88,8 @@ inline asioice::task<void> gather_task(asioice::net::io_context &ctx,
                           "samgaawaa",
                           "1234"}},
         .component_count = 1,
-        .transport_policy = asioice::transport_policy::ALL};
+        .transport_policy = asioice::transport_policy::ALL,
+        .enable_mdns = true};
     Agent agent1(ctx.get_executor(), config1);
     std::shared_ptr<IceTransport> transport1 = agent1.create_ice_transport(1);
     auto dtls_client =

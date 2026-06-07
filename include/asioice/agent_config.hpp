@@ -2,11 +2,13 @@
 
 #include "asioice/config.hpp"
 #include "asioice/address.hpp"
+#include "asioice/mdns_interface.hpp"
 
 #include <string>
 #include <vector>
 #include <optional>
 #include <chrono>
+#include <memory>
 
 namespace asioice {
 
@@ -35,6 +37,10 @@ struct agent_config {
     std::chrono::milliseconds connectivity_check_timeout{5000};
     std::chrono::milliseconds connectivity_check_interval{20};
     std::chrono::milliseconds keepalive_interval{15000};
+    bool enable_mdns = false;
+    std::shared_ptr<mdns_interface> mdns = nullptr;
+    std::chrono::milliseconds mdns_publish_timeout{3000};
+    std::chrono::milliseconds mdns_resolve_timeout{3000};
 };
 
 } // namespace asioice

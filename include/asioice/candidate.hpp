@@ -36,6 +36,7 @@ struct candidate {
     std::string tcptype;
     std::optional<uint32_t> generation;
     std::string mdns_host;
+    std::string mdns_related;
     mutable asioice::any_transport transport;
 };
 

@@ -108,7 +108,8 @@ static task<void> ice_dtls_sctp_session(net::io_context &ctx, ws_ptr ws) {
                         .password = "pion_pwd",
                         .ice_controlling = false,
                         .use_loopback = true,
-                        .component_count = 1};
+                        .component_count = 1,
+                        .enable_mdns = true};
     cfg.trickle_ice = false;
 
     agent ag(ctx.get_executor(), cfg);
@@ -150,7 +151,7 @@ static task<void> ice_dtls_sctp_session(net::io_context &ctx, ws_ptr ws) {
     for (const auto &c : ag.local_candidates())
         sdp << "a=" << c.to_sdp() << "\r\n";
     co_await ws_send(*ws, {{"type", "answer"}, {"sdp", sdp.str()}});
-    std::cout << "Sent answer, connecting\n";
+    std::cout << "Sent answer, connecting:" << sdp.str() << '\n';
 
     bool connected = co_await ag.connect();
     if (connected) {

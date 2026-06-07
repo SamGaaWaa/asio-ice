@@ -35,7 +35,7 @@ struct agent_base;
 
 struct agent_base_impl : std::enable_shared_from_this<agent_base_impl> {
     agent_base_impl(net::any_io_executor ex, agent_config config,
-                    agent_base *agent) noexcept;
+                    agent_base *agent);
 
     agent_base_impl(const agent_base_impl &) = delete;
     agent_base_impl &operator=(const agent_base_impl &) = delete;
@@ -329,6 +329,7 @@ struct agent_base_impl : std::enable_shared_from_this<agent_base_impl> {
     std::string _remote_username{};
     std::string _remote_password{};
     uint64_t _tie_breaker = 0;
+    boost::container::flat_map<net::ip::address, std::string> _mdns_names{};
     std::vector<asioice::candidate> _local_candidates{};
     std::vector<asioice::candidate> _remote_candidates{};
     bool _local_candidates_end = false;

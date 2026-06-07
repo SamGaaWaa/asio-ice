@@ -9,7 +9,8 @@
 #endif
 #include "asio2exec.hpp"
 
-#include "exec/when_any.hpp"
+#include <exec/when_any.hpp>
+#include <exec/start_detached.hpp>
 
 #include <iostream>
 
@@ -20,13 +21,13 @@ void mdns_query_test() {
     mdns::net::io_context ctx;
     asio2exec::scheduler sched{ ctx };
 
-    mdns::server server{ ctx };
-    auto f = server.queryA("pion-test.local") |
+    mdns::server server{ ctx.get_executor() };
+    auto f = server.query("pion-test.local") |
             ex::then([&](const std::expected<std::string, std::error_code>& ip) {
                 std::cout << "Result: " << ip.value() << '\n';
                 server.stop();
             });
-    ex::start_detached(ex::starts_on(sched, std::move(f)));
+    exec::start_detached(ex::starts_on(sched, std::move(f)));
     ctx.run();
 }
 
@@ -37,12 +38,18 @@ void mdns_publish_test() {
 
     timer.expires_after(std::chrono::seconds(30));
 
-    mdns::server server{ ctx };
-    auto f = server.publish("pion-test.local", "192.168.0.4");
+    mdns::server server{ ctx.get_executor() };
+    auto f = server.publish("192.168.0.4");
     auto timeout = timer.async_wait(asio2exec::use_sender);
-    ex::start_detached(
+    exec::start_detached(
         ex::when_all(
-            ex::starts_on(sched, std::move(f)),
+            ex::starts_on(sched, std::move(f) | ex::then([](auto ret) {
+                if (ret) {
+                    std::cout << "Publish as name: " << *ret << '\n';
+                } else {
+                    std::cout << "Publish failed: " << ret.error().message();
+                }
+            })),
             ex::starts_on(sched, std::move(timeout)) | ex::then([&](auto) { server.stop(); })
         )
     );
@@ -51,7 +58,7 @@ void mdns_publish_test() {
 
 int main() {
     try {
-        mdns_query_test();
+        // mdns_query_test();
         mdns_publish_test();
     }
     catch (const std::exception& e) {
