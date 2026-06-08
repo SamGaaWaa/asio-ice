@@ -1,0 +1,89 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>asio-ice Browser WebRTC Demo</title>
+<style>
+body{font-family:monospace;max-width:700px;margin:40px auto;padding:0 20px;background:#111;color:#0f0}
+button{padding:8px 16px;font:inherit;cursor:pointer}
+#log{background:#000;border:1px solid #333;padding:10px;height:300px;overflow-y:auto;white-space:pre-wrap;margin:10px 0}
+</style>
+</head>
+<body>
+<h2>asio-ice Browser WebRTC Demo</h2>
+<p>Server: <input id="wsu" value="ws://localhost:8083/ws" style="width:300px;font:inherit">
+<button onclick="connect()">Connect</button></p>
+<div id="log"></div>
+<script>
+const E = (id) => document.getElementById(id);
+function log(s) { const l = E('log'); l.textContent += s + '\n'; l.scrollTop = l.scrollHeight; }
+
+async function connect() {
+    log('Connecting to ' + E('wsu').value + '...');
+    const ws = new WebSocket(E('wsu').value);
+
+    const opened = new Promise((r) => { ws.onopen = () => r(); });
+    ws.onerror = () => log('WebSocket error');
+    ws.onclose = () => log('WebSocket closed');
+
+    const pc = new RTCPeerConnection({
+        iceServers: [{urls: 'stun:14.29.112.241:20002'}]
+    });
+
+    pc.oniceconnectionstatechange = () => log('ICE state: ' + pc.iceConnectionState);
+    pc.onicegatheringstatechange = () => log('ICE gathering: ' + pc.iceGatheringState);
+
+    const dc = pc.createDataChannel('pingpong');
+    log('Created DataChannel: ' + dc.label);
+
+    dc.onopen = () => {
+        log('DataChannel OPEN!');
+        dc.send('ping');
+        log('Sent: ping');
+        setInterval(() => {
+            if (dc.readyState !== 'open') {
+                log('DC not open, state=' + dc.readyState);
+                return;
+            }
+            dc.send('ping');
+            log('Sent: ping');
+        }, 1000);
+    };
+    dc.onclose = () => log('DataChannel CLOSED');
+    dc.onerror = (e) => log('DataChannel error: ' + (e.error ? e.error.message : 'unknown'));
+    dc.onmessage = (e) => {
+        log('Recv: ' + e.data);
+        if (e.data === 'pong') {
+            log('Ping-pong SUCCESS!');
+        }
+    };
+
+    ws.onmessage = async (e) => {
+        log('WS recv: ' + e.data);
+        const msg = JSON.parse(e.data);
+        if (msg.type === 'answer') {
+            log('Got answer');
+            await pc.setRemoteDescription(new RTCSessionDescription({type: 'answer', sdp: msg.sdp}));
+            log('Remote description set');
+        }
+    };
+
+    const offer = await pc.createOffer();
+    await pc.setLocalDescription(offer);
+    log('Local description set, gathering candidates...');
+
+    await new Promise((resolve) => {
+        if (pc.iceGatheringState === 'complete') resolve();
+        else pc.onicegatheringstatechange = () => { if (pc.iceGatheringState === 'complete') resolve(); };
+    });
+    log('Candidates gathered');
+
+    await opened;
+    const sdp = pc.localDescription.sdp;
+    log('Offer SDP:\n' + sdp);
+    ws.send(JSON.stringify({type: 'offer', sdp: sdp}));
+    log('Offer sent');
+}
+</script>
+</body>
+</html>

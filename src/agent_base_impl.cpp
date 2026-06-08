@@ -102,7 +102,6 @@ asioice::task<void> agent_base_impl::server_reflexive_candidate(
         .related = local_candidate.endpoint,
         .transport = std::move(transport)};
     if (this->_config.enable_mdns) {
-        srflx.mdns_host = this->_mdns_names.at(srflx.endpoint.address());
         srflx.mdns_related = this->_mdns_names.at(srflx.related->address());
     }
     if (this->_on_local_candidates)
@@ -236,6 +235,11 @@ asioice::task<void> agent_base_impl::get_component_candidates(
                         this->_mdns_names[c.endpoint.address()] = mdns;
                         c.mdns_host = std::move(mdns);
                     }
+                    ICE_IN_DEBUG {
+                        std::cout << "mDNS publish result: \""
+                                  << c.endpoint.address().to_string()
+                                  << "\" -> \"" << c.mdns_host << "\"\n";
+                    }
                 });
             scope.spawn(
                 utils::stop_when(std::move(publish_task),
@@ -246,6 +250,13 @@ asioice::task<void> agent_base_impl::get_component_candidates(
                                          return timer.async_wait(
                                              asio2exec::use_sender);
                                      })) |
+                stdexec::upon_stopped([&c] {
+                    ICE_IN_DEBUG {
+                        std::cout << "mDNS publish \""
+                                  << c.endpoint.address().to_string()
+                                  << "\" timeout\n";
+                    }
+                }) |
                 utils::ignore());
         }
         if (need_publish)
@@ -379,7 +390,6 @@ asioice::task<void> agent_base_impl::do_gather_candidates() {
     }
 
     exec::async_scope scope;
-    // TODO: use components set
     for (uint8_t component = 1; component <= this->_config.component_count;
          ++component) {
         scope.spawn(get_component_candidates(this->_local_candidates, component,
@@ -586,6 +596,10 @@ agent_base_impl::add_remote_candidate(asioice::candidate remote_c) {
         if (!ret) {
             ICE_IN_DEBUG { std::cerr << "resolved mdns host is invalid\n"; }
             co_return false;
+        }
+        ICE_IN_DEBUG {
+            std::cout << "mDNS name \"" << remote_c.mdns_host << "\" resolved: "
+                      << remote_c.endpoint.address().to_string() << '\n';
         }
         std::string{}.swap(remote_c.mdns_host);
     }
@@ -1141,9 +1155,11 @@ agent_base_impl::request(asioice::candidate_pair &pair,
         auto new_state =
             co_await (trans.on_state_change() | stdexec::stopped_as_optional());
         if (!new_state.has_value()) {
+            ICE_IN_DEBUG { std::cout << "STUN request timeout\n"; }
             goto END;
         }
         if (trans.state() == stun::transaction::state_t::ERR) {
+            ICE_IN_DEBUG { std::cout << "STUN request error\n"; }
             goto END;
         }
         assert(trans.state() == stun::transaction::state_t::DONE);
