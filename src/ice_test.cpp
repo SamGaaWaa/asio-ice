@@ -265,7 +265,7 @@ inline asioice::task<void> gather_task(asioice::net::io_context &ctx,
         std::cout << "Server got new datachannel: " << ch->label() << '\n';
         scope.spawn([](auto ch) -> asioice::task<void> {
             std::cout << "Waiting for data from client...\n";
-            while (true) {
+            while (ch->is_open()) {
                 data_channel_message msg = co_await ch->read();
                 bool sent = co_await ch->send_text(std::string_view{
                     (const char *)msg.data.data(), msg.data.size()});
@@ -291,6 +291,11 @@ inline asioice::task<void> gather_task(asioice::net::io_context &ctx,
             std::cout << ">>>";
             msg = co_await async_cin(ch.get_executor());
             if (msg == "quit") {
+                bool closed = co_await ch.close();
+                if (closed)
+                    std::cout << "Channel closed\n";
+                else
+                    std::cout << "Channel failed to close\n";
                 co_return;
             }
             auto sent = co_await ch.send_text(msg);

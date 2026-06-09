@@ -4,6 +4,7 @@
 #include "net/dcsctp/public/dcsctp_socket_factory.h"
 
 #include <boost/intrusive/set.hpp>
+#include <boost/compat/move_only_function.hpp>
 
 #include <cassert>
 #include <memory>
@@ -69,6 +70,9 @@ struct transport_impl final
         assert(_timeout_set.empty());
 
         _notify_sender.set_value();
+        _on_outgoing_reseted = nullptr;
+        _on_incoming_reseted = nullptr;
+        _on_buffered_amount_low = nullptr;
         _interface->stop();
     }
 
@@ -110,6 +114,24 @@ struct transport_impl final
     void close() noexcept {
         if (!closed())
             _dcsctp->Close();
+    }
+
+    void on_outgoing_reseted(
+        boost::compat::move_only_function<
+            void(std::span<const dcsctp::StreamID>, bool, std::string_view)>
+            cb) {
+        _on_outgoing_reseted = std::move(cb);
+    }
+
+    void on_incoming_reseted(boost::compat::move_only_function<
+                             void(std::span<const dcsctp::StreamID>)>
+                                 cb) {
+        _on_incoming_reseted = std::move(cb);
+    }
+
+    void on_buffered_amount_low(
+        boost::compat::move_only_function<void(dcsctp::StreamID)> cb) {
+        _on_buffered_amount_low = std::move(cb);
     }
 
   private:
@@ -194,6 +216,17 @@ struct transport_impl final
 
     // state changed
     exsctp::shared_promise<void> _on_state_changed{};
+
+    // reset callback
+    boost::compat::move_only_function<void(
+        std::span<const dcsctp::StreamID> streams, bool success,
+        std::string_view reason)>
+        _on_outgoing_reseted{};
+    boost::compat::move_only_function<void(
+        std::span<const dcsctp::StreamID> streams)>
+        _on_incoming_reseted{};
+    boost::compat::move_only_function<void(dcsctp::StreamID)>
+        _on_buffered_amount_low{};
 
     std::unique_ptr<dcsctp::DcSctpSocketInterface> _dcsctp{};
 
@@ -295,20 +328,38 @@ struct transport_impl final
     // It is allowed to call into this library from within this callback.
     void
     OnStreamsResetFailed(std::span<const dcsctp::StreamID> outgoing_streams,
-                         std::string_view reason) override {}
+                         std::string_view reason) override {
+        if (_on_outgoing_reseted)
+            _on_outgoing_reseted(outgoing_streams, false, reason);
+    }
 
     // Indicates that a stream reset request has been performed.
     //
     // It is allowed to call into this library from within this callback.
     void OnStreamsResetPerformed(
-        std::span<const dcsctp::StreamID> outgoing_streams) override {}
+        std::span<const dcsctp::StreamID> outgoing_streams) override {
+        if (_on_outgoing_reseted)
+            _on_outgoing_reseted(outgoing_streams, true, "");
+    }
 
     // When a peer has reset some of its outgoing streams, this will be called.
     // An empty list indicates that all streams have been reset.
     //
     // It is allowed to call into this library from within this callback.
     void OnIncomingStreamsReset(
-        std::span<const dcsctp::StreamID> incoming_streams) override {}
+        std::span<const dcsctp::StreamID> incoming_streams) override {
+        if (_on_incoming_reseted)
+            _on_incoming_reseted(incoming_streams);
+    }
+
+    // Will be called when the amount of data buffered to be sent falls to or
+    // below the threshold set when calling `SetBufferedAmountLowThreshold`.
+    //
+    // It is allowed to call into this library from within this callback.
+    void OnBufferedAmountLow(dcsctp::StreamID id) override {
+        if (_on_buffered_amount_low)
+            _on_buffered_amount_low(id);
+    }
 
     // Will be called when the total amount of data buffered (in the entire send
     // buffer, for all streams) falls to or below the threshold specified in

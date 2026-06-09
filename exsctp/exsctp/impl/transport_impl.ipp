@@ -123,23 +123,32 @@ template <class Interface>
 exsctp::inline_task<bool>
 transport_impl<Interface>::send(exsctp::message msg,
                                 dcsctp::SendOptions send_options) {
+    if (this->closed())
+        co_return false;
     auto lk = co_await this->_send_mtx.lock();
     while (this->send_queue_buffered_high()) {
-        co_await (this->_notify_send_queue_buffered_low.get_future() |
-                  stdexec::continues_on(this->_interface->scheduler()));
+        if (this->closed())
+            co_return false;
+        co_await (
+            utils::stop_when(this->_notify_send_queue_buffered_low.get_future(),
+                             this->_on_state_changed.get_future()) |
+            stdexec::continues_on(this->_interface->scheduler()));
     }
-    while (true) {
+    while (!this->closed()) {
         dcsctp::DcSctpMessage sctp_msg(
             dcsctp::StreamID(msg.stream_id), dcsctp::PPID(msg.ppid),
             std::vector<uint8_t>(msg.data.begin(), msg.data.end()));
         auto ret = this->_dcsctp->Send(std::move(sctp_msg), send_options);
         if (ret == dcsctp::SendStatus::kErrorResourceExhaustion) [[unlikely]] {
-            co_await (this->_notify_total_buffered_amount_low.get_future() |
+            co_await (utils::stop_when(
+                          this->_notify_total_buffered_amount_low.get_future(),
+                          this->_on_state_changed.get_future()) |
                       stdexec::continues_on(this->_interface->scheduler()));
             continue;
         }
         co_return ret == dcsctp::SendStatus::kSuccess;
     }
+    co_return false;
 }
 
 template <class Interface> auto transport_impl<Interface>::read() noexcept {

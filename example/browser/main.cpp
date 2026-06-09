@@ -271,6 +271,8 @@ static task<void> ice_dtls_sctp_session(net::io_context &ctx, ws_ptr ws) {
         std::cout << "Remote DataChannel: " << ch->label() << " (stream "
                   << ch->stream_id() << ")\n";
         scope.spawn([](std::shared_ptr<Datachannel> ch) -> task<void> {
+            utils::scope_guard on_exit(
+                []() noexcept { std::cout << "Channel closed\n"; });
             while (true) {
                 data_channel_message msg = co_await ch->read();
                 std::string_view text(

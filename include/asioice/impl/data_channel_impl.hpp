@@ -42,6 +42,13 @@ struct data_channel_message {
     bool binary;
 };
 
+enum data_channel_priority : uint16_t {
+    very_low = 128,
+    low = 256,
+    medium = 512,
+    high = 1024
+};
+
 struct data_channel_options {
     bool ordered = true;
     std::optional<uint32_t> max_packet_life_time{};
@@ -49,6 +56,7 @@ struct data_channel_options {
     std::string protocol = "";
     bool negotiated = false;
     uint16_t stream_id = 0;
+    data_channel_priority priority = data_channel_priority::low;
 };
 
 template <class Sctp>
@@ -57,6 +65,9 @@ class data_channel_manager_impl
     static constexpr uint32_t kPpidDcep = 50;
     static constexpr uint32_t kPpidString = 51;
     static constexpr uint32_t kPpidBinary = 53;
+    static constexpr uint32_t kPpidStringEmpty = 56;
+    static constexpr uint32_t kPpidBinaryEmpty = 57;
+
     static constexpr uint8_t kDcepOpen = 0x03;
     static constexpr uint8_t kDcepAck = 0x02;
 
@@ -90,7 +101,10 @@ class data_channel_manager_impl
             _manager->_channels.erase(this->stream_id());
             for (const auto &msg : _q)
                 _manager->dec_cache_bytes(msg.data.size());
+            _q.clear();
             _manager->_not_full.set_one_value();
+            if (state() != state_t::closed)
+                request_reset();
         }
 
         executor_type get_executor() const noexcept {
@@ -102,9 +116,22 @@ class data_channel_manager_impl
         const std::string &protocol() const noexcept { return _protocol; }
         bool ordered() const noexcept { return _ordered; }
         state_t state() const noexcept { return _state.get(); }
+        uint16_t priority() const noexcept { return _priority; }
 
-        auto send(std::span<const uint8_t> data, bool binary) {
-            return _manager->send(*this, data, binary);
+        bool is_open() const noexcept { return state() != state_t::closed; }
+
+        auto send(std::span<const uint8_t> data, bool is_binary) {
+            uint32_t type = [=] {
+                if (is_binary)
+                    return data.empty() ? kPpidBinaryEmpty : kPpidBinary;
+                else
+                    return data.empty() ? kPpidStringEmpty : kPpidString;
+            }();
+            return utils::if_else(
+                stdexec::just(_state == state_t::closing ||
+                              _state == state_t::closed),
+                [] { return stdexec::just(false); },
+                [=, this] { return _manager->send(*this, data, type); });
         }
 
         auto send_binary(std::span<const uint8_t> data) {
@@ -122,14 +149,23 @@ class data_channel_manager_impl
                        return utils::if_else(
                            stdexec::just(_q.empty()),
                            [this] {
-                               return _wait_data.get_future() |
+                               return utils::if_else(
+                                          stdexec::just(state() ==
+                                                        state_t::closed),
+                                          [] {
+                                              return stdexec::just_stopped() |
+                                                     stdexec::then([] {});
+                                          },
+                                          [this] {
+                                              return _wait_data.get_future();
+                                          }) |
                                       stdexec::continues_on(
                                           asio2exec::basic_scheduler<
                                               executor_type>{get_executor()}) |
                                       stdexec::then([this] {
                                           assert(!_q.empty());
                                           auto msg = std::move(_q.front());
-                                          _q.pop_back();
+                                          _q.pop_front();
                                           _manager->dec_cache_bytes(
                                               msg.data.size());
                                           _manager->_not_full.set_one_value();
@@ -138,12 +174,24 @@ class data_channel_manager_impl
                            },
                            [this] {
                                auto msg = std::move(_q.front());
-                               _q.pop_back();
+                               _q.pop_front();
                                _manager->dec_cache_bytes(msg.data.size());
                                _manager->_not_full.set_one_value();
                                return stdexec::just(std::move(msg));
                            });
                    });
+        }
+
+        auto close() {
+            request_close();
+            return utils::if_else(
+                stdexec::just(_state == state_t::closed),
+                [] { return stdexec::just(true); },
+                [this] {
+                    return on_state_changed() | stdexec::then([this] {
+                               return _state == state_t::closed;
+                           });
+                });
         }
 
       private:
@@ -154,7 +202,29 @@ class data_channel_manager_impl
             return std::make_shared<data_channel>(std::move(manager));
         }
 
-        void set_state(state_t s) noexcept { _state = s; }
+        void set_state(state_t s) noexcept {
+            _state = s;
+            if (_state == state_t::closed)
+                _wait_data.set_stopped();
+        }
+
+        void request_reset() noexcept {
+            dcsctp::StreamID id{_stream_id};
+            _manager->_sctp->socket().ResetStreams({&id, 1});
+        }
+
+        void request_close() noexcept {
+            if (_state == state_t::closing || _state == state_t::closed)
+                return;
+            _state = state_t::closing;
+            if (_manager->_sctp->socket().buffered_amount(
+                    dcsctp::StreamID(_stream_id)) == 0) {
+                request_reset();
+                return;
+            }
+            _manager->_sctp->socket().SetBufferedAmountLowThreshold(
+                dcsctp::StreamID(_stream_id), 0);
+        }
 
         void set_attributes(const data_channel_options &options) noexcept {
             _ordered = options.ordered;
@@ -163,6 +233,7 @@ class data_channel_manager_impl
             _protocol = options.protocol;
             _negotiated = options.negotiated;
             _stream_id = options.stream_id;
+            _priority = options.priority;
         }
 
         exsctp::send_options get_send_options() const noexcept {
@@ -228,6 +299,7 @@ class data_channel_manager_impl
         std::optional<uint32_t> _max_packet_life_time{}; // in ms
         bool _negotiated = false;
         uint16_t _stream_id = 0;
+        data_channel_priority _priority = data_channel_priority::low;
     };
 
     using channel_callback =
@@ -239,6 +311,12 @@ class data_channel_manager_impl
           _is_client(is_client), _next_stream_id(is_client ? 0 : 1) {
         if (!_sctp)
             throw std::invalid_argument("sctp transport is null");
+        _sctp->on_outgoing_reseted(std::bind_front(
+            &data_channel_manager_impl::on_outgoing_reseted, this));
+        _sctp->on_incoming_reseted(std::bind_front(
+            &data_channel_manager_impl::on_incoming_reseted, this));
+        _sctp->on_buffered_amount_low(std::bind_front(
+            &data_channel_manager_impl::on_buffered_amount_low, this));
     }
 
     data_channel_manager_impl(const data_channel_manager_impl &) = delete;
@@ -246,6 +324,8 @@ class data_channel_manager_impl
     data_channel_manager_impl &
     operator=(const data_channel_manager_impl &) = delete;
     data_channel_manager_impl &operator=(data_channel_manager_impl &&) = delete;
+
+    ~data_channel_manager_impl() { assert(_cache_bytes == 0); }
 
     executor_type get_executor() const noexcept {
         return _sctp->get_executor();
@@ -256,13 +336,22 @@ class data_channel_manager_impl
             _sctp->get_executor()};
         utils::detached_with_data(
             utils::stop_when(stdexec::starts_on(sched, read_loop()),
-                             _stop_promise.get_future()),
+                             _stop_promise.get_future() |
+                                 stdexec::continues_on(sched)),
             this->shared_from_this());
     }
 
     void stop() noexcept {
+        _sctp->on_outgoing_reseted(nullptr);
+        _sctp->on_incoming_reseted(nullptr);
+        _sctp->on_buffered_amount_low(nullptr);
         _stop_promise.set_value();
         _on_remote_channel = nullptr;
+        while (!_channels.empty()) {
+            auto &ch = *_channels.begin()->second;
+            _channels.erase(_channels.begin());
+            ch.set_state(data_channel::state_t::closed);
+        }
     }
 
     const std::shared_ptr<sctp_type> &sctp() noexcept { return _sctp; }
@@ -304,28 +393,48 @@ class data_channel_manager_impl
 
         if (!options.negotiated)
             co_await send_dcep_open(*ch);
+        _sctp->socket().SetStreamPriority(
+            dcsctp::StreamID(ch->stream_id()),
+            dcsctp::StreamPriority(ch->priority()));
         co_return ch;
     }
 
-    auto send(const data_channel &ch, std::span<const uint8_t> data,
-              bool binary) {
-        uint32_t ppid = binary ? kPpidBinary : kPpidString;
-        exsctp::message msg{ch.stream_id(), ppid, data};
-        return stdexec::just(std::move(msg)) |
-               stdexec::let_value([this, &ch](exsctp::message &msg) {
-                   return _sctp->send(msg, ch.get_send_options());
-               });
-    }
-
-    task<bool> send_text(const data_channel &ch, std::string_view text) {
-        return send(
-            ch,
-            std::span<const uint8_t>{
-                reinterpret_cast<const uint8_t *>(text.data()), text.size()},
-            false);
-    }
-
   private:
+    void on_outgoing_reseted(std::span<const dcsctp::StreamID> ids,
+                             bool success, std::string_view reason) {
+        if (!success) {
+            ICE_IN_DEBUG {
+                for (auto id : ids)
+                    std::cerr << "Reset stream " << *id << " failed\n";
+            }
+            // fallthrough
+        }
+        for (const auto &id : ids) {
+            auto it = _channels.find(*id);
+            if (it == _channels.end())
+                continue;
+            it->second->set_state(data_channel::state_t::closed);
+        }
+    }
+
+    void on_incoming_reseted(std::span<const dcsctp::StreamID> ids) {
+        for (const auto &id : ids) {
+            auto it = _channels.find(*id);
+            if (it == _channels.end())
+                continue;
+            it->second->request_close();
+        }
+    }
+
+    void on_buffered_amount_low(dcsctp::StreamID id) {
+        auto it = _channels.find(*id);
+        if (it == _channels.end())
+            return;
+        if (it->second->state() == data_channel::state_t::closing) {
+            it->second->request_reset();
+        }
+    }
+
     void inc_cache_bytes(std::size_t n) noexcept { _cache_bytes += n; }
 
     void dec_cache_bytes(std::size_t n) noexcept { _cache_bytes -= n; }
@@ -420,6 +529,7 @@ class data_channel_manager_impl
 
         buf[0] = kDcepOpen;
         buf[1] = ch.get_channel_type();
+        binary::write_big<uint16_t, 2>(buf.data(), ch.priority());
         binary::write_big<uint32_t, 4>(buf.data(),
                                        ch.get_reliability_parameter());
         binary::write_big<uint16_t, 8>(buf.data(), uint16_t(ch.label().size()));
@@ -475,6 +585,19 @@ class data_channel_manager_impl
                 }
                 co_return;
             }
+            switch (auto pri = binary::read_big<uint16_t, 2>(data.data());
+                    pri) {
+            case data_channel_priority::very_low:
+            case data_channel_priority::low:
+            case data_channel_priority::medium:
+            case data_channel_priority::high:
+                opt.priority = static_cast<data_channel_priority>(pri);
+                break;
+            default:
+                ICE_IN_DEBUG { std::cerr << "unknown priority:" << pri; }
+                opt.priority = data_channel_priority::low;
+                break;
+            }
             auto ch = data_channel::make_channel(this->shared_from_this());
             ch->_label = std::string(
                 reinterpret_cast<const char *>(data.data() + 12), label_len);
@@ -485,6 +608,7 @@ class data_channel_manager_impl
             ch->_max_retransmits = opt.max_retransmits;
             ch->_max_packet_life_time = opt.max_packet_life_time;
             ch->_stream_id = sid;
+            ch->_priority = opt.priority;
 
             // ACK is sent on the same stream as the OPEN
             uint8_t ack = kDcepAck;
@@ -500,6 +624,10 @@ class data_channel_manager_impl
             _channels[sid] = ch.get();
             ch->set_state(data_channel::state_t::open);
             _next_stream_id = sid + 1;
+
+            _sctp->socket().SetStreamPriority(
+                dcsctp::StreamID(ch->stream_id()),
+                dcsctp::StreamPriority(ch->priority()));
             if (_on_remote_channel)
                 _on_remote_channel(std::move(ch));
         } else if (msg_type == kDcepAck) {
@@ -519,8 +647,10 @@ class data_channel_manager_impl
     task<void> read_loop() {
         while (!_stopped) {
             auto opt = co_await _sctp->read();
-            if (!opt)
+            if (!opt) {
+                stop();
                 break;
+            }
             auto ppid = opt->ppid();
             auto sid = opt->stream_id();
             auto payload = std::move(*opt).ReleasePayload();
@@ -531,6 +661,9 @@ class data_channel_manager_impl
             if (*ppid == kPpidDcep) {
                 co_await handle_dcep(*sid, payload);
             } else {
+                if (*ppid == kPpidStringEmpty || *ppid == kPpidBinaryEmpty) {
+                    std::vector<uint8_t>{}.swap(payload);
+                }
                 auto it = _channels.find(*sid);
                 if (it == _channels.end()) {
                     ICE_IN_DEBUG { std::cerr << "Unknown stream id\n"; }
@@ -547,10 +680,24 @@ class data_channel_manager_impl
                 }
                 if (it == _channels.end())
                     continue;
-                it->second->push(data_channel_message{std::move(payload),
-                                                      *ppid == kPpidBinary});
+                it->second->push(data_channel_message{
+                    std::move(payload),
+                    *ppid == kPpidBinary || *ppid == kPpidBinaryEmpty});
             }
         }
+    }
+
+    auto send(const data_channel &ch, std::span<const uint8_t> data,
+              uint32_t msg_type) {
+        static const uint8_t zero = 0;
+        if (data.empty())
+            data = std::span<const uint8_t>(&zero, 1);
+        uint32_t ppid = msg_type;
+        exsctp::message msg{ch.stream_id(), ppid, data};
+        return stdexec::just(std::move(msg)) |
+               stdexec::let_value([this, &ch](exsctp::message &msg) {
+                   return _sctp->send(msg, ch.get_send_options());
+               });
     }
 
     std::shared_ptr<sctp_type> _sctp;

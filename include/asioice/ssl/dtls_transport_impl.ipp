@@ -336,7 +336,11 @@ dtls_impl<NextLayer>::perform(Op op, auto... self) {
 template <class NextLayer>
 bool dtls_impl<NextLayer>::datagram_received(io_buffer_ptr &buffer,
                                              const asioice::endpoint &) {
-    if (!buffer || buffer->size() < 1)
+    if (!buffer) {
+        this->close();
+        return false;
+    }
+    if (buffer->size() < 1)
         return false;
     uint8_t first_b = *buffer->begin();
     if (first_b < 20 || first_b > 63)
@@ -348,7 +352,11 @@ bool dtls_impl<NextLayer>::datagram_received(io_buffer_ptr &buffer,
 
 template <class NextLayer>
 bool dtls_impl<NextLayer>::datagram_received(io_buffer_ptr &buffer) {
-    if (!buffer || buffer->size() < 1)
+    if (!buffer) {
+        this->close();
+        return false;
+    }
+    if (buffer->size() < 1)
         return false;
     uint8_t first_b = *buffer->begin();
     if (first_b < 20 || first_b > 63)

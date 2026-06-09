@@ -149,6 +149,24 @@ template <IOInterface Interface = any_io_interface> class basic_transport {
     // is not already closed.
     void close() noexcept { _impl->close(); }
 
+    void on_outgoing_reseted(
+        boost::compat::move_only_function<
+            void(std::span<const dcsctp::StreamID>, bool, std::string_view)>
+            cb) {
+        _impl->on_outgoing_reseted(std::move(cb));
+    }
+
+    void on_incoming_reseted(boost::compat::move_only_function<
+                             void(std::span<const dcsctp::StreamID>)>
+                                 cb) {
+        _impl->on_incoming_reseted(std::move(cb));
+    }
+
+    void on_buffered_amount_low(
+        boost::compat::move_only_function<void(dcsctp::StreamID)> cb) {
+        _impl->on_buffered_amount_low(std::move(cb));
+    }
+
   private:
     std::shared_ptr<impl_type> _impl;
 };

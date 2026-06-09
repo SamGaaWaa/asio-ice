@@ -105,6 +105,10 @@ struct io_interface : std::enable_shared_from_this<io_interface<Layer>> {
 
   private:
     asioice::task<void> read_loop() {
+        utils::scope_guard on_exit([this]() noexcept {
+            if (_on_data)
+                _on_data(nullptr, 0, _ptr);
+        });
         std::vector<uint8_t> buf(mtu());
         while (true) {
             auto [ec, n] = co_await _next_layer->async_receive(
@@ -145,6 +149,10 @@ template <class Layer> struct sctp_impl {
   private:
     static void on_data_received(const void *data, size_t n, void *user_data) {
         auto *self = static_cast<sctp_impl *>(user_data);
+        if (!data) {
+            self->close();
+            return;
+        }
         self->_transport.dispatch_packet(
             {static_cast<const uint8_t *>(data), n});
     }
@@ -196,6 +204,24 @@ template <class Layer> struct sctp_impl {
     // Closes the connection non-gracefully. Will send ABORT if the connection
     // is not already closed.
     void close() noexcept { _transport.close(); }
+
+    void on_outgoing_reseted(
+        boost::compat::move_only_function<
+            void(std::span<const dcsctp::StreamID>, bool, std::string_view)>
+            cb) {
+        _transport.on_outgoing_reseted(std::move(cb));
+    }
+
+    void on_incoming_reseted(boost::compat::move_only_function<
+                             void(std::span<const dcsctp::StreamID>)>
+                                 cb) {
+        _transport.on_incoming_reseted(std::move(cb));
+    }
+
+    void on_buffered_amount_low(
+        boost::compat::move_only_function<void(dcsctp::StreamID)> cb) {
+        _transport.on_buffered_amount_low(std::move(cb));
+    }
 
   private:
     exsctp_transport _transport;
