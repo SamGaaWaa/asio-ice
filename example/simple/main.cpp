@@ -114,7 +114,7 @@ exec::task<void> co_main(asioice::net::io_context &ctx, std::size_t time) {
 }
 
 int main(int argc, char **argv) {
-    asioice::net::io_context ctx;
+    asioice::net::io_context ctx(BOOST_ASIO_CONCURRENCY_HINT_UNSAFE); // single thread
     exec::start_detached(
         stdexec::starts_on(stdexec::inline_scheduler{},
                            co_main(ctx, argc > 1 ? std::atoi(argv[1]) : 10)));

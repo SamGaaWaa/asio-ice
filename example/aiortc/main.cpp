@@ -95,8 +95,8 @@ static task<void> ice_dtls_sctp_session(net::io_context &ctx, ws_ptr ws) {
     std::cout << "WS connected\n";
     asioice::utils::scheduler sched{ctx};
     ssl::dtls_certificate cert;
-    std::string local_fp = cert.get_fingerprint_sha256();
-    std::cout << "DTLS fp: " << local_fp << '\n';
+    auto local_fp = cert.get_fingerprint(ssl::hash_algorithm::sha256);
+    std::cout << "DTLS fp: " << local_fp.value << '\n';
 
     auto offer = parse_sdp((co_await ws_recv(*ws))["sdp"].get<std::string>());
     std::cout << "Offer: ufrag=" << offer.ufrag << " fp=" << offer.fp
@@ -124,7 +124,8 @@ static task<void> ice_dtls_sctp_session(net::io_context &ctx, ws_ptr ws) {
 
     auto ice = ag.create_ice_transport(1);
     auto dtls = std::make_shared<DtlsT>(ice, std::move(cert));
-    dtls->set_expected_remote_fingerprint(offer.fp);
+    dtls->set_expected_remote_fingerprint(
+        ssl::fingerprint{ssl::hash_algorithm::sha256, offer.fp});
 
     for (const auto &line : offer.cands) {
         auto c = candidate::from_sdp(line);
@@ -144,7 +145,7 @@ static task<void> ice_dtls_sctp_session(net::io_context &ctx, ws_ptr ws) {
         << "c=IN IP4 0.0.0.0\r\na=mid:0\r\n"
         << "a=ice-ufrag:" << ag.local_username() << "\r\n"
         << "a=ice-pwd:" << ag.local_password() << "\r\n"
-        << "a=fingerprint:sha-256 " << local_fp << "\r\n"
+        << "a=" << local_fp.to_sdp() << "\r\n"
         << "a=setup:active\r\n"
         << "a=sctpmap:5000 webrtc-datachannel 65535\r\n";
     for (const auto &c : ag.local_candidates())
@@ -166,8 +167,8 @@ static task<void> ice_dtls_sctp_session(net::io_context &ctx, ws_ptr ws) {
         std::cerr << "DTLS failed: " << hs_ec.message() << '\n';
         co_return;
     }
-    std::cout << "DTLS OK, fp: " << dtls->get_remote_fingerprint_sha256()
-              << '\n';
+    auto remote_fp = dtls->get_remote_fingerprint(ssl::hash_algorithm::sha256);
+    std::cout << "DTLS OK, fp: " << remote_fp.value << '\n';
 
     auto sctp = std::make_shared<SctpT>(dtls, exsctp::sctp_options{});
     sctp->start();

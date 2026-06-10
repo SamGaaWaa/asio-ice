@@ -182,7 +182,7 @@ static remote_sdp parse_sdp(std::string_view s) {
     return d;
 }
 
-static std::string make_sdp(const agent &ag, const std::string &local_fp,
+static std::string make_sdp(const agent &ag, const auto &local_fp,
                             const std::string &setup,
                             const std::string &username) {
     std::ostringstream sdp;
@@ -192,7 +192,7 @@ static std::string make_sdp(const agent &ag, const std::string &local_fp,
         << "c=IN IP4 0.0.0.0\r\na=mid:0\r\n"
         << "a=ice-ufrag:" << ag.local_username() << "\r\n"
         << "a=ice-pwd:" << ag.local_password() << "\r\n"
-        << "a=fingerprint:sha-256 " << local_fp << "\r\n"
+        << "a=" << local_fp.to_sdp() << "\r\n"
         << "a=setup:" << setup << "\r\n"
         << "a=sctpmap:5000 webrtc-datachannel 65535\r\n"
         << "a=username:" << username << "\r\n";
@@ -219,8 +219,8 @@ static task<void> chat_session(net::io_context &ctx) {
     std::cout << "Your username: " << GREEN << username << RESET << '\n';
 
     ssl::dtls_certificate cert;
-    std::string local_fp = cert.get_fingerprint_sha256();
-    std::cout << "Local DTLS fingerprint: " << local_fp << '\n';
+    auto local_fp = cert.get_fingerprint(ssl::hash_algorithm::sha256);
+    std::cout << "Local DTLS fingerprint: " << local_fp.value << '\n';
 
     std::string local_ufrag = "chat_offer";
     std::string local_pwd = "chat_pwd_offer";
@@ -290,7 +290,8 @@ static task<void> chat_session(net::io_context &ctx) {
 
     ag.set_remote_username(remote.ufrag);
     ag.set_remote_password(remote.pwd);
-    dtls->set_expected_remote_fingerprint(remote.fp);
+    dtls->set_expected_remote_fingerprint(
+        ssl::fingerprint{ssl::hash_algorithm::sha256, remote.fp});
 
     for (const auto &line : remote.cands) {
         auto c = candidate::from_sdp(line);

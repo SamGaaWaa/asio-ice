@@ -2,9 +2,12 @@
 
 #include <vector>
 #include <string>
+#include <string_view>
 #include <cstdint>
 #include <memory>
 #include <tuple>
+#include <span>
+#include <optional>
 
 namespace asioice::ssl {
 
@@ -26,16 +29,59 @@ struct srtp_key_material {
 
 enum class dtls_role { client, server };
 
+enum class hash_algorithm {
+    sha1,
+    sha256,
+    sha384,
+    sha512,
+};
+
+enum class key_type {
+    ecdsa_p256,
+    ecdsa_p384,
+    ed25519,
+};
+
+struct fingerprint {
+    hash_algorithm algorithm = hash_algorithm::sha256;
+    std::string value;
+
+    bool empty() const noexcept { return value.empty(); }
+
+    std::string hash_name() const;
+
+    std::string to_sdp() const;
+
+    static std::optional<fingerprint>
+    from_sdp(std::string_view sdp_line);
+
+    std::strong_ordering
+    operator<=>(const fingerprint &) const noexcept = default;
+};
+
 class dtls_certificate {
   public:
-    dtls_certificate();
+    dtls_certificate(key_type kt = key_type::ecdsa_p256,
+                     hash_algorithm sign_algo = hash_algorithm::sha256);
+
+    static dtls_certificate
+    from_pem(std::string_view cert_pem, std::string_view key_pem);
+
+    static dtls_certificate
+    from_der(std::span<const uint8_t> cert_der,
+             std::span<const uint8_t> key_der);
+
     ~dtls_certificate();
     dtls_certificate(const dtls_certificate &) = delete;
     dtls_certificate &operator=(const dtls_certificate &) = delete;
     dtls_certificate(dtls_certificate &&) noexcept;
     dtls_certificate &operator=(dtls_certificate &&) noexcept;
 
-    std::string get_fingerprint_sha256() const;
+    fingerprint get_fingerprint(hash_algorithm algo) const;
+
+    std::string cert_pem() const;
+    std::string key_pem() const;
+
     void *native_handle() const noexcept;
 
     bool empty() const noexcept { return _impl == nullptr; }
@@ -47,6 +93,8 @@ class dtls_certificate {
   private:
     struct impl;
     std::unique_ptr<impl> _impl;
+
+    dtls_certificate(std::unique_ptr<impl> impl);
 };
 
 } // namespace asioice::ssl

@@ -75,8 +75,8 @@ inline asioice::task<void> gather_task(asioice::net::io_context &ctx,
                                   "14.29.112.241:20002"};
 
     ssl::dtls_certificate server_cert, client_cert;
-    std::string server_fp = server_cert.get_fingerprint_sha256();
-    std::string client_fp = client_cert.get_fingerprint_sha256();
+    auto server_fp = server_cert.get_fingerprint(ssl::hash_algorithm::sha256);
+    auto client_fp = client_cert.get_fingerprint(ssl::hash_algorithm::sha256);
 
     agent_config config1 = {
         .username = "user1",

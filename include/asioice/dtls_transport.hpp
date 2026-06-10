@@ -76,15 +76,15 @@ class dtls_transport {
                                      std::forward<Args>(self)...);
     }
 
-    std::string get_remote_fingerprint_sha256() const {
-        return _impl->get_remote_fingerprint_sha256();
+    fingerprint get_remote_fingerprint(hash_algorithm algo) const {
+        return _impl->get_remote_fingerprint(algo);
     }
 
     std::optional<srtp_key_material> export_srtp_key_material() {
         return _impl->export_srtp_key_material();
     }
 
-    void set_expected_remote_fingerprint(std::string fp) noexcept {
+    void set_expected_remote_fingerprint(fingerprint fp) noexcept {
         _impl->set_expected_remote_fingerprint(std::move(fp));
     }
 

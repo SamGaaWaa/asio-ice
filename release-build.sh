@@ -10,6 +10,7 @@ cmake .. \
  	-DCMAKE_C_COMPILER=clang-20 \
 	-DCMAKE_CXX_FLAGS="-stdlib=libc++ -O3 -DNDEBUG" \
 	-DCMAKE_CXX_COMPILER=clang++-20 \
+        -DCMAKE_EXE_LINKER_FLAGS="-fuse-ld=mold -L/usr/lib/llvm-20/lib -Wl,-rpath,/usr/lib/llvm-20/lib" \
         -DASIOICE_ENABLE_SCTP_OVER_DTLS=ON
-make -j8
+make -j2
 popd

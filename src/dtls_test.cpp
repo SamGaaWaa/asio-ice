@@ -29,7 +29,7 @@ namespace net = asio;
 
 asioice::task<void> server_coro(asioice::net::any_io_executor ex,
                                 asioice::ssl::dtls_certificate cert,
-                                std::string client_fp) {
+                                asioice::ssl::fingerprint client_fp) {
     using namespace asioice;
     using DtlsTransport =
         ssl::dtls_transport<datagram_transport<net::ip::udp::socket>>;
@@ -59,8 +59,9 @@ asioice::task<void> server_coro(asioice::net::any_io_executor ex,
     }
     std::cout << "DTLS accept completed\n";
 
-    std::string remote_fp = dtls_server.get_remote_fingerprint_sha256();
-    std::cout << "Server's remote fingerprint: " << remote_fp << '\n';
+    auto remote_fp =
+        dtls_server.get_remote_fingerprint(ssl::hash_algorithm::sha256);
+    std::cout << "Server's remote fingerprint: " << remote_fp.value << '\n';
 
     if (auto srtp_material = dtls_server.export_srtp_key_material();
         srtp_material) {
@@ -110,11 +111,11 @@ int main() {
 
     ssl::dtls_certificate server_cert, client_cert;
 
-    std::string server_fp = server_cert.get_fingerprint_sha256();
-    std::string client_fp = client_cert.get_fingerprint_sha256();
+    auto server_fp = server_cert.get_fingerprint(ssl::hash_algorithm::sha256);
+    auto client_fp = client_cert.get_fingerprint(ssl::hash_algorithm::sha256);
 
-    std::cout << "Server fingerprint: " << server_fp << '\n';
-    std::cout << "Client fingerprint: " << client_fp << '\n';
+    std::cout << "Server fingerprint: " << server_fp.value << '\n';
+    std::cout << "Client fingerprint: " << client_fp.value << '\n';
 
     net::io_context io_ctx;
     exec::start_detached(stdexec::starts_on(
@@ -147,8 +148,10 @@ int main() {
         }
         std::cout << "DTLS connect success\n";
 
-        std::string remote_fp = dtls_client.get_remote_fingerprint_sha256();
-        std::cout << "Client's remote fingerprint: " << remote_fp << '\n';
+        auto remote_fp =
+            dtls_client.get_remote_fingerprint(ssl::hash_algorithm::sha256);
+        std::cout << "Client's remote fingerprint: " << remote_fp.value
+                  << '\n';
 
         if (auto srtp_material = dtls_client.export_srtp_key_material();
             srtp_material) {

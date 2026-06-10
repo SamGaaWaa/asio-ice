@@ -1,5 +1,28 @@
 namespace asioice::ssl::impl {
 
+// ---------------------------------------------------------------------------
+// helper: hash_algorithm -> OpenSSL EVP_MD
+// ---------------------------------------------------------------------------
+
+static inline const ::EVP_MD *
+evp_md_from_hash_algo(hash_algorithm algo) noexcept {
+    switch (algo) {
+    case hash_algorithm::sha1:
+        return ::EVP_sha1();
+    case hash_algorithm::sha256:
+        return ::EVP_sha256();
+    case hash_algorithm::sha384:
+        return ::EVP_sha384();
+    case hash_algorithm::sha512:
+        return ::EVP_sha512();
+    }
+    return ::EVP_sha256();
+}
+
+// ---------------------------------------------------------------------------
+// operation structs
+// ---------------------------------------------------------------------------
+
 template <class NextLayer> struct dtls_impl<NextLayer>::send_op {
     template <class ConstBufferSequence>
     send_op(const ConstBufferSequence &buf, dtls_impl<NextLayer> *impl) noexcept
@@ -175,6 +198,10 @@ template <class NextLayer> struct dtls_impl<NextLayer>::shutdown_op {
     bool _success = false;
 };
 
+// ---------------------------------------------------------------------------
+// async_send / async_receive / async_handshake / async_shutdown
+// ---------------------------------------------------------------------------
+
 template <class NextLayer>
 template <class ConstBufferSequence>
 asioice::task<std::tuple<std::error_code, std::size_t>>
@@ -218,6 +245,10 @@ auto dtls_impl<NextLayer>::async_shutdown(bool fast_shutdown, Args &&...self) {
            });
 }
 
+// ---------------------------------------------------------------------------
+// timeout handling
+// ---------------------------------------------------------------------------
+
 template <class NextLayer> void dtls_impl<NextLayer>::handle_timeout() {
     if (!this->_timeout_handler_promise.empty() || this->_closed)
         return;
@@ -254,6 +285,10 @@ asioice::task<void> dtls_impl<NextLayer>::timeout_handler() {
         co_await this->perform(dtls_impl<NextLayer>::retransmission_op{this});
     }
 }
+
+// ---------------------------------------------------------------------------
+// perform (main I/O loop)
+// ---------------------------------------------------------------------------
 
 template <class NextLayer>
 template <OpenSSLOperation Op>
@@ -333,6 +368,10 @@ dtls_impl<NextLayer>::perform(Op op, auto... self) {
     std::unreachable();
 }
 
+// ---------------------------------------------------------------------------
+// datagram dispatch
+// ---------------------------------------------------------------------------
+
 template <class NextLayer>
 bool dtls_impl<NextLayer>::datagram_received(io_buffer_ptr &buffer,
                                              const asioice::endpoint &) {
@@ -375,6 +414,10 @@ template <class NextLayer> void dtls_impl<NextLayer>::close() noexcept {
                               this->shared_from_this());
 }
 
+// ---------------------------------------------------------------------------
+// fingerprint verification
+// ---------------------------------------------------------------------------
+
 template <class NextLayer>
 int dtls_impl<NextLayer>::verify_callback(int preverify_ok,
                                           X509_STORE_CTX *ctx) {
@@ -390,7 +433,8 @@ int dtls_impl<NextLayer>::verify_callback(int preverify_ok,
 
     unsigned char md[EVP_MAX_MD_SIZE];
     unsigned int n;
-    if (!::X509_digest(cert, ::EVP_sha256(), md, &n))
+    const hash_algorithm algo = self->_expected_remote_fingerprint.algorithm;
+    if (!::X509_digest(cert, evp_md_from_hash_algo(algo), md, &n))
         return 0;
 
     std::ostringstream oss;
@@ -401,31 +445,31 @@ int dtls_impl<NextLayer>::verify_callback(int preverify_ok,
             << static_cast<int>(md[i]);
     }
     std::string computed = std::move(oss).str();
-    const std::string &expected = self->_expected_remote_fingerprint;
-    return (computed == expected) ? 1 : 0;
+    return (computed == self->_expected_remote_fingerprint.value) ? 1 : 0;
 }
 
 template <class NextLayer>
 void dtls_impl<NextLayer>::set_expected_remote_fingerprint(
-    std::string fingerprint_sha256) noexcept {
-    _expected_remote_fingerprint = fingerprint_sha256;
-    std::transform(_expected_remote_fingerprint.begin(),
-                   _expected_remote_fingerprint.end(),
-                   _expected_remote_fingerprint.begin(),
+    fingerprint fp) noexcept {
+    _expected_remote_fingerprint = fp;
+    std::transform(_expected_remote_fingerprint.value.begin(),
+                   _expected_remote_fingerprint.value.end(),
+                   _expected_remote_fingerprint.value.begin(),
                    [](unsigned char c) { return std::toupper(c); });
 }
 
 template <class NextLayer>
-std::string dtls_impl<NextLayer>::get_remote_fingerprint_sha256() const {
+fingerprint dtls_impl<NextLayer>::get_remote_fingerprint(
+    hash_algorithm algo) const {
     ::X509 *peer_cert = ::SSL_get_peer_certificate(_ssl);
     if (!peer_cert)
-        return "";
+        return fingerprint{algo, ""};
     unsigned char md[EVP_MAX_MD_SIZE];
     unsigned int n;
-    bool ok = ::X509_digest(peer_cert, ::EVP_sha256(), md, &n);
+    bool ok = ::X509_digest(peer_cert, evp_md_from_hash_algo(algo), md, &n);
     ::X509_free(peer_cert);
     if (!ok)
-        return "";
+        return fingerprint{algo, ""};
     std::ostringstream oss;
     for (unsigned int i = 0; i < n; ++i) {
         if (i != 0)
@@ -433,8 +477,12 @@ std::string dtls_impl<NextLayer>::get_remote_fingerprint_sha256() const {
         oss << std::hex << std::uppercase << std::setfill('0') << std::setw(2)
             << static_cast<int>(md[i]);
     }
-    return std::move(oss).str();
+    return fingerprint{algo, std::move(oss).str()};
 }
+
+// ---------------------------------------------------------------------------
+// SRTP key material
+// ---------------------------------------------------------------------------
 
 template <class NextLayer>
 std::optional<srtp_key_material>

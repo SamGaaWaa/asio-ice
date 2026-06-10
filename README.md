@@ -13,7 +13,7 @@ The library provides a full-featured ICE agent that can gather candidates (host,
 - **Senders/receivers (P2300)** -- all async operations return `stdexec::sender` types, enabling structured concurrency with `exec::async_scope`, `exec::when_any`, `exec::repeat_until`, and `exec::finally`.
 - **Asio-based I/O** -- works with both **Boost.Asio** (>=1.89) and **standalone Asio**; all I/O is asynchronous and non-blocking via an `asio2exec` sender/receiver bridge.
 - **Pluggable transport** -- type-erased `any_transport` with built-in UDP socket transport, TURN client, DTLS transport (OpenSSL), and experimental SCTP-over-DTLS.
-- **Full candidate support** -- host, server-reflexive (STUN), peer-reflexive, and relayed (TURN) candidates; IPv4/IPv6 dual-stack.
+- **Full candidate support** -- host, server-reflexive (STUN), peer-reflexive, relayed (TURN), and mDNS candidates; IPv4/IPv6 dual-stack.
 - **STUN/TURN** -- complete STUN message encoding/decoding (HMAC-SHA-256 integrity), TURN client with allocation, permissions, channels, nonce cookies, and long-term credential mechanism.
 - **Security** -- DTLS-SRTP key material export for encrypted media; STUN message integrity with HMAC-SHA-256; self-signed certificate generation.
 - **Configurable** -- fine-tune behavior through `agent_config` (STUN/TURN servers, component count, transport policy, timeouts, keepalive interval).
@@ -60,6 +60,7 @@ make -j$(nproc)
 | Option | Default | Description |
 |--------|---------|-------------|
 | `ASIOICE_USE_BOOST_ASIO` | `ON` | Use Boost.Asio; set to `OFF` for standalone Asio |
+| `ASIOICE_USE_CPPMDNS` | `ON` | Enable mDNS candidate support (uses cppmdns) |
 | `ASIOICE_USE_OPENSSL` | `OFF` | Enable OpenSSL (auto-enabled by DTLS/SCTP) |
 | `ASIOICE_ENABLE_DTLS` | `OFF` | Enable DTLS transport |
 | `ASIOICE_ENABLE_SCTP_OVER_DTLS` | `OFF` | Enable SCTP-over-DTLS data channels |
@@ -72,6 +73,7 @@ make -j$(nproc)
 - `ice_test` -- ICE integration test (two agents, trickle ICE, RTP/RTCP)
 - Individual unit tests: `stun_test`, `stun_client_test`, `turn_client_test`, `hash_test`, `candidate_test`, `async_queue_test`, `io_buffer_test`, `io_buffer2_test`, `on_scope_empty_test`
 - Optional: `dtls_test`, `sctp_test`, `boost_fiber_test`
+- Examples (SCTP+DTLS): `aiortc_example`, `pion_example`, `werift_example`
 
 ## Usage
 
@@ -227,7 +229,11 @@ asioice::agent_config cfg{
     .max_pending_check_count = 100,
     .connectivity_check_timeout = std::chrono::milliseconds(5000),
     .connectivity_check_interval = std::chrono::milliseconds(20),
-    .keepalive_interval = std::chrono::milliseconds(15000)
+    .keepalive_interval = std::chrono::milliseconds(15000),
+    .enable_mdns = false,
+    .mdns = nullptr,
+    .mdns_publish_timeout = std::chrono::milliseconds(3000),
+    .mdns_resolve_timeout = std::chrono::milliseconds(3000)
 };
 ```
 
@@ -256,6 +262,7 @@ INIT --> GATHERING --> CONNECTING --> CONNECTED
 | srflx | `candidate_type::srflx` | STUN Binding response |
 | prflx | `candidate_type::prflx` | Inbound connectivity check from unknown remote |
 | relay | `candidate_type::relay` | TURN Allocate response |
+| mdns  | `candidate_type::mdns` | mDNS hostname resolution |
 
 ### Transport Layers
 
@@ -315,13 +322,15 @@ find src include -name "*.cpp" -o -name "*.hpp" -o -name "*.ipp" | xargs clang-f
 - DTLS transport with SRTP key material export
 - Trickle ICE (incremental candidate exchange)
 - Keepalive on nominated pairs
+- mDNS candidates (RFC 6762/6763, via cppmdns)
+- SCTP-over-DTLS data channels with DCEP (RFC 8832)
+- WebSocket-based signaling interoperability examples (aiortc, pion/webrtc, werift-webrtc)
 
 ### Planned
 
 - TCP candidate support (active, passive, simultaneous-open)
 - Full ICE restart procedures
 - ICE-Lite mode
-- mDNS candidates
 - Performance optimizations (reduced allocations, improved coroutine efficiency)
 - NAT behavior discovery
 

@@ -95,12 +95,12 @@ struct dtls_impl : asioice::datagram_receiver,
     template <class... Args>
     auto async_shutdown(bool fast_shutdown, Args &&...self);
 
-    std::string get_remote_fingerprint_sha256() const;
+    fingerprint get_remote_fingerprint(hash_algorithm algo) const;
 
     std::optional<srtp_key_material> export_srtp_key_material();
 
     void
-    set_expected_remote_fingerprint(std::string fingerprint_sha256) noexcept;
+    set_expected_remote_fingerprint(fingerprint fp) noexcept;
 
   private:
     struct send_op;
@@ -135,7 +135,7 @@ struct dtls_impl : asioice::datagram_receiver,
     receiver_list_t _receivers{};
     bool _closed{false};
     bool _peer_closed{false};
-    std::string _expected_remote_fingerprint{};
+    fingerprint _expected_remote_fingerprint{};
     asioice::shared_promise<void> _timeout_handler_promise{};
 };
 
