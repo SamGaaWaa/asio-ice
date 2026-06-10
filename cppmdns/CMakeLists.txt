@@ -36,6 +36,12 @@ target_compile_options(cppmdns_compile_flags INTERFACE
 target_compile_options(cppmdns_compile_flags INTERFACE
                        $<$<COMPILE_LANG_AND_ID:CXX,MSVC>:/Zc:__cplusplus /Zc:preprocessor /D_WIN32_WINNT=0x0601 /Zm200 /bigobj /W4 /wd4100 /wd4101 /wd4127 /wd4324 /wd4456 /wd4459>
                        )
+target_link_libraries(cppmdns_compile_flags INTERFACE
+                      $<$<PLATFORM_ID:Windows>:bcrypt;ws2_32;iphlpapi;mswsock>
+                      )
+target_compile_options(cppmdns_compile_flags INTERFACE
+                       $<$<AND:$<COMPILE_LANG_AND_ID:CXX,GNU>,$<PLATFORM_ID:Windows>>:-Wa,-mbig-obj>
+                       )
 if(NOT CPPMDNS_USE_BOOST_ASIO)
     target_link_libraries(cppmdns_compile_flags INTERFACE asio::asio)
     target_compile_definitions(cppmdns_compile_flags INTERFACE ASIO_STANDALONE)

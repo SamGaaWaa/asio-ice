@@ -171,11 +171,7 @@ static task<void> ice_dtls_sctp_session(net::io_context &ctx, ws_ptr ws) {
               << '\n';
 
     auto sctp = std::make_shared<SctpT>(dtls, exsctp::sctp_options{});
-
     sctp->start();
-
-    timer.expires_after(std::chrono::seconds(2));
-    co_await timer.async_wait(asio2exec::use_sender);
 
     std::cout << "SCTP accept...\n";
     bool sctp_connected = co_await sctp->accept();

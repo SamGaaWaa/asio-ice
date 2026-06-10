@@ -26,7 +26,7 @@ struct agent_config {
     bool ice_controlling = true;
     bool use_loopback = false;
     bool use_ipv4 = true;
-    bool use_ipv6 = false;
+    bool use_ipv6 = true;
     std::string transport = "udp";
     std::vector<asioice::endpoint> stun_servers;
     std::vector<turn_credentials> turn_servers;

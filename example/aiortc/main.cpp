@@ -171,11 +171,7 @@ static task<void> ice_dtls_sctp_session(net::io_context &ctx, ws_ptr ws) {
     std::cout << "DTLS OK, fp: " << dtls->get_remote_fingerprint_sha256()
               << '\n';
 
-    timer.expires_after(std::chrono::seconds(3));
-    co_await timer.async_wait(asio2exec::use_sender);
-
     auto sctp = std::make_shared<SctpT>(dtls, exsctp::sctp_options{});
-
     sctp->start();
 
     std::cout << "SCTP accept...\n";
