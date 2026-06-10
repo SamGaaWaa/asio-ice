@@ -5,13 +5,12 @@
 #include "asioice/dtls_transport.hpp"
 #include "asioice/sctp_transport.hpp"
 #include "asioice/socket_transport.hpp"
+#include "asioice/detail/asio2exec.hpp"
 #include "asioice/data_channel.hpp"
 
 #include <exec/start_detached.hpp>
 
 #if ASIOICE_USE_BOOST_ASIO > 0
-#define ASIO_TO_EXEC_USE_BOOST 1
-#include "asio2exec.hpp"
 #include <boost/asio/io_context.hpp>
 #include <boost/asio/ip/host_name.hpp>
 #include <boost/asio/ip/basic_endpoint.hpp>
@@ -21,7 +20,6 @@ namespace asioice {
 namespace net = boost::asio;
 }
 #else
-#include "asio2exec.hpp"
 #include <asio/io_context.hpp>
 #include <asio/ip/host_name.hpp>
 #include <asio/ip/basic_endpoint.hpp>
@@ -118,7 +116,7 @@ inline asioice::task<void> gather_task(asioice::net::io_context &ctx,
 
     // Trickle ICE
     exec::async_scope scope;
-    asio2exec::scheduler sched{ctx};
+    utils::scheduler sched{ctx};
     net::steady_timer network_timer(ctx.get_executor());
     auto network_latency = std::chrono::milliseconds(60);
 
@@ -143,7 +141,7 @@ inline asioice::task<void> gather_task(asioice::net::io_context &ctx,
                        auto &agent2) -> asioice::task<void> {
             net::steady_timer timer(agent1.get_executor(),
                                     std::chrono::milliseconds(60));
-            co_await timer.async_wait(asio2exec::use_sender);
+            co_await timer.async_wait(utils::use_sender);
             for (auto &c : candidates) {
                 co_await agent2.add_remote_candidate(std::move(c));
             }
@@ -168,7 +166,7 @@ inline asioice::task<void> gather_task(asioice::net::io_context &ctx,
                        auto &agent2) -> asioice::task<void> {
             net::steady_timer timer(agent2.get_executor(),
                                     std::chrono::milliseconds(60));
-            co_await timer.async_wait(asio2exec::use_sender);
+            co_await timer.async_wait(utils::use_sender);
             for (auto &c : candidates) {
                 co_await agent1.add_remote_candidate(std::move(c));
             }
@@ -179,14 +177,14 @@ inline asioice::task<void> gather_task(asioice::net::io_context &ctx,
     scope.spawn(
         stdexec::starts_on(
             sched, utils::stop_when(agent1.gather_candidates(),
-                                    timer1.async_wait(asio2exec::use_sender))) |
+                                    timer1.async_wait(utils::use_sender))) |
         utils::ignore());
 
     std::cout << "Agent1 create OFFER with empty candidate list\n";
     std::cout << "Agent1 will response early checks\n";
     // Simulate network latency
     network_timer.expires_after(network_latency);
-    co_await network_timer.async_wait(asio2exec::use_sender);
+    co_await network_timer.async_wait(utils::use_sender);
 
     agent2.set_remote_username(agent1.local_username());
     agent2.set_remote_password(agent1.local_password());
@@ -195,7 +193,7 @@ inline asioice::task<void> gather_task(asioice::net::io_context &ctx,
     scope.spawn(
         stdexec::starts_on(
             sched, utils::stop_when(agent2.gather_candidates(),
-                                    timer2.async_wait(asio2exec::use_sender))) |
+                                    timer2.async_wait(utils::use_sender))) |
         utils::ignore());
     std::cout << "Agent2 is connecting ...\n";
     scope.spawn(stdexec::starts_on(sched, agent2.connect()) | utils::ignore());
@@ -203,7 +201,7 @@ inline asioice::task<void> gather_task(asioice::net::io_context &ctx,
     std::cout << "Agent2 create ANSWER with empty candidate list\n";
     // Simulate network latency
     network_timer.expires_after(network_latency);
-    co_await network_timer.async_wait(asio2exec::use_sender);
+    co_await network_timer.async_wait(utils::use_sender);
     agent1.set_remote_username(agent2.local_username());
     agent1.set_remote_password(agent2.local_password());
 
@@ -319,8 +317,8 @@ inline asioice::task<void> gather_task(asioice::net::io_context &ctx,
 
 void gathering_test(int num) {
     asioice::net::io_context ctx;
-    exec::start_detached(
-        stdexec::starts_on(asio2exec::scheduler{ctx}, gather_task(ctx, num)));
+    exec::start_detached(stdexec::starts_on(asioice::utils::scheduler{ctx},
+                                            gather_task(ctx, num)));
     ctx.run();
 }
 

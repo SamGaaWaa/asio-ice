@@ -11,10 +11,10 @@
 #include "asioice/detail/detached_with_data.hpp"
 #include "asioice/detail/stop_when.hpp"
 #include "asioice/detail/shared_promise.hpp"
+#include "asioice/detail/asio2exec.hpp"
 #include "exsctp/transport.hpp"
 
 #if ASIOICE_USE_BOOST_ASIO > 0
-#define ASIO_TO_EXEC_USE_BOOST 1
 #include <boost/asio/steady_timer.hpp>
 namespace asioice {
 namespace net = boost::asio;
@@ -25,14 +25,13 @@ namespace asioice {
 namespace net = asio;
 }
 #endif
-#include "asio2exec.hpp"
 
 namespace asioice::sctp::impl {
 
 template <asioice::UniqueAsyncPacketConnectionTransport Layer>
 struct io_interface : std::enable_shared_from_this<io_interface<Layer>> {
     using executor_type = typename Layer::executor_type;
-    using scheduler_type = asio2exec::basic_scheduler<executor_type>;
+    using scheduler_type = utils::basic_scheduler<executor_type>;
 
     io_interface(std::shared_ptr<Layer> next_layer)
         : _next_layer{std::move(next_layer)} {
@@ -81,7 +80,7 @@ struct io_interface : std::enable_shared_from_this<io_interface<Layer>> {
             asioice::net::steady_timer::rebind_executor<executor_type>::other;
         return stdexec::just(timer_type(this->get_executor(), t)) |
                stdexec::let_value([](auto &timer) {
-                   return timer.async_wait(asio2exec::use_sender) |
+                   return timer.async_wait(utils::use_sender) |
                           stdexec::then([](auto ec) {}) |
                           stdexec::upon_stopped([] {});
                });
@@ -112,7 +111,7 @@ struct io_interface : std::enable_shared_from_this<io_interface<Layer>> {
         std::vector<uint8_t> buf(mtu());
         while (true) {
             auto [ec, n] = co_await _next_layer->async_receive(
-                net::buffer(buf), asio2exec::use_sender);
+                net::buffer(buf), utils::use_sender);
             if (ec) {
                 ICE_IN_DEBUG {
                     std::cerr

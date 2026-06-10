@@ -61,6 +61,10 @@ template <class Socket> struct datagram_transport {
         _impl->max_buffer_size(size);
     }
 
+    void set_buffer_pool(std::shared_ptr<io_buffer_pool> pool) noexcept {
+        _impl->set_buffer_pool(std::move(pool));
+    }
+
     template <class ConstBufferSequence, class... Args>
     auto async_send_to(const ConstBufferSequence &buffers,
                        const endpoint_type &destination, Args &&...args) {

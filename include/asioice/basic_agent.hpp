@@ -110,7 +110,7 @@ template <class Sock> struct basic_agent {
     }
 
     template <class Func>
-        requires(std::invocable<Func, asioice::io_buffer_ptr, uint8_t>)
+        requires(std::invocable<Func, asioice::io_buffer_ptr &, uint8_t>)
     void on_data(Func &&callback) {
         _impl->on_data(std::forward<Func>(callback));
     }

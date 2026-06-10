@@ -72,6 +72,9 @@ struct agent_base {
     const std::string &remote_password() const noexcept;
     void set_remote_password(std::string password) noexcept;
 
+    std::shared_ptr<io_buffer_pool> &buffer_pool() noexcept;
+    const std::shared_ptr<io_buffer_pool> &buffer_pool() const noexcept;
+
     agent_state_t state() const noexcept;
     exec::function<void()> on_state_change() noexcept;
 
@@ -102,7 +105,8 @@ struct agent_base {
                  void(asioice::io_buffer_ptr &, uint8_t)>
                      callback);
 
-    std::shared_ptr<asioice::candidate_pair>
+    // std::shared_ptr<asioice::candidate_pair>
+    asioice::candidate_pair *
     find_nominated_pair(uint8_t component) const noexcept;
 
     void add_receiver(ice_receiver &receiver) noexcept;

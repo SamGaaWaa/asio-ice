@@ -8,19 +8,7 @@
 #include "asioice/detail/detached_with_data.hpp"
 #include "asioice/detail/ignore.hpp"
 #include "asioice/detail/scope_guard.hpp"
-
-#if ASIOICE_USE_BOOST_ASIO > 0
-#define ASIO_TO_EXEC_USE_BOOST 1
-#include "asio2exec.hpp"
-namespace asioice {
-namespace net = boost::asio;
-}
-#else
-#include "asio2exec.hpp"
-namespace asioice {
-namespace net = asio;
-}
-#endif
+#include "asioice/detail/asio2exec.hpp"
 
 #include <exec/start_detached.hpp>
 #include <exec/repeat_until.hpp>
@@ -34,7 +22,8 @@ namespace asioice {
 agent_base_impl::agent_base_impl(net::any_io_executor ex, agent_config config,
                                  agent_base *agent)
     : _any_executor(std::move(ex)), _config(std::move(config)), _agent(agent),
-      _ice_controlling(_config.ice_controlling) {
+      _ice_controlling(_config.ice_controlling),
+      _pool(std::make_shared<io_buffer_pool>(_config.max_buffer_pool_size)) {
 #if ASIOICE_USE_CPPMDNS
     if (_config.enable_mdns && _config.mdns == nullptr)
         _config.mdns = default_mdns_interface();
@@ -154,7 +143,7 @@ asioice::task<void> agent_base_impl::server_reflexive_candidate(
         }
     }
     co_await (utils::on_scope_empty(scope) |
-              stdexec::continues_on(asio2exec::scheduler{this->_any_executor}));
+              stdexec::continues_on(utils::scheduler{this->_any_executor}));
 } catch (std::exception &e) {
     ICE_IN_DEBUG { std::cerr << e.what() << '\n'; }
     co_return;
@@ -224,7 +213,7 @@ asioice::task<void> agent_base_impl::get_component_candidates(
             auto publish_task =
                 stdexec::just() | stdexec::let_value([this, &c] {
                     return stdexec::starts_on(
-                        asio2exec::scheduler{this->_any_executor},
+                        utils::scheduler{this->_any_executor},
                         this->_config.mdns->publish(c.endpoint.address()));
                 }) |
                 stdexec::then([this, &c](std::string mdns) {
@@ -241,28 +230,27 @@ asioice::task<void> agent_base_impl::get_component_candidates(
                                   << "\" -> \"" << c.mdns_host << "\"\n";
                     }
                 });
-            scope.spawn(
-                utils::stop_when(std::move(publish_task),
-                                 stdexec::just(net::steady_timer{
-                                     this->_any_executor,
-                                     this->_config.mdns_publish_timeout}) |
-                                     stdexec::let_value([](auto &timer) {
-                                         return timer.async_wait(
-                                             asio2exec::use_sender);
-                                     })) |
-                stdexec::upon_stopped([&c] {
-                    ICE_IN_DEBUG {
-                        std::cout << "mDNS publish \""
-                                  << c.endpoint.address().to_string()
-                                  << "\" timeout\n";
-                    }
-                }) |
-                utils::ignore());
+            scope.spawn(utils::stop_when(
+                            std::move(publish_task),
+                            stdexec::just(net::steady_timer{
+                                this->_any_executor,
+                                this->_config.mdns_publish_timeout}) |
+                                stdexec::let_value([](auto &timer) {
+                                    return timer.async_wait(utils::use_sender);
+                                })) |
+                        stdexec::upon_stopped([&c] {
+                            ICE_IN_DEBUG {
+                                std::cout << "mDNS publish \""
+                                          << c.endpoint.address().to_string()
+                                          << "\" timeout\n";
+                            }
+                        }) |
+                        utils::ignore());
         }
         if (need_publish)
-            co_await (utils::on_scope_empty(scope) |
-                      stdexec::continues_on(
-                          asio2exec::scheduler{this->_any_executor}));
+            co_await (
+                utils::on_scope_empty(scope) |
+                stdexec::continues_on(utils::scheduler{this->_any_executor}));
         std::erase_if(host_candidates, [](const auto &c) {
             std::cout << "MDNS: " << c.mdns_host << '\n';
             return !c.mdns_host.ends_with(".local");
@@ -299,9 +287,8 @@ asioice::task<void> agent_base_impl::get_component_candidates(
             component_candidates, host_candidates, this->_config.stun_servers);
     }
     if (!this->_config.turn_servers.empty()) {
-        co_await (
-            utils::on_scope_empty(scope) |
-            stdexec::continues_on(asio2exec::scheduler{this->_any_executor}));
+        co_await (utils::on_scope_empty(scope) |
+                  stdexec::continues_on(utils::scheduler{this->_any_executor}));
     }
     co_return;
 }
@@ -398,7 +385,7 @@ asioice::task<void> agent_base_impl::do_gather_candidates() {
 
     // TODO: may it throws
     co_await (utils::on_scope_empty(scope) |
-              stdexec::continues_on(asio2exec::scheduler{this->_any_executor}));
+              stdexec::continues_on(utils::scheduler{this->_any_executor}));
 }
 
 static bool __validate_remote_candidate(const asioice::candidate &c) noexcept {
@@ -581,7 +568,7 @@ agent_base_impl::add_remote_candidate(asioice::candidate remote_c) {
         auto resolve_task =
             stdexec::just() | stdexec::let_value([&, this] {
                 return stdexec::starts_on(
-                    asio2exec::scheduler{this->_any_executor},
+                    utils::scheduler{this->_any_executor},
                     this->_config.mdns->resolve(remote_c.mdns_host));
             }) |
             stdexec::then([&](net::ip::address addr) {
@@ -592,7 +579,7 @@ agent_base_impl::add_remote_candidate(asioice::candidate remote_c) {
                 [](auto err) { return stdexec::just_stopped(); });
         auto ret = co_await utils::stop_when(
             std::move(resolve_task),
-            resolve_timer.async_wait(asio2exec::use_sender));
+            resolve_timer.async_wait(utils::use_sender));
         if (!ret) {
             ICE_IN_DEBUG { std::cerr << "resolved mdns host is invalid\n"; }
             co_return false;
@@ -821,7 +808,7 @@ asioice::task<bool> agent_base_impl::do_connect() noexcept {
                 // ta.expires_after(std::chrono::milliseconds(1));
                 ta.expires_after(this->_config.connectivity_check_interval);
             }
-            auto wakeup = utils::stop_when(ta.async_wait(asio2exec::use_sender),
+            auto wakeup = utils::stop_when(ta.async_wait(utils::use_sender),
                                            this->_state.on_change());
             if (auto ret = co_await std::move(wakeup); !ret || *ret)
                 break;
@@ -835,7 +822,7 @@ asioice::task<bool> agent_base_impl::do_connect() noexcept {
     scope.request_stop();
     ICE_IN_DEBUG { std::cout << "Waiting for all checks to finish\n"; }
     co_await (utils::on_scope_empty(scope) |
-              stdexec::continues_on(asio2exec::scheduler{this->_any_executor}));
+              stdexec::continues_on(utils::scheduler{this->_any_executor}));
     ICE_IN_DEBUG {
         std::cout << "connect: "
                   << (this->_state == agent_state_t::CONNECTED ? "success\n"
@@ -844,7 +831,7 @@ asioice::task<bool> agent_base_impl::do_connect() noexcept {
     if (this->_state == agent_state_t::CONNECTED) {
         utils::detached_with_data(
             utils::stop_when(
-                stdexec::starts_on(asio2exec::scheduler{this->_any_executor},
+                stdexec::starts_on(utils::scheduler{this->_any_executor},
                                    this->free_candidates()),
                 this->_state.on_change()),
             this->shared_from_this());
@@ -856,7 +843,7 @@ asioice::task<bool> agent_base_impl::do_connect() noexcept {
             utils::detached_with_data(
                 utils::stop_when(
                     stdexec::starts_on(
-                        asio2exec::scheduler{this->_any_executor},
+                        utils::scheduler{this->_any_executor},
                         valid_p.pair->keepalive_task(
                             this->_config.keepalive_interval, valid_p.pair)),
                     this->_state.on_change()),
@@ -883,7 +870,7 @@ asioice::task<void> agent_base_impl::check(check_task ct) {
     net::steady_timer timer{this->_any_executor,
                             this->_config.connectivity_check_timeout};
     co_await utils::stop_when(do_check(std::move(ct)),
-                              timer.async_wait(asio2exec::use_sender));
+                              timer.async_wait(utils::use_sender));
 }
 
 asioice::task<void> agent_base_impl::do_check(check_task ct) {
@@ -1146,7 +1133,7 @@ agent_base_impl::request(asioice::candidate_pair &pair,
 
     utils::inplace_receiver<void> retry_receiver;
     auto retry_op = retry_receiver.start(
-        stdexec::starts_on(asio2exec::scheduler{this->_any_executor},
+        stdexec::starts_on(utils::scheduler{this->_any_executor},
                            trans.run(pair.local_candidate().transport)));
     stdexec::start(retry_op);
 
@@ -1365,9 +1352,9 @@ agent_base_impl::do_handle_request(asioice::any_transport transport,
         this->_state == agent_state_t::GATHERING) {
         // early check
         do {
-            co_await (this->_state.on_change() |
-                      stdexec::continues_on(
-                          asio2exec::scheduler{this->_any_executor}));
+            co_await (
+                this->_state.on_change() |
+                stdexec::continues_on(utils::scheduler{this->_any_executor}));
         } while (this->_state == agent_state_t::INIT ||
                  this->_state == agent_state_t::GATHERING);
         if (this->_state == agent_state_t::CLOSED ||
@@ -1721,7 +1708,7 @@ asioice::task<void> agent_base_impl::free_candidates() {
     if (duration.count() < 3000) {
         net::steady_timer timer{this->_any_executor};
         timer.expires_after(std::chrono::milliseconds(3000 - duration.count()));
-        co_await timer.async_wait(asio2exec::use_sender);
+        co_await timer.async_wait(utils::use_sender);
     }
     auto nominated_pairs = this->nominated_pairs();
     auto transport_in_use = [&](const auto &transport) noexcept {
@@ -1817,14 +1804,15 @@ void agent_base_impl::create_channel_for_valid_pair() {
     }
 }
 
-std::shared_ptr<asioice::candidate_pair>
+// std::shared_ptr<asioice::candidate_pair>
+asioice::candidate_pair *
 agent_base_impl::find_nominated_pair(uint8_t component) const noexcept {
     if (this->_state == agent_state_t::CLOSED) [[unlikely]]
         return nullptr;
     for (auto &valid_p : this->_valid_list) {
         if (valid_p.nominated && valid_p.pair->component() == component)
             [[likely]] {
-            return valid_p.pair;
+            return valid_p.pair.get();
         }
     }
     ICE_IN_DEBUG {

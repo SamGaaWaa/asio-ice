@@ -87,7 +87,7 @@ asioice::task<void> server_coro(asioice::net::any_io_executor ex,
             std::cout << "Client closed the connection\n";
             // test fast shutdown
             net::steady_timer timer{ex, std::chrono::seconds(5)};
-            co_await timer.async_wait(asio2exec::use_sender);
+            co_await timer.async_wait(utils::use_sender);
             ec = co_await dtls_server.async_shutdown(false);
             if (ec)
                 std::cerr << "Server shutdown failed: " << ec.message() << '\n';
@@ -118,7 +118,7 @@ int main() {
 
     net::io_context io_ctx;
     exec::start_detached(stdexec::starts_on(
-        asio2exec::scheduler{io_ctx},
+        utils::scheduler{io_ctx},
         server_coro(io_ctx.get_executor(), std::move(server_cert), client_fp)));
 
     net::ip::udp::socket sock{io_ctx.get_executor()};
@@ -187,7 +187,7 @@ int main() {
         }
     };
 
-    asio2exec::scheduler sched{io_ctx};
+    utils::scheduler sched{io_ctx};
     exec::start_detached(stdexec::starts_on(
         sched, exec::finally(work(), stdexec::just() | stdexec::then([&] {
                                          dtls_client.close();

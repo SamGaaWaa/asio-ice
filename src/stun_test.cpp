@@ -8,8 +8,6 @@
 #include "asioice/detail/stun.hpp"
 
 #if ASIOICE_USE_BOOST_ASIO > 0
-#define ASIO_TO_EXEC_USE_BOOST 1
-#include <asio2exec.hpp>
 #include <boost/asio/buffer.hpp>
 #include <boost/asio/ip/udp.hpp>
 namespace asioice {
@@ -18,7 +16,6 @@ namespace net = boost::asio;
 #else
 #include <asio/buffer.hpp>
 #include <asio/ip/udp.hpp>
-#include <asio2exec.hpp>
 namespace asioice {
 namespace net = asio;
 }
@@ -217,7 +214,8 @@ void parse_base64() {
     std::cin >> b64;
     std::vector<std::byte> raw;
     raw.resize(asioice::base64::decoded_size(b64.size()));
-    raw.resize(asioice::base64::decode(raw.data(), b64.data(), b64.size()).first);
+    raw.resize(
+        asioice::base64::decode(raw.data(), b64.data(), b64.size()).first);
 
     const auto begin = std::chrono::high_resolution_clock::now();
     asioice::stun::message resp;
@@ -236,7 +234,8 @@ void parse_base64() {
 
 void write_test() {
     asioice::stun::message msg, parsed;
-    msg.mapped_address.emplace(asioice::net::ip::make_address("127.0.0.1"), 8080);
+    msg.mapped_address.emplace(asioice::net::ip::make_address("127.0.0.1"),
+                               8080);
     msg.integrities.emplace_back(asioice::stun::message::integrity::SHA1);
     msg.integrities.emplace_back(asioice::stun::message::integrity::SHA256);
     msg.use_fingerprint(true);

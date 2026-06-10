@@ -20,7 +20,6 @@
 #include "asioice/detail/detached_with_data.hpp"
 
 #if ASIOICE_USE_BOOST_ASIO > 0
-#define ASIO_TO_EXEC_USE_BOOST 1
 #include <boost/asio/buffers_iterator.hpp>
 #include <boost/asio/io_context.hpp>
 #include <boost/asio/ip/tcp.hpp>

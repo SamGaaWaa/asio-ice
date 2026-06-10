@@ -3,7 +3,6 @@
 #include "mdns.hpp"
 
 #if ASIOICE_USE_BOOST_ASIO > 0
-#define ASIO_TO_EXEC_USE_BOOST 1
 #include <boost/asio/io_context.hpp>
 namespace asioice {
 namespace net = boost::asio;
@@ -14,8 +13,6 @@ namespace asioice {
 namespace net = asio;
 }
 #endif
-
-#include "asio2exec.hpp"
 
 #include <thread>
 #include <mutex>

@@ -9,19 +9,17 @@
 #include "asioice/detail/scope_guard.hpp"
 #include "asioice/detail/receiver.hpp"
 #include "asioice/detail/inplace_receiver.hpp"
+#include "asioice/detail/asio2exec.hpp"
 
 #include <boost/intrusive/set.hpp>
 #include <boost/container/small_vector.hpp>
 
 #if ASIOICE_USE_BOOST_ASIO > 0
-#define ASIO_TO_EXEC_USE_BOOST 1
-#include "asio2exec.hpp"
 #include <boost/asio/steady_timer.hpp>
 namespace asioice {
 namespace net = boost::asio;
 }
 #else
-#include "asio2exec.hpp"
 #include <asio/steady_timer.hpp>
 namespace asioice {
 namespace net = asio;
@@ -60,7 +58,7 @@ struct transaction
         return utils::stop_when(
                    retry(transport),
                    _stop_retry.get_future() |
-                       stdexec::continues_on(asio2exec::scheduler{_executor})) |
+                       stdexec::continues_on(utils::scheduler{_executor})) |
                stdexec::then([](auto &&...) {});
     }
 
@@ -121,7 +119,7 @@ struct transaction
             }
             _timer.expires_after(retry_rto);
             retry_rto *= 2;
-            ec = co_await _timer.async_wait(asio2exec::use_sender);
+            ec = co_await _timer.async_wait(utils::use_sender);
             if (ec) {
                 ICE_IN_DEBUG {
                     std::cerr << "STUN transaction failed: " << ec.message()
@@ -198,7 +196,7 @@ struct basic_request_t {
         bool ret = false;
         utils::inplace_receiver<void> retry_receiver;
         auto retry_op = retry_receiver.start(stdexec::starts_on(
-            asio2exec::basic_scheduler<typename Transport::executor_type>{
+            utils::basic_scheduler<typename Transport::executor_type>{
                 transport.get_executor()},
             trans.run(transport)));
         stdexec::start(retry_op);

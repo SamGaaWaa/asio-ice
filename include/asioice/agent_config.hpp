@@ -41,6 +41,8 @@ struct agent_config {
     std::shared_ptr<mdns_interface> mdns = nullptr;
     std::chrono::milliseconds mdns_publish_timeout{3000};
     std::chrono::milliseconds mdns_resolve_timeout{3000};
+    std::size_t max_buffer_pool_size{128};
+    std::size_t max_buffer_size{1500};
 };
 
 } // namespace asioice

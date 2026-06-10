@@ -90,7 +90,8 @@ io_buffer io_buffer::make_raw(void *data, std::size_t capacity,
                               std::size_t offset, std::size_t size) noexcept {
     io_buffer buf;
     buf._type = buffer_type::raw;
-    buf._raw = std::span<std::uint8_t>(static_cast<std::uint8_t *>(data), capacity);
+    buf._raw =
+        std::span<std::uint8_t>(static_cast<std::uint8_t *>(data), capacity);
     buf._offset = offset;
     buf._size = size;
     return buf;
@@ -218,7 +219,9 @@ std::size_t io_buffer::capacity() const noexcept {
 
 std::uint8_t *io_buffer::data() noexcept { return buffer() + _offset; }
 
-const std::uint8_t *io_buffer::data() const noexcept { return buffer() + _offset; }
+const std::uint8_t *io_buffer::data() const noexcept {
+    return buffer() + _offset;
+}
 
 std::size_t io_buffer::size() const noexcept { return _size; }
 
@@ -385,8 +388,8 @@ std::span<std::uint8_t> io_buffer::back_writable(std::size_t n) noexcept {
     return std::span<std::uint8_t>(buffer() + _offset + _size, n);
 }
 
-std::unique_ptr<io_buffer>
-io_buffer_pool::get(std::size_t head_room, std::size_t tail_room) {
+std::unique_ptr<io_buffer> io_buffer_pool::get(std::size_t head_room,
+                                               std::size_t tail_room) {
     io_buffer *buf = nullptr;
 
     // 1. 尝试从缓冲区链表获取
@@ -427,12 +430,11 @@ io_buffer_pool::get(std::size_t head_room, std::size_t tail_room) {
 }
 
 void io_buffer_pool::put(std::unique_ptr<io_buffer> buffer) noexcept {
-    if (_size >= _max_size || !buffer) [[unlikely]]
+    if (_size >= _max_size || !buffer || buffer->pool() != this) [[unlikely]]
         return;
 
     // 释放缓冲区对 shared_block 的引用
-    if (buffer->_type == io_buffer::buffer_type::shared &&
-        buffer->_shared) {
+    if (buffer->_type == io_buffer::buffer_type::shared && buffer->_shared) {
         // release() 会检查引用计数，如果为0且 block->pool 不为空，则放入
         // _blocks 链表
         buffer->_shared->release();
@@ -441,7 +443,7 @@ void io_buffer_pool::put(std::unique_ptr<io_buffer> buffer) noexcept {
 
     buffer->clear();
     buffer->_type = io_buffer::buffer_type::raw; // 重置为 raw 类型
-    buffer->_raw = std::span<std::uint8_t>();       // 清空 raw 数据
+    buffer->_raw = std::span<std::uint8_t>();    // 清空 raw 数据
 
     buffer->set_next(_buffers);
     _buffers = buffer.release();

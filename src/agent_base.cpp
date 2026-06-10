@@ -51,6 +51,15 @@ void agent_base::set_remote_password(std::string password) noexcept {
     _impl->set_remote_password(std::move(password));
 }
 
+std::shared_ptr<io_buffer_pool> &agent_base::buffer_pool() noexcept {
+    return _impl->buffer_pool();
+}
+
+const std::shared_ptr<io_buffer_pool> &
+agent_base::buffer_pool() const noexcept {
+    return _impl->buffer_pool();
+}
+
 agent_state_t agent_base::state() const noexcept { return _impl->state(); }
 exec::function<void()> agent_base::on_state_change() noexcept {
     return exec::function<void()>{[this] { return _impl->on_state_change(); }};
@@ -110,7 +119,8 @@ void agent_base::on_data(
     _impl->on_data(std::move(callback));
 }
 
-std::shared_ptr<asioice::candidate_pair>
+// std::shared_ptr<asioice::candidate_pair>
+asioice::candidate_pair *
 agent_base::find_nominated_pair(uint8_t component) const noexcept {
     return _impl->find_nominated_pair(component);
 }

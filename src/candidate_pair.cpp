@@ -1,19 +1,17 @@
 #include "asioice/candidate_pair.hpp"
 #include "asioice/detail/scope_guard.hpp"
 #include "asioice/detail/stun.hpp"
+#include "asioice/detail/asio2exec.hpp"
 
 #include "json.hpp"
 
 #if ASIOICE_USE_BOOST_ASIO > 0
-#define ASIO_TO_EXEC_USE_BOOST 1
-#include "asio2exec.hpp"
 #include <boost/asio/io_context.hpp>
 #include <boost/asio/steady_timer.hpp>
 namespace asioice {
 namespace net = boost::asio;
 }
 #else
-#include "asio2exec.hpp"
 #include <asio/io_context.hpp>
 #include <asio/steady_timer.hpp>
 namespace asioice {
@@ -153,7 +151,7 @@ candidate_pair::keepalive_task(std::chrono::milliseconds ms,
                 break;
             p = nullptr;
             timer.expires_at(send_time);
-            co_await timer.async_wait(asio2exec::use_sender);
+            co_await timer.async_wait(utils::use_sender);
             p = self.lock();
             if (!p)
                 co_return;

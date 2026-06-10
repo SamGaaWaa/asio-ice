@@ -2,6 +2,7 @@
 #include "asioice/detail/scope_guard.hpp"
 #include "asioice/socket_transport.hpp"
 #include "asioice/detail/stun_transaction.hpp"
+#include "asioice/detail/asio2exec.hpp"
 
 #if ASIOICE_USE_BOOST_ASIO > 0
 #include <boost/asio/buffer.hpp>
@@ -19,8 +20,6 @@ namespace net = asio;
 }
 #endif
 
-#include "asio2exec.hpp"
-
 #include <exec/async_scope.hpp>
 
 #include <iostream>
@@ -29,7 +28,7 @@ namespace net = asio;
 void udp_request_test() {
     using namespace asioice;
 
-    asio2exec::asio_context asio_thread;
+    utils::asio_context asio_thread;
     asio_thread.start();
 
     auto &ctx = asio_thread.context();
@@ -75,7 +74,7 @@ void udp_request_test() {
         std::cout << resp.to_string() << '\n';
     };
 
-    asio2exec::scheduler sched{ctx};
+    utils::scheduler sched{ctx};
     stdexec::sync_wait(stdexec::starts_on(sched, request_coro()));
 
     std::cout << "Test client.stop()\n";
@@ -83,7 +82,7 @@ void udp_request_test() {
     net::steady_timer timer{ctx.get_executor(), std::chrono::seconds(10)};
     scope.spawn(stdexec::starts_on(sched, request_coro()));
     scope.spawn(stdexec::starts_on(
-        sched, timer.async_wait(asio2exec::use_sender) |
+        sched, timer.async_wait(utils::use_sender) |
                    stdexec::then([&](auto) { transport->stop(); })));
     stdexec::sync_wait(scope.on_empty());
     std::cout << "Finish\n";
@@ -92,7 +91,7 @@ void udp_request_test() {
 void tcp_request_test() {
     // using namespace asioice;
 
-    // asio2exec::asio_context asio_thread;
+    // utils::asio_context asio_thread;
     // asio_thread.start();
 
     // auto &ctx = asio_thread.get_executor();
@@ -117,7 +116,7 @@ void tcp_request_test() {
     //     std::vector<char> tmp_buf;
     //     while (true) {
     //         auto [err, n] = co_await sock.async_read_some(
-    //             net::buffer(buf, sizeof(buf)), asio2exec::use_sender);
+    //             net::buffer(buf, sizeof(buf)), utils::use_sender);
     //         if (err) {
     //             std::cerr << "Receive error: " << err.message() << '\n';
     //             co_return;
@@ -156,7 +155,7 @@ void tcp_request_test() {
     //     std::cout << "Received response: " << resp.to_string() << '\n';
     // };
 
-    // asio2exec::scheduler sched{ctx};
+    // utils::scheduler sched{ctx};
     // auto work =
     //     stdexec::when_all(recv_coro(), request_coro() | stdexec::let_value([]
     //     {
@@ -171,7 +170,7 @@ void tcp_request_test() {
     // net::steady_timer timer{ctx, std::chrono::seconds(10)};
     // scope.spawn(stdexec::starts_on(sched, request_coro()));
     // scope.spawn(stdexec::starts_on(
-    //     sched, timer.async_wait(asio2exec::use_sender) |
+    //     sched, timer.async_wait(utils::use_sender) |
     //                stdexec::then([&](auto) { client.stop(); })));
     // stdexec::sync_wait(scope.on_empty());
 

@@ -22,11 +22,14 @@ struct shared_block {
     io_buffer_pool *pool{nullptr};
 
     std::uint8_t *data() noexcept {
-        return static_cast<std::uint8_t*>(static_cast<void*>(this)) + sizeof(shared_block);
+        return static_cast<std::uint8_t *>(static_cast<void *>(this)) +
+               sizeof(shared_block);
     }
 
     const std::uint8_t *data() const noexcept {
-        return static_cast<const std::uint8_t*>(static_cast<const void*>(this)) + sizeof(shared_block);
+        return static_cast<const std::uint8_t *>(
+                   static_cast<const void *>(this)) +
+               sizeof(shared_block);
     }
 
     static shared_block *allocate(std::size_t capacity);
@@ -301,7 +304,7 @@ struct io_buffer_pool {
     void put(std::unique_ptr<io_buffer> buffer) noexcept;
 
   private:
-    std::size_t _max_size;
+    const std::size_t _max_size;
     io_buffer *_buffers{nullptr};
     std::size_t _size{0};
     shared_block *_blocks{nullptr};
@@ -328,8 +331,8 @@ struct io_buffer_pool {
 struct io_buffer_ptr {
     io_buffer_ptr() noexcept {}
     io_buffer_ptr(io_buffer_pool *pool,
-                   std::size_t head_room = io_buffer::default_head_room(),
-                   std::size_t tail_room = io_buffer::default_tail_room())
+                  std::size_t head_room = io_buffer::default_head_room(),
+                  std::size_t tail_room = io_buffer::default_tail_room())
         : _buffer(pool ? pool->get(head_room, tail_room).release()
                        : std::make_unique<io_buffer>(
                              io_buffer::make_shared(head_room + tail_room))

@@ -13,8 +13,6 @@
 #include <stdexec/execution.hpp>
 
 #if ASIOICE_USE_BOOST_ASIO > 0
-#define ASIO_TO_EXEC_USE_BOOST 1
-#include "asio2exec.hpp"
 #include <boost/asio/io_context.hpp>
 #include <boost/asio/as_tuple.hpp>
 #include <boost/asio/posix/stream_descriptor.hpp>
@@ -100,7 +98,7 @@ read_line(net::posix::stream_descriptor &stream, std::string &buffer) {
     while (buffer.find('\n') == std::string::npos) {
         char buf[256];
         auto [ec, n] = co_await stream.async_read_some(
-            net::buffer(buf), net::as_tuple(asio2exec::use_sender));
+            net::buffer(buf), net::as_tuple(asioice::utils::use_sender));
         if (ec) {
             if (ec == net::error::eof)
                 break;
@@ -204,7 +202,7 @@ static std::string make_sdp(const agent &ag, const std::string &local_fp,
 }
 
 static task<void> chat_session(net::io_context &ctx) {
-    asio2exec::scheduler sched{ctx};
+    asioice::utils::scheduler sched{ctx};
     net::posix::stream_descriptor stdin_stream(ctx.get_executor(),
                                                STDIN_FILENO);
     std::string stdin_buf;
@@ -263,7 +261,8 @@ static task<void> chat_session(net::io_context &ctx) {
         std::cout << "Gathering candidates...\n";
         net::steady_timer timer(ctx, std::chrono::seconds(10));
         auto result = co_await utils::stop_when(
-            ag.gather_candidates(), timer.async_wait(asio2exec::use_sender));
+            ag.gather_candidates(),
+            timer.async_wait(asioice::utils::use_sender));
         if (!result.has_value()) {
             std::cout << "Gather timeout\n";
             co_return;
@@ -304,7 +303,8 @@ static task<void> chat_session(net::io_context &ctx) {
         std::cout << "Gathering candidates...\n";
         net::steady_timer timer(ctx, std::chrono::seconds(10));
         auto result = co_await utils::stop_when(
-            ag.gather_candidates(), timer.async_wait(asio2exec::use_sender));
+            ag.gather_candidates(),
+            timer.async_wait(asioice::utils::use_sender));
         if (!result.has_value()) {
             std::cout << "Gather timeout\n";
             co_return;
@@ -398,6 +398,6 @@ static task<void> chat_session(net::io_context &ctx) {
 int main() {
     net::io_context ctx;
     exec::start_detached(
-        stdexec::starts_on(asio2exec::scheduler{ctx}, chat_session(ctx)));
+        stdexec::starts_on(asioice::utils::scheduler{ctx}, chat_session(ctx)));
     ctx.run();
 }

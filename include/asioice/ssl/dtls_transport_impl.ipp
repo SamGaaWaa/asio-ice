@@ -249,7 +249,7 @@ asioice::task<void> dtls_impl<NextLayer>::timeout_handler() {
         }
         if (timeout > std::chrono::milliseconds{1}) {
             timer.expires_after(timeout);
-            co_await timer.async_wait(asio2exec::use_sender);
+            co_await timer.async_wait(utils::use_sender);
         }
         co_await this->perform(dtls_impl<NextLayer>::retransmission_op{this});
     }

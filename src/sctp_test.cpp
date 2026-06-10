@@ -2,7 +2,6 @@
 #include "asioice/socket_transport.hpp"
 
 #if ASIOICE_USE_BOOST_ASIO > 0
-#define ASIO_TO_EXEC_USE_BOOST 1
 #include <boost/asio/ip/udp.hpp>
 namespace asioice {
 namespace net = boost::asio;
@@ -23,7 +22,7 @@ namespace net = asio;
 void ping_pong(size_t n) {
     using namespace asioice;
     using UdpSocket =
-        asio2exec::use_sender_t::as_default_on_t<net::ip::udp::socket>;
+        utils::use_sender_t::as_default_on_t<net::ip::udp::socket>;
     static_assert(UniqueAsyncPacketConnectionTransport<UdpSocket>);
 
     net::io_context ctx;
@@ -76,7 +75,7 @@ void ping_pong(size_t n) {
                 co_return;
             }
             timer.expires_after(std::chrono::seconds(1));
-            co_await timer.async_wait(asio2exec::use_sender);
+            co_await timer.async_wait(utils::use_sender);
         }
         co_await client.shutdown();
     };
@@ -103,12 +102,12 @@ void ping_pong(size_t n) {
                 co_return;
             }
             timer.expires_after(std::chrono::seconds(1));
-            co_await timer.async_wait(asio2exec::use_sender);
+            co_await timer.async_wait(utils::use_sender);
         }
         co_await server.shutdown();
     };
 
-    asio2exec::scheduler sched{ctx};
+    utils::scheduler sched{ctx};
     exec::start_detached(
         stdexec::starts_on(sched, client_coro(std::move(sctp_client), n)));
     exec::start_detached(

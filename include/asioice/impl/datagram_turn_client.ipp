@@ -15,7 +15,7 @@ asioice::task<bool> datagram_client<NextLayer>::request(
 
     bool ret = false;
     utils::inplace_receiver<void> retry_receiver;
-    asio2exec::scheduler sched{this->get_executor()};
+    utils::scheduler sched{this->get_executor()};
     auto retry_op = retry_receiver.start(
         stdexec::starts_on(sched, trans.run(this->_next_layer)));
     stdexec::start(retry_op);
@@ -267,7 +267,7 @@ template <class NextLayer> void datagram_client<NextLayer>::stop() noexcept {
             net::const_buffer data{&buf[0], (std::size_t)n};
             utils::detached_with_data(
                 this->next_layer().async_send_to(data, this->_server,
-                                                 asio2exec::use_sender),
+                                                 utils::use_sender),
                 this->shared_from_this(), std::move(buf));
         }
     }
@@ -285,7 +285,7 @@ asioice::task<void> datagram_client<NextLayer>::refresh_allocation_task() {
     while (this->_lifetime > 0) {
         auto expire = std::chrono::seconds(this->_lifetime * 5 / 6);
         timer.expires_after(expire);
-        co_await timer.async_wait(asio2exec::use_sender);
+        co_await timer.async_wait(utils::use_sender);
         std::optional<bool> success =
             co_await (this->refresh(std::chrono::seconds(this->_lifetime)) |
                       stdexec::stopped_as_optional());
@@ -304,8 +304,7 @@ template <class NextLayer>
 void datagram_client<NextLayer>::start_refresh_allocation_task() {
     if (!this->is_running())
         return;
-    asio2exec::basic_scheduler<
-        typename datagram_client<NextLayer>::executor_type>
+    utils::basic_scheduler<typename datagram_client<NextLayer>::executor_type>
         sched{this->get_executor()};
     utils::detached_with_data(
         stdexec::starts_on(
@@ -482,7 +481,7 @@ datagram_client<NextLayer>::permission_state::refresh_task() {
         this->client().get_executor());
     while (true) {
         timer.expires_after(std::chrono::seconds(60 * 4));
-        auto ec = co_await timer.async_wait(asio2exec::use_sender);
+        auto ec = co_await timer.async_wait(utils::use_sender);
         if (ec)
             break;
 
@@ -514,8 +513,7 @@ template <class NextLayer>
 void datagram_client<NextLayer>::permission_state::start() {
     if (!this->_client->is_running())
         return;
-    asio2exec::basic_scheduler<
-        typename datagram_client<NextLayer>::executor_type>
+    utils::basic_scheduler<typename datagram_client<NextLayer>::executor_type>
         sched{this->client().get_executor()};
     utils::detached_with_data(
         stdexec::starts_on(sched,
@@ -560,7 +558,7 @@ datagram_client<NextLayer>::create_permission(std::ranges::view auto peers,
         stdexec::just() | stdexec::let_value([&] {
             return this->_new_permissions_created.get_future() |
                    stdexec::continues_on(
-                       asio2exec::basic_scheduler<
+                       utils::basic_scheduler<
                            typename datagram_client<NextLayer>::executor_type>{
                            this->get_executor()});
         }) |
@@ -693,7 +691,7 @@ datagram_client<NextLayer>::async_send_to(ConstBufferSequence buffer_sequence,
         buffers.buffers().emplace_back(pad, 4 - data_size % 4);
     }
     co_return co_await this->next_layer().async_send_to(
-        buffers.buffers(), this->_server, asio2exec::use_sender);
+        buffers.buffers(), this->_server, utils::use_sender);
 }
 
 template <class NextLayer>
@@ -714,7 +712,7 @@ auto datagram_client<NextLayer>::send_channel_data(
                        buffers.buffers().begin(),
                        net::const_buffer(header.data(), header.size()));
                    return this->next_layer().async_send_to(
-                       buffers.buffers(), this->_server, asio2exec::use_sender);
+                       buffers.buffers(), this->_server, utils::use_sender);
                });
 }
 
@@ -809,8 +807,7 @@ template <class NextLayer>
 void datagram_client<NextLayer>::channel_state::start() {
     if (!this->_client->is_running())
         return;
-    asio2exec::basic_scheduler<
-        typename datagram_client<NextLayer>::executor_type>
+    utils::basic_scheduler<typename datagram_client<NextLayer>::executor_type>
         sched{this->client().get_executor()};
     utils::detached_with_data(
         stdexec::starts_on(sched,
@@ -835,7 +832,7 @@ asioice::task<void> datagram_client<NextLayer>::channel_state::refresh_task() {
         this->client().get_executor());
     while (true) {
         timer.expires_after(std::chrono::seconds(60 * 9));
-        auto ec = co_await timer.async_wait(asio2exec::use_sender);
+        auto ec = co_await timer.async_wait(utils::use_sender);
         if (ec)
             break;
         std::optional<bool> ret = co_await stdexec::stopped_as_optional(
@@ -873,7 +870,7 @@ asioice::task<void> datagram_client<NextLayer>::channel_state::refresh_task() {
     this->set_permission(nullptr);
     utils::scope_guard on_exit([this]() noexcept { this->remove_from_set(); });
     timer.expires_after(std::chrono::seconds(60 * 5));
-    co_await utils::stop_when(timer.async_wait(asio2exec::use_sender),
+    co_await utils::stop_when(timer.async_wait(utils::use_sender),
                               this->_stop.get_future());
 }
 

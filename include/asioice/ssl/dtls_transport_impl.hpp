@@ -1,15 +1,12 @@
 #pragma once
 
 #include "asioice/config.hpp"
-#if ASIOICE_USE_BOOST_ASIO > 0
-#define ASIO_TO_EXEC_USE_BOOST 1
-#endif
 
 #include <openssl/err.h>
 #include <openssl/ssl.h>
 
 #include "asioice/concepts.hpp"
-#include "asio2exec.hpp"
+#include "asioice/detail/asio2exec.hpp"
 #include "asioice/detail/receiver.hpp"
 #include "asioice/detail/scope_guard.hpp"
 #include "asioice/detail/shared_promise.hpp"

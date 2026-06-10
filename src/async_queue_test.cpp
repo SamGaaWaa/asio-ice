@@ -1,12 +1,11 @@
 #include "asioice/config.hpp"
 #include "asioice/detail/async_queue.hpp"
+#include "asioice/detail/asio2exec.hpp"
 #include "asioice/task.hpp"
 
 #include <boost/circular_buffer.hpp>
 
 #if ASIOICE_USE_BOOST_ASIO > 0
-#define ASIO_TO_EXEC_USE_BOOST 1
-#include "asio2exec.hpp"
 #include <boost/asio/awaitable.hpp>
 #include <boost/asio/co_spawn.hpp>
 #include <boost/asio/detached.hpp>
@@ -18,7 +17,6 @@ namespace net = boost::asio;
 using boost::system::error_code;
 } // namespace asioice
 #else
-#include "asio2exec.hpp"
 #include <asio/awaitable.hpp>
 #include <asio/co_spawn.hpp>
 #include <asio/detached.hpp>
@@ -46,8 +44,8 @@ uint64_t asio_channel_test(int times) {
     using namespace asioice;
 
     net::io_context ctx;
-    net::experimental::channel<void(asioice::error_code, int)> ch{ctx,
-                                                              buffer_max_size};
+    net::experimental::channel<void(asioice::error_code, int)> ch{
+        ctx, buffer_max_size};
 
     uint64_t sum = 0;
 
@@ -78,7 +76,7 @@ uint64_t async_queue_test(int times) {
     using namespace asioice;
 
     net::io_context ctx;
-    asio2exec::scheduler sched{ctx};
+    utils::scheduler sched{ctx};
     async_queue<std::tuple<asioice::error_code, int>> q(buffer_max_size);
 
     uint64_t sum = 0;
@@ -114,7 +112,7 @@ uint64_t async_queue_with_circular_buffer_test(int times) {
     using namespace asioice;
 
     net::io_context ctx;
-    asio2exec::scheduler sched{ctx};
+    utils::scheduler sched{ctx};
     async_queue<std::tuple<asioice::error_code, int>,
                 boost::circular_buffer<std::tuple<asioice::error_code, int>>>
         q(buffer_max_size);
@@ -152,7 +150,7 @@ uint64_t async_queue_with_inline_task_test(int times) {
     using namespace asioice;
 
     net::io_context ctx;
-    asio2exec::scheduler sched{ctx};
+    utils::scheduler sched{ctx};
     async_queue<std::tuple<asioice::error_code, int>> q(buffer_max_size);
 
     uint64_t sum = 0;

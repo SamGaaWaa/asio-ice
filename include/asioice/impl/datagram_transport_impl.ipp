@@ -6,14 +6,14 @@ template <class Socket> void datagram_transport_impl<Socket>::start() {
         return;
     utils::detached_with_data(
         stdexec::starts_on(
-            asio2exec::basic_scheduler<typename Self::executor_type>{
+            utils::basic_scheduler<typename Self::executor_type>{
                 this->get_executor()},
             utils::stop_when(
                 this->recv_loop(),
                 this->_stop.get_future() |
-                    stdexec::continues_on(asio2exec::basic_scheduler<
-                                          typename Self::executor_type>{
-                        this->get_executor()}))),
+                    stdexec::continues_on(
+                        utils::basic_scheduler<typename Self::executor_type>{
+                            this->get_executor()}))),
         this->shared_from_this());
     this->_running = true;
 }
@@ -22,16 +22,16 @@ template <class Socket>
 asioice::task<void> datagram_transport_impl<Socket>::recv_loop() {
     utils::scope_guard on_exit([this]() noexcept { this->_running = false; });
     while (true) {
-        io_buffer_ptr buf(nullptr, 64, this->max_buffer_size());
+        io_buffer_ptr buf(this->_pool.get(), 0, 4096);
+        assert(buf->capacity() == 4096);
         typename datagram_transport_impl<Socket>::endpoint_type ep;
         if constexpr (requires {
                           this->socket().async_receive_from(
-                              buf->prepare_back(this->max_buffer_size()), ep,
-                              asio2exec::use_sender);
+                              buf->prepare_back(buf->capacity()), ep,
+                              utils::use_sender);
                       }) {
             auto [ec, n] = co_await this->socket().async_receive_from(
-                buf->prepare_back(this->max_buffer_size()), ep,
-                asio2exec::use_sender);
+                buf->prepare_back(buf->capacity()), ep, utils::use_sender);
             if (ec) {
                 ICE_IN_DEBUG {
                     std::cerr << "recv_loop: " << ec.message() << "\n";
@@ -43,8 +43,7 @@ asioice::task<void> datagram_transport_impl<Socket>::recv_loop() {
             buf->commit_back(n);
         } else {
             auto [ec, n] = co_await this->socket().async_receive(
-                buf->prepare_back(this->max_buffer_size()),
-                asio2exec::use_sender);
+                buf->prepare_back(buf->capacity()), utils::use_sender);
             if (ec) {
                 ICE_IN_DEBUG {
                     std::cerr << "recv_loop: " << ec.message() << "\n";

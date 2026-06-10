@@ -67,7 +67,13 @@ struct agent_base_impl : std::enable_shared_from_this<agent_base_impl> {
     agent_state_t state() const noexcept { return _state; }
     auto on_state_change() noexcept {
         return _state.on_change() |
-               stdexec::continues_on(asio2exec::scheduler{_any_executor});
+               stdexec::continues_on(utils::scheduler{_any_executor});
+    }
+
+    std::shared_ptr<io_buffer_pool> &buffer_pool() noexcept { return _pool; }
+
+    const std::shared_ptr<io_buffer_pool> &buffer_pool() const noexcept {
+        return _pool;
     }
 
     auto on_closed() noexcept {
@@ -77,8 +83,8 @@ struct agent_base_impl : std::enable_shared_from_this<agent_base_impl> {
                        [] { return stdexec::just(); },
                        [this] {
                            return this->_state.on_change() |
-                                  stdexec::continues_on(asio2exec::scheduler{
-                                      this->_any_executor});
+                                  stdexec::continues_on(
+                                      utils::scheduler{this->_any_executor});
                        });
                }) |
                stdexec::then(
@@ -94,8 +100,8 @@ struct agent_base_impl : std::enable_shared_from_this<agent_base_impl> {
                        [] { return stdexec::just(); },
                        [this] {
                            return this->_state.on_change() |
-                                  stdexec::continues_on(asio2exec::scheduler{
-                                      this->_any_executor});
+                                  stdexec::continues_on(
+                                      utils::scheduler{this->_any_executor});
                        });
                }) |
                stdexec::then([this] {
@@ -145,7 +151,8 @@ struct agent_base_impl : std::enable_shared_from_this<agent_base_impl> {
         _on_data = std::move(callback);
     }
 
-    std::shared_ptr<asioice::candidate_pair>
+    // std::shared_ptr<asioice::candidate_pair>
+    asioice::candidate_pair *
     find_nominated_pair(uint8_t component) const noexcept;
 
     void add_receiver(ice_receiver &receiver) {
@@ -324,6 +331,7 @@ struct agent_base_impl : std::enable_shared_from_this<agent_base_impl> {
     stun::transaction_set _transactions{};    // use for connectivity checks
     transaction_state_set _transaction_states{};
     agent_config _config;
+    std::shared_ptr<io_buffer_pool> _pool;
     bool _ice_controlling = true;
     bool _remote_is_lite = false;
     std::string _remote_username{};

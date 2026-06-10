@@ -12,7 +12,7 @@ namespace asioice::impl {
 template <class Sock> struct basic_agent_impl final : agent_base {
     using socket_type = Sock;
     using executor_type = typename socket_type::executor_type;
-    using scheduler_type = asio2exec::basic_scheduler<executor_type>;
+    using scheduler_type = utils::basic_scheduler<executor_type>;
     using raw_transport = asioice::datagram_transport<socket_type>;
     using raw_transport_ptr = std::shared_ptr<raw_transport>;
     using turn_client_type = asioice::turn::client<raw_transport, true>;
@@ -121,6 +121,7 @@ template <class Sock> struct basic_agent_impl final : agent_base {
         }
 
         auto transport = std::make_shared<raw_transport>(std::move(sock));
+        transport->set_buffer_pool(this->buffer_pool());
 
         ICE_IN_DEBUG {
             std::cout << "Host transport bound to "

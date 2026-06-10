@@ -56,7 +56,7 @@ void allocate_test(std::size_t epoch_count) {
         std::cout << "Relayed address: " << relayed->address() << ":"
                   << relayed->port() << '\n';
         auto ec =
-            co_await remote_peer.async_connect(*relayed, asio2exec::use_sender);
+            co_await remote_peer.async_connect(*relayed, utils::use_sender);
         if (ec) {
             std::cerr << "Connect failed: " << ec.message() << '\n';
             co_return;
@@ -95,7 +95,7 @@ void allocate_test(std::size_t epoch_count) {
                                           msg->size() - 1}
                       << "\n\n";
             timer.expires_after(std::chrono::seconds(1));
-            co_await timer.async_wait(asio2exec::use_sender);
+            co_await timer.async_wait(utils::use_sender);
         }
     };
     auto peer_recv_coro = [&]() -> asioice::task<void> {
@@ -105,7 +105,7 @@ void allocate_test(std::size_t epoch_count) {
             std::error_code err;
             std::size_t n;
             std::tie(err, n) = co_await remote_peer.async_receive_from(
-                net::buffer(buf), relayed, asio2exec::use_sender);
+                net::buffer(buf), relayed, utils::use_sender);
             if (err) {
                 std::cerr << "Receive error: " << err.message() << '\n';
                 co_return;
@@ -114,7 +114,7 @@ void allocate_test(std::size_t epoch_count) {
                       << relayed.address() << ':' << relayed.port()
                       << "\": " << std::string_view{buf, n} << '\n';
             std::tie(err, n) = co_await remote_peer.async_send_to(
-                net::buffer(buf, n), relayed, asio2exec::use_sender);
+                net::buffer(buf, n), relayed, utils::use_sender);
             if (err) {
                 std::cerr << "Send error: " << err.message() << '\n';
                 co_return;
@@ -128,7 +128,7 @@ void allocate_test(std::size_t epoch_count) {
         co_await stdexec::just_stopped();
     };
 
-    asio2exec::basic_scheduler<net::io_context::executor_type> sched{
+    utils::basic_scheduler<net::io_context::executor_type> sched{
         ctx.get_executor()};
     auto work = stdexec::when_all(peer_recv_coro(),
                                   allocate_coro() | stdexec::let_value([&] {

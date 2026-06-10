@@ -1,10 +1,7 @@
 #pragma once
 
 #include "asioice/config.hpp"
-#if ASIOICE_USE_BOOST_ASIO > 0
-#define ASIO_TO_EXEC_USE_BOOST 1
-#endif
-#include "asio2exec.hpp"
+#include "asioice/detail/asio2exec.hpp"
 #include "asioice/detail/receiver.hpp"
 #include "asioice/detail/scope_guard.hpp"
 #include "asioice/detail/shared_promise.hpp"
@@ -57,15 +54,19 @@ struct datagram_transport_impl
     std::size_t max_buffer_size() const noexcept { return _max_buffer_size; }
     void max_buffer_size(std::size_t size) noexcept { _max_buffer_size = size; }
 
+    void set_buffer_pool(std::shared_ptr<io_buffer_pool> pool) noexcept {
+        _pool = std::move(pool);
+    }
+
     template <class ConstBufferSequence, class... Args>
     auto async_send_to(const ConstBufferSequence &buffers,
                        const endpoint_type &destination, Args &&...args) {
-        return _sock.async_send_to(buffers, destination, asio2exec::use_sender);
+        return _sock.async_send_to(buffers, destination, utils::use_sender);
     }
 
     template <class ConstBufferSequence, class... Args>
     auto async_send(const ConstBufferSequence &buffers, Args &&...args) {
-        return _sock.async_send(buffers, asio2exec::use_sender);
+        return _sock.async_send(buffers, utils::use_sender);
     }
 
     void add_receiver(datagram_receiver &receiver) noexcept;
@@ -79,6 +80,7 @@ struct datagram_transport_impl
     asioice::task<void> recv_loop();
 
     Socket _sock;
+    std::shared_ptr<io_buffer_pool> _pool{nullptr};
     endpoint_type _local_endpoint;
     early_data_cache _early_data;
     bool _stop_cache_early_data{false};

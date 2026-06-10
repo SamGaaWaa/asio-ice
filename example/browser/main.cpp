@@ -10,8 +10,6 @@
 #include "json.hpp"
 
 #if ASIOICE_USE_BOOST_ASIO > 0
-#define ASIO_TO_EXEC_USE_BOOST 1
-#include "asio2exec.hpp"
 #include <boost/asio/io_context.hpp>
 #include <boost/asio/ip/tcp.hpp>
 #include <boost/asio/as_tuple.hpp>
@@ -99,7 +97,7 @@ static task<void> ws_send(ws_t &ws, const nlohmann::json &msg) {
     ws.text(true);
     auto d = msg.dump();
     auto [ec, n] = co_await ws.async_write(
-        net::buffer(d), net::as_tuple(asio2exec::use_sender));
+        net::buffer(d), net::as_tuple(asioice::utils::use_sender));
     if (ec)
         std::cerr << "ws err: " << ec.message() << '\n';
 }
@@ -107,7 +105,7 @@ static task<void> ws_send(ws_t &ws, const nlohmann::json &msg) {
 static task<nlohmann::json> ws_recv(ws_t &ws) {
     beast::flat_buffer buf;
     auto [ec, n] =
-        co_await ws.async_read(buf, net::as_tuple(asio2exec::use_sender));
+        co_await ws.async_read(buf, net::as_tuple(asioice::utils::use_sender));
     if (ec)
         throw std::runtime_error("ws recv: " + ec.message());
     auto j = nlohmann::json::parse(beast::buffers_to_string(buf.data()));
@@ -148,7 +146,7 @@ static remote_sdp parse_sdp(std::string_view s) {
 
 static task<void> ice_dtls_sctp_session(net::io_context &ctx, ws_ptr ws) {
     std::cout << "WS connected\n";
-    asio2exec::scheduler sched{ctx};
+    asioice::utils::scheduler sched{ctx};
     ssl::dtls_certificate cert;
     std::string local_fp = cert.get_fingerprint_sha256();
     std::cout << "DTLS fp: " << local_fp << '\n';
@@ -210,7 +208,7 @@ static task<void> ice_dtls_sctp_session(net::io_context &ctx, ws_ptr ws) {
 
     net::steady_timer timer(ctx, std::chrono::seconds(5));
     co_await utils::stop_when(ag.gather_candidates(),
-                              timer.async_wait(asio2exec::use_sender));
+                              timer.async_wait(asioice::utils::use_sender));
 
     for (const auto &p : ag.candidate_pairs()) {
         std::cout << "candidate pairs: " << p->to_string(2) << '\n';
@@ -289,7 +287,7 @@ static task<void> ice_dtls_sctp_session(net::io_context &ctx, ws_ptr ws) {
     std::cout << "Waiting 30s for DataChannel ping-pong...\n";
 
     net::steady_timer wait_timer(ctx, std::chrono::seconds(30));
-    co_await wait_timer.async_wait(asio2exec::use_sender);
+    co_await wait_timer.async_wait(asioice::utils::use_sender);
 
     std::cout << "Shutting down...\n";
     dc_mgr.stop();
@@ -306,7 +304,7 @@ static task<void> http_session(net::io_context &ctx,
     beast::flat_buffer buf;
     http::request<http::string_body> req;
     auto [ec, n] = co_await http::async_read(
-        sock, buf, req, net::as_tuple(asio2exec::use_sender));
+        sock, buf, req, net::as_tuple(asioice::utils::use_sender));
     if (ec)
         co_return;
     if (websocket::is_upgrade(req)) {
@@ -314,7 +312,7 @@ static task<void> http_session(net::io_context &ctx,
         ws->set_option(websocket::stream_base::timeout::suggested(
             beast::role_type::server));
         auto [wec] = co_await ws->async_accept(
-            req, net::as_tuple(asio2exec::use_sender));
+            req, net::as_tuple(asioice::utils::use_sender));
         if (wec)
             co_return;
         co_await ice_dtls_sctp_session(ctx, ws);
@@ -325,7 +323,8 @@ static task<void> http_session(net::io_context &ctx,
     res.set(http::field::content_type, "text/html");
     res.body() = k_html_page;
     res.prepare_payload();
-    co_await http::async_write(sock, res, net::as_tuple(asio2exec::use_sender));
+    co_await http::async_write(sock, res,
+                               net::as_tuple(asioice::utils::use_sender));
 }
 
 static task<void> listener(net::io_context &ctx) {
@@ -333,8 +332,8 @@ static task<void> listener(net::io_context &ctx) {
         ctx, net::ip::tcp::endpoint(net::ip::tcp::v4(), PORT));
     std::cout << "Server on http://localhost:" << PORT << '\n';
     while (true) {
-        auto [ec, sock] =
-            co_await acc.async_accept(net::as_tuple(asio2exec::use_sender));
+        auto [ec, sock] = co_await acc.async_accept(
+            net::as_tuple(asioice::utils::use_sender));
         if (ec)
             continue;
         exec::start_detached(http_session(ctx, std::move(sock)));
@@ -345,6 +344,6 @@ int main() {
     std::cout << std::unitbuf;
     net::io_context ctx;
     exec::start_detached(
-        stdexec::starts_on(asio2exec::scheduler{ctx}, listener(ctx)));
+        stdexec::starts_on(asioice::utils::scheduler{ctx}, listener(ctx)));
     ctx.run();
 }

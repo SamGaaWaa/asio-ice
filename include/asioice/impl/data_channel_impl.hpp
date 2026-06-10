@@ -160,8 +160,8 @@ class data_channel_manager_impl
                                               return _wait_data.get_future();
                                           }) |
                                       stdexec::continues_on(
-                                          asio2exec::basic_scheduler<
-                                              executor_type>{get_executor()}) |
+                                          utils::basic_scheduler<executor_type>{
+                                              get_executor()}) |
                                       stdexec::then([this] {
                                           assert(!_q.empty());
                                           auto msg = std::move(_q.front());
@@ -272,9 +272,8 @@ class data_channel_manager_impl
 
         auto on_state_changed() {
             return _state.on_change() |
-                   stdexec::continues_on(
-                       asio2exec::basic_scheduler<executor_type>{
-                           this->get_executor()});
+                   stdexec::continues_on(utils::basic_scheduler<executor_type>{
+                       this->get_executor()});
         }
 
         void push(data_channel_message msg) {
@@ -332,7 +331,7 @@ class data_channel_manager_impl
     }
 
     void start() {
-        asio2exec::basic_scheduler<typename sctp_type::executor_type> sched{
+        utils::basic_scheduler<typename sctp_type::executor_type> sched{
             _sctp->get_executor()};
         utils::detached_with_data(
             utils::stop_when(stdexec::starts_on(sched, read_loop()),
@@ -674,7 +673,7 @@ class data_channel_manager_impl
                        this->max_cache_bytes()) {
                     co_await (_not_full.get_future() |
                               stdexec::continues_on(
-                                  asio2exec::basic_scheduler<executor_type>{
+                                  utils::basic_scheduler<executor_type>{
                                       get_executor()}));
                     it = _channels.find(*sid);
                 }
