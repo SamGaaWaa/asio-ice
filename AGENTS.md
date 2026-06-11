@@ -15,16 +15,22 @@ asio-ice is an ICE (RFC 8445) implementation in C++23. It uses [stdexec](https:/
 
 ## Build Commands
 
-**Prerequisites**: CMake 3.22+, Boost 1.89+ (`json`, `context`), Clang 20+ / GCC 13+, stdexec include tree. OpenSSL 3.0+ for DTLS/SCTP.
+**Prerequisites**: CMake 3.22+, Boost 1.89+ (`json`, `context`), **Clang 20+** / GCC 13+, stdexec include tree. OpenSSL 3.0+ for DTLS/SCTP.
 
-**IMPORTANT**: Build scripts hardcode personal paths. Edit `Boost_DIR`, `STDEXEC_DIR`, and `OPENSSL_ROOT_DIR` per machine before running.
+**IMPORTANT**: This project is developed and tested with **Clang**. GCC 13 may hit template/coroutine compatibility issues with the current stdexec. Use Clang when you hit build errors.
+
+Build scripts hardcode personal paths. Edit `Boost_DIR`, `STDEXEC_DIR`, and `OPENSSL_ROOT_DIR` per machine before running.
+
+### Conan (recommended)
+
+Dependencies are declared in `conanfile.py`. Use a conan profile with C++23 support (e.g., `-pr:b default -pr:h cpp23`).
 
 ```bash
-./debug-build.sh            # Clang debug + ASan → clang-build/
-./release-build.sh          # Clang -O3 → clang-build/
-./gcc-debug-build.sh        # GCC debug + ASan → gcc-build/
-./gcc-release-build.sh      # GCC -O3 → gcc-build/
+conan install . -of build -s build_type=Debug -o "&:sctp=True"
+conan build . -of build
 ```
+
+This resolves Boost, stdexec, OpenSSL, and standalone Asio (when `ASIOICE_USE_BOOST_ASIO=OFF`) automatically — no manual path edits needed.
 
 ### Manual CMake
 ```bash
@@ -35,6 +41,14 @@ cmake .. -DCMAKE_BUILD_TYPE=Debug \
          -DBoost_DIR=<path>/lib/cmake/Boost-1.89.0 \
          -DSTDEXEC_DIR=<path>/stdexec/include
 make -j$(nproc)
+```
+
+### Shell scripts (legacy — hardcoded paths)
+```bash
+./debug-build.sh            # Clang debug + ASan → clang-build/
+./release-build.sh          # Clang -O3 → clang-build/
+./gcc-debug-build.sh        # GCC debug + ASan → gcc-build/
+./gcc-release-build.sh      # GCC -O3 → gcc-build/
 ```
 
 ### Key CMake options
@@ -49,7 +63,7 @@ make -j$(nproc)
 - `asioice` — static library
 - Tests: `stun_test`, `candidate_test`, `hash_test`, `turn_client_test`, etc.
 - SCTP+DTLS: `ice_test`, `sctp_test`
-- Examples: `simple_example`, `aiortc_example`, `browser_example`, `chat_example`, `pion_example`, `werift_example`
+- Examples: `simple_example`, `ffmpeg_example`, `aiortc_example`, `browser_example`, `chat_example`, `pion_example`, `werift_example`
 
 To build a single target: `make browser_example -j$(nproc)`
 
@@ -161,6 +175,39 @@ CMake sets `Boost_USE_STATIC_LIBS ON` and links `Boost::boost` (not individual c
 
 `third_party/json.hpp` (nlohmann) is available as `#include "json.hpp"` without path prefix (private include for asioice targets).
 
+### Conan packaging
+
+The project provides a `conanfile.py` at the repo root. It declares:
+
+**Dependencies resolved by Conan:**
+| Dep | Conan ref | Required | Notes |
+|-----|-----------|----------|-------|
+| boost | `boost/1.89.0` | always | links `Boost::boost`, not individual components |
+| stdexec | `stdexec/...` | always | header-only, injects `STDEXEC_DIR` |
+| openssl | `openssl/3.*` | with `-o &:openssl=True` or `sctp=True` | DTLS/SCTP |
+| asio | `asio/1.*` | with `-o &:asio_mode=standalone` | standalone Asio path |
+
+**Options exposed to consumers (`-o &:<name>=<value>`):**
+- `sctp` (bool, default `False`) — enables SCTP+DTLS, implies `openssl=True`
+- `openssl` (bool, default `False`) — enables DTLS/OpenSSL
+- `asio_mode` (`"boost"` / `"standalone"`, default `"boost"`) — Boost.Asio vs standalone Asio
+- `mdns` (bool, default `True`) — enables cppmdns subproject
+
+**`conanfile.py` requirements:**
+- Uses `CMakeToolchain` generator to inject `STDEXEC_DIR`, `Boost_DIR`, `OPENSSL_ROOT_DIR` via CMake variables
+- `ConanFile.package_info` must set `cpp_info.libs = ["asioice"]` and `cpp_info.includedirs = ["include"]` so consumers can `find_package(asioice CONFIG)` or `target_link_libraries(... asioice::asioice)`
+- Mark `cppmdns` and `dcsctp` as private linkages (they are submodules, not exposed headers)
+- Set `cmake_minimum_required` compatibility through `CMakeToolchain` `cmake_minimum_required_version`
+
+**For publishing to ConanCenter or a private remote:**
+1. Ensure `version` in `conanfile.py` matches git tag (`git describe --tags`)
+2. Run `conan create . --version=<ver>` to build+test the package locally
+3. Use `conan upload asioice/<ver> -r <remote>` to push
+
+**Profile notes:**
+- Conan profiles must set `compiler.cppstd=23` (or `gnu23`)
+- When using Clang with libc++, ensure profile has `compiler.libcxx=libc++`
+
 ### Formatting
 
 `.clang-format` enforces 80-col limit, 4-space indent. `SortIncludes: Never` — include order is intentional, never auto-sort.
@@ -169,13 +216,27 @@ CMake sets `Boost_USE_STATIC_LIBS ON` and links `Boost::boost` (not individual c
 find src include -name "*.cpp" -o -name "*.hpp" -o -name "*.ipp" | xargs clang-format -i
 ```
 
+### sendto() and ICE nomination
+
+`agent::sendto()` sends raw UDP to the remote endpoint of the nominated candidate pair. It does NOT add STUN headers. The remote peer's demuxer determines packet type by the first byte:
+- STUN: `0x00` / `0x01`
+- DTLS: `20`–`63`
+- RTP/SRTP: `0x80` (other values passed through to application)
+
+`sento()` returns an error if no pair is nominated — you must `co_await ag.connect()` first.
+
+### boost::process child management
+
+`boost::process::child` is used in the ffmpeg example. The constructor launches the process; `.running()` checks if alive; `.terminate()` sends SIGTERM; `.wait()` blocks until exit. The `bp::search_path("ffmpeg")` resolves the binary from `PATH`. An `std::error_code` out-parameter on the constructor catches launch failures without throwing.
+
 ## Examples
 
-All six examples follow a common pattern: gather candidates, build SDP, ICE connect, (DTLS + SCTP, DataChannel).
+All examples follow a common pattern: gather candidates, build SDP, ICE connect, (DTLS + media/DataChannel).
 
 | Example  | Signaling | Remote Peer | DTLS Role (C++) | Requirements |
 |----------|-----------|-------------|-----------------|-------------|
 | simple   | in-process | another in-process agent | N/A (no DTLS) | core only |
+| ffmpeg   | WebSocket (8080) | Python aiortc | client | DTLS only |
 | aiortc   | WebSocket (8080) | Python aiortc | client | SCTP+DTLS |
 | browser  | WebSocket (8083) | Chrome/Firefox JS | client | SCTP+DTLS |
 | pion     | WebSocket (8081) | Go pion/webrtc | client | SCTP+DTLS |
@@ -190,6 +251,47 @@ A self-contained ICE connectivity test between two in-process agents with ping-p
 ./simple_example [seconds]
 ```
 Uses `use_loopback = true`, exchanges candidates directly via code (no SDP), sends one-byte STUN-demux header (`\4`). Good for quick iteration and benchmarking the ICE core.
+
+### FFmpeg SRTP example (`example/ffmpeg/`)
+
+Demonstrates DTLS-SRTP key export: ICE connects, DTLS handshakes, C++ exports SRTP keys and launches ffmpeg (via `boost::process`) to push an encrypted H.264 video stream. A local UDP relay forwards ffmpeg's SRTP output to the Python peer through `agent::sendto()`.
+
+```bash
+# Terminal 1: C++ WebSocket server + ffmpeg relay
+# Requires ffmpeg with libx264 in PATH
+./ffmpeg_example
+
+# Terminal 2: Python aiortc receiver
+python aiortc_receiver.py
+```
+
+Flow: Python creates RTCPeerConnection with video transceiver (recvonly) → sends SDP offer via WebSocket → C++ does ICE + DTLS → exports SRTP keys via `export_srtp_key_material()` → formats keys as base64(salt+key) for ffmpeg's `srtp_out_params` → opens local UDP relay socket → spawns ffmpeg generating H.264 test stream → relay reads from local UDP and forwards to Python via `ag.sendto()` → Python receives and logs frame count.
+
+Key differences from aiortc example:
+- Built with `ASIOICE_ENABLE_DTLS=ON` only (no SCTP required)
+- No DataChannel or SCTP — signaling is WebSocket only, media is bare SRTP
+- Uses `boost::process::child` for ffmpeg process lifecycle
+- The DTLS-SRTP key export mechanism: after DTLS handshake, `dtls->export_srtp_key_material()` returns `srtp_key_material` with `client_write_key`, `client_write_salt`, and the negotiated `srtp_protection_profile`
+- ffmpeg uses the **client write keys** (C++ is DTLS client, ffmpeg is the sender)
+- SRTP packets (first byte 0x80) bypass STUN/DTLS demux and arrive at Python's RTCPeerConnection as raw SRTP
+
+### DTLS-SRTP key export
+
+```cpp
+using DtlsT = ssl::dtls_transport<agent::ice_transport_type>;
+auto dtls = std::make_shared<DtlsT>(ice, std::move(cert));
+// ... ICE connect, DTLS handshake ...
+auto keys = dtls->export_srtp_key_material();
+if (keys && keys->profile != srtp_protection_profile::none) {
+    // keys->client_write_key    (vector<uint8_t>)
+    // keys->client_write_salt   (vector<uint8_t>)
+    // keys->server_write_key
+    // keys->server_write_salt
+    // keys->profile             (srtp_protection_profile enum)
+}
+```
+
+Callable only after DTLS handshake completes. The returned keys match the DRTS-SRTP profile negotiated in the DTLS handshake (configured via OpenSSL's `SSL_CTX_set_tlsext_use_srtp`). The C++ side is always DTLS client in examples, so ffmpeg (the stream sender) uses `client_write_key` + `client_write_salt`.
 
 ### WebSocket signaling pattern (aiortc/browser/pion/werift)
 
