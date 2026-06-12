@@ -39,11 +39,13 @@ struct datagram_receiver
         return *static_cast<const Transport *>(_transport.get());
     }
 
+    // RFC 7983
     virtual bool datagram_received(io_buffer_ptr &buffer,
                                    const asioice::endpoint &endpoint) {
         return false;
     }
 
+    // RFC 7983
     virtual bool datagram_received(io_buffer_ptr &buffer) { return false; }
 
     void detach() noexcept {

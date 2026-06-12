@@ -12,7 +12,7 @@
 #include "asioice/detail/async_mutex.hpp"
 #include "asioice/detail/scope_guard.hpp"
 #include "asioice/detail/property.hpp"
-#include "binary.hpp"
+#include "asioice/detail/binary.hpp"
 
 #include <exec/async_scope.hpp>
 #include <exec/repeat_until.hpp>

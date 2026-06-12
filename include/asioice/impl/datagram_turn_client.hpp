@@ -8,7 +8,7 @@
 
 #include "asioice/config.hpp"
 #include "asioice/detail/async_queue.hpp"
-#include "binary.hpp"
+#include "asioice/detail/binary.hpp"
 #include "asioice/detail/buffer_wrapper.hpp"
 #include "asioice/detail/io_buffer.hpp"
 #include "asioice/detail/receiver.hpp"

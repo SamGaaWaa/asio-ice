@@ -21,7 +21,7 @@
     clang 17.0.1
 */
 
-namespace binary {
+namespace asioice::binary {
 
     namespace __detail {
         template<size_t N>
@@ -1579,9 +1579,9 @@ namespace binary {
             return byteswap(value);
     }
 
-} // namespace binary
+} // namespace asioice::binary
 
 namespace std {
     template<>
-    struct is_error_code_enum<binary::binary_error> : std::true_type {};
+    struct is_error_code_enum<asioice::binary::binary_error> : std::true_type {};
 }

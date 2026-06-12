@@ -1,6 +1,6 @@
 #include "asioice/detail/stun.hpp"
 #include "base64.hpp"
-#include "binary.hpp"
+#include "asioice/detail/binary.hpp"
 #include "hash.hpp"
 #include "asioice/detail/scope_guard.hpp"
 
