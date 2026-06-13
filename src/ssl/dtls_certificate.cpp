@@ -126,7 +126,6 @@ static ::EVP_PKEY *generate_ec_key(int curve_nid) noexcept {
     ::EVP_PKEY *pkey = nullptr;
     if (::EVP_PKEY_keygen(pctx, &pkey) <= 0)
         return nullptr;
-    pctx_guard.dismiss();
     return pkey;
 }
 
@@ -141,7 +140,6 @@ static ::EVP_PKEY *generate_ed25519_key() noexcept {
     ::EVP_PKEY *pkey = nullptr;
     if (::EVP_PKEY_keygen(pctx, &pkey) <= 0)
         return nullptr;
-    pctx_guard.dismiss();
     return pkey;
 }
 
