@@ -49,6 +49,7 @@ struct agent_base_impl : std::enable_shared_from_this<agent_base_impl> {
         return _remote_candidates;
     }
     const auto &config() const noexcept { return _config; }
+    auto &config() noexcept { return _config; }
 
     const auto &candidate_pairs() const noexcept { return _check_list; }
 

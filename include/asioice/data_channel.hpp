@@ -45,14 +45,15 @@ template <class Sctp> struct data_channel_manager {
     const auto &sctp() const noexcept { return _impl->sctp(); }
     auto &sctp() noexcept { return _impl->sctp(); }
 
-    auto on_remote_channel(channel_callback cb) {
+    void on_remote_channel(channel_callback cb) {
         _impl->on_remote_channel(std::move(cb));
     }
 
     auto
     create_data_channel(std::string label,
                         data_channel_options options = data_channel_options{}) {
-        return _impl->create_data_channel(std::move(label), std::move(options));
+        return _impl->create_data_channel(std::move(label), std::move(options),
+                                          _impl);
     }
 
   private:

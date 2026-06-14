@@ -42,7 +42,7 @@ struct data_channel_message {
     bool binary;
 };
 
-enum data_channel_priority : uint16_t {
+enum struct data_channel_priority : uint16_t {
     very_low = 128,
     low = 256,
     medium = 512,
@@ -116,8 +116,16 @@ class data_channel_manager_impl
         const std::string &protocol() const noexcept { return _protocol; }
         bool ordered() const noexcept { return _ordered; }
         state_t state() const noexcept { return _state.get(); }
-        uint16_t priority() const noexcept { return _priority; }
-
+        data_channel_priority priority() const noexcept { return _priority; }
+        data_channel_options options() const noexcept {
+            return {.ordered = ordered(),
+                    .max_packet_life_time = _max_packet_life_time,
+                    .max_retransmits = _max_retransmits,
+                    .protocol = protocol(),
+                    .negotiated = _negotiated,
+                    .stream_id = stream_id(),
+                    .priority = priority()};
+        }
         bool is_open() const noexcept { return state() != state_t::closed; }
 
         auto send(std::span<const uint8_t> data, bool is_binary) {
@@ -366,7 +374,8 @@ class data_channel_manager_impl
     }
 
     task<std::shared_ptr<data_channel>>
-    create_data_channel(std::string label, data_channel_options options) {
+    create_data_channel(std::string label, data_channel_options options,
+                        auto...) {
         if (options.max_retransmits && options.max_packet_life_time)
             throw std::invalid_argument{
                 "max_retransmits && max_packet_life_time"};
@@ -394,7 +403,7 @@ class data_channel_manager_impl
             co_await send_dcep_open(*ch);
         _sctp->socket().SetStreamPriority(
             dcsctp::StreamID(ch->stream_id()),
-            dcsctp::StreamPriority(ch->priority()));
+            dcsctp::StreamPriority((uint16_t)ch->priority()));
         co_return ch;
     }
 
@@ -528,7 +537,7 @@ class data_channel_manager_impl
 
         buf[0] = kDcepOpen;
         buf[1] = ch.get_channel_type();
-        binary::write_big<uint16_t, 2>(buf.data(), ch.priority());
+        binary::write_big<uint16_t, 2>(buf.data(), (uint16_t)ch.priority());
         binary::write_big<uint32_t, 4>(buf.data(),
                                        ch.get_reliability_parameter());
         binary::write_big<uint16_t, 8>(buf.data(), uint16_t(ch.label().size()));
@@ -586,10 +595,10 @@ class data_channel_manager_impl
             }
             switch (auto pri = binary::read_big<uint16_t, 2>(data.data());
                     pri) {
-            case data_channel_priority::very_low:
-            case data_channel_priority::low:
-            case data_channel_priority::medium:
-            case data_channel_priority::high:
+            case std::to_underlying(data_channel_priority::very_low):
+            case std::to_underlying(data_channel_priority::low):
+            case std::to_underlying(data_channel_priority::medium):
+            case std::to_underlying(data_channel_priority::high):
                 opt.priority = static_cast<data_channel_priority>(pri);
                 break;
             default:
@@ -626,7 +635,7 @@ class data_channel_manager_impl
 
             _sctp->socket().SetStreamPriority(
                 dcsctp::StreamID(ch->stream_id()),
-                dcsctp::StreamPriority(ch->priority()));
+                dcsctp::StreamPriority((uint16_t)ch->priority()));
             if (_on_remote_channel)
                 _on_remote_channel(std::move(ch));
         } else if (msg_type == kDcepAck) {

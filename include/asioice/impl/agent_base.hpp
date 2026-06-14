@@ -59,6 +59,7 @@ struct agent_base {
     std::span<const asioice::candidate> local_candidates() const noexcept;
     std::span<const asioice::candidate> remote_candidates() const noexcept;
     const agent_config &config() const noexcept;
+    agent_config &config() noexcept;
 
     const std::vector<std::shared_ptr<asioice::candidate_pair>> &
     candidate_pairs() const noexcept;

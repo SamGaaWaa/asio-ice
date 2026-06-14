@@ -33,6 +33,7 @@ template <class Sock> struct basic_agent {
     }
 
     const agent_config &config() const noexcept { return _impl->config(); }
+    agent_config &config() noexcept { return _impl->config(); }
 
     const std::vector<std::shared_ptr<asioice::candidate_pair>> &
     candidate_pairs() const noexcept {

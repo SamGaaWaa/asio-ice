@@ -22,6 +22,8 @@ const agent_config &agent_base::config() const noexcept {
     return _impl->config();
 }
 
+agent_config &agent_base::config() noexcept { return _impl->config(); }
+
 const std::vector<std::shared_ptr<asioice::candidate_pair>> &
 agent_base::candidate_pairs() const noexcept {
     return _impl->candidate_pairs();
