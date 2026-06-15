@@ -107,7 +107,7 @@ inline bool dispatch_receivers(ReceiverList &receivers, io_buffer_ptr &buffer1,
     receivers.swap(receivers1);
     utils::scope_guard on_exit([&]() noexcept {
         if (!receivers1.empty())
-            receivers.swap(receivers1);
+            receivers.splice(receivers.begin(), receivers1);
     });
 
     ReceiverList tmp;
