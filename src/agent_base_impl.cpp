@@ -549,6 +549,39 @@ void agent_base_impl::close() noexcept {
     this->_agent = nullptr;
 }
 
+bool agent_base_impl::restart(std::string new_ufrag,
+                              std::string new_pwd) noexcept {
+    if (this->_state != agent_state_t::CONNECTED)
+        return false;
+
+    this->_config.username = std::move(new_ufrag);
+    this->_config.password = std::move(new_pwd);
+    ++this->_generation;
+
+    for (auto &trans : this->_transactions)
+        trans.stop_retring();
+    while (this->_transaction_states.empty())
+        this->_transaction_states.erase(this->_transaction_states.begin());
+
+    this->_check_list.clear();
+    this->_triggered_check_queue.clear();
+
+    std::erase_if(this->_valid_list,
+                  [](const auto &p) { return !p.nominated; });
+
+    this->_local_candidates.clear();
+    this->_remote_candidates.clear();
+    this->_mdns_names.clear();
+
+    this->_local_candidates_end = false;
+    this->_remote_candidates_end = false;
+    // this->_pending_check_count = 0;
+    this->_check_list_state = check_list_state_t::RUNNING;
+
+    this->_state = agent_state_t::INIT;
+    return true;
+}
+
 asioice::task<bool>
 agent_base_impl::add_remote_candidate(asioice::candidate remote_c) {
     if (this->_state == agent_state_t::CLOSED ||
@@ -1002,8 +1035,9 @@ asioice::task<void> agent_base_impl::do_check(check_task ct) {
             it == this->_valid_list.end()) {
             valid_p->set_state(asioice::candidate_pair::state_t::SUCCEEDED);
             to_nominate = valid_p.get();
-            this->_valid_list.emplace_back(std::move(valid_p),
-                                           std::move(ct.pair));
+            this->_valid_list.emplace_back(
+                std::move(valid_p), std::move(ct.pair), false,
+                this->_generation);
         } else {
             to_nominate = it->pair.get();
         }
@@ -1547,7 +1581,7 @@ bool agent_base_impl::set_nominated(asioice::candidate_pair &pair) noexcept {
 
     if (std::ranges::any_of(this->_valid_list, [&](const auto &pp) noexcept {
             return pp.pair->component() == it->pair->component() &&
-                   pp.nominated;
+                   pp.nominated && pp.generation == this->_generation;
         })) {
         ICE_IN_DEBUG {
             std::cerr << "Nominated multiple candidate pairs: "
@@ -1557,6 +1591,14 @@ bool agent_base_impl::set_nominated(asioice::candidate_pair &pair) noexcept {
     }
 
     it->nominated = true;
+    std::erase_if(this->_valid_list, [&](const auto &vp) noexcept {
+        return vp.pair.get() != it->pair.get() &&
+               vp.pair->component() == it->pair->component() &&
+               vp.generation != this->_generation;
+    });
+    it = std::ranges::find_if(this->_valid_list, [&](const auto &pp) noexcept {
+        return pp.pair.get() == &pair;
+    });
     // Once a candidate pair for a component of a data stream has been
     // nominated, and the state of the checklist associated with the data
     // stream is Running, the ICE agent MUST remove all candidate pairs
@@ -1804,15 +1846,14 @@ void agent_base_impl::create_channel_for_valid_pair() {
     }
 }
 
-// std::shared_ptr<asioice::candidate_pair>
-asioice::candidate_pair *
+std::shared_ptr<asioice::candidate_pair>
 agent_base_impl::find_nominated_pair(uint8_t component) const noexcept {
     if (this->_state == agent_state_t::CLOSED) [[unlikely]]
         return nullptr;
     for (auto &valid_p : this->_valid_list) {
         if (valid_p.nominated && valid_p.pair->component() == component)
             [[likely]] {
-            return valid_p.pair.get();
+            return valid_p.pair;
         }
     }
     ICE_IN_DEBUG {

@@ -110,6 +110,8 @@ struct agent {
                  void(asioice::io_buffer_ptr &, uint8_t)>
                      callback);
 
+    bool restart(std::string new_ufrag, std::string new_pwd) noexcept;
+
     void close() noexcept;
 
     void add_receiver(ice_receiver &receiver);

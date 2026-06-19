@@ -83,6 +83,8 @@ struct agent_base {
 
     exec::function<void()> on_connected_or_closed() noexcept;
 
+    bool restart(std::string new_ufrag, std::string new_pwd) noexcept;
+
     void close() noexcept;
 
     bool all_components_nominated() const noexcept;
@@ -106,8 +108,7 @@ struct agent_base {
                  void(asioice::io_buffer_ptr &, uint8_t)>
                      callback);
 
-    // std::shared_ptr<asioice::candidate_pair>
-    asioice::candidate_pair *
+    std::shared_ptr<asioice::candidate_pair>
     find_nominated_pair(uint8_t component) const noexcept;
 
     void add_receiver(ice_receiver &receiver) noexcept;

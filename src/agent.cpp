@@ -156,6 +156,11 @@ void agent::on_data(
     static_cast<udp_agent_impl *>(_impl.get())->on_data(std::move(callback));
 }
 
+bool agent::restart(std::string new_ufrag, std::string new_pwd) noexcept {
+    return static_cast<udp_agent_impl *>(_impl.get())
+        ->restart(std::move(new_ufrag), std::move(new_pwd));
+}
+
 void agent::close() noexcept {
     static_cast<udp_agent_impl *>(_impl.get())->close();
 }

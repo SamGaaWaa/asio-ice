@@ -116,6 +116,10 @@ template <class Sock> struct basic_agent {
         _impl->on_data(std::forward<Func>(callback));
     }
 
+    bool restart(std::string new_ufrag, std::string new_pwd) noexcept {
+        return _impl->restart(std::move(new_ufrag), std::move(new_pwd));
+    }
+
     void close() { _impl->close(); }
 
     void add_receiver(ice_receiver &receiver) { _impl->add_receiver(receiver); }

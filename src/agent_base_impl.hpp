@@ -116,6 +116,8 @@ struct agent_base_impl : std::enable_shared_from_this<agent_base_impl> {
         return _check_list_state;
     }
 
+    bool restart(std::string new_ufrag, std::string new_pwd) noexcept;
+
     void close() noexcept;
 
     bool all_components_nominated() const noexcept;
@@ -152,8 +154,7 @@ struct agent_base_impl : std::enable_shared_from_this<agent_base_impl> {
         _on_data = std::move(callback);
     }
 
-    // std::shared_ptr<asioice::candidate_pair>
-    asioice::candidate_pair *
+    std::shared_ptr<asioice::candidate_pair>
     find_nominated_pair(uint8_t component) const noexcept;
 
     void add_receiver(ice_receiver &receiver) {
@@ -195,6 +196,7 @@ struct agent_base_impl : std::enable_shared_from_this<agent_base_impl> {
         std::shared_ptr<asioice::candidate_pair> pair;
         std::shared_ptr<asioice::candidate_pair> source;
         bool nominated = false;
+        uint32_t generation = 0;
     };
 
     struct transaction_state
@@ -338,6 +340,7 @@ struct agent_base_impl : std::enable_shared_from_this<agent_base_impl> {
     std::string _remote_username{};
     std::string _remote_password{};
     uint64_t _tie_breaker = 0;
+    uint32_t _generation = 0;
     boost::container::flat_map<net::ip::address, std::string> _mdns_names{};
     std::vector<asioice::candidate> _local_candidates{};
     std::vector<asioice::candidate> _remote_candidates{};

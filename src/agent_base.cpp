@@ -76,6 +76,11 @@ exec::function<void()> agent_base::on_connected_or_closed() noexcept {
         [this] { return _impl->on_connected_or_closed(); }};
 }
 
+bool agent_base::restart(std::string new_ufrag,
+                         std::string new_pwd) noexcept {
+    return _impl->restart(std::move(new_ufrag), std::move(new_pwd));
+}
+
 void agent_base::close() noexcept { _impl->close(); }
 
 bool agent_base::all_components_nominated() const noexcept {
@@ -121,8 +126,7 @@ void agent_base::on_data(
     _impl->on_data(std::move(callback));
 }
 
-// std::shared_ptr<asioice::candidate_pair>
-asioice::candidate_pair *
+std::shared_ptr<asioice::candidate_pair>
 agent_base::find_nominated_pair(uint8_t component) const noexcept {
     return _impl->find_nominated_pair(component);
 }
