@@ -78,16 +78,15 @@ inline asioice::task<void> gather_task(asioice::net::io_context &ctx,
     auto server_fp = server_cert.get_fingerprint(ssl::hash_algorithm::sha256);
     auto client_fp = client_cert.get_fingerprint(ssl::hash_algorithm::sha256);
 
-    agent_config config1 = {
-        .username = "user1",
-        .password = "pass1",
-        .ice_controlling = true,
-        .turn_servers = {{{net::ip::make_address("127.0.0.1"), 13478},
-                          "samgaawaa",
-                          "1234"}},
-        .component_count = 1,
-        .transport_policy = asioice::transport_policy::ALL,
-        .enable_mdns = true};
+    agent_config config1 = {.username = "user1",
+                            .password = "pass1",
+                            .ice_controlling = true,
+                            .ice_servers = {.urls = {"turn:127.0.0.1:13478"},
+                                            .username = "samgaawaa",
+                                            .password = "1234"},
+                            .component_count = 1,
+                            .transport_policy = asioice::transport_policy::ALL,
+                            .enable_mdns = true};
     Agent agent1(ctx.get_executor(), config1);
     std::shared_ptr<IceTransport> transport1 = agent1.create_ice_transport(1);
     auto dtls_client =
@@ -100,10 +99,7 @@ inline asioice::task<void> gather_task(asioice::net::io_context &ctx,
         .username = "user2",
         .password = "pass2",
         .ice_controlling = false,
-        .stun_servers =
-            {
-                {net::ip::make_address("14.29.112.241"), 20002},
-            },
+        .ice_servers = {.urls = {"stun:14.29.112.241:20002"}},
         .component_count = 1,
         .transport_policy = asioice::transport_policy::ALL};
     Agent agent2(ctx.get_executor(), config2);

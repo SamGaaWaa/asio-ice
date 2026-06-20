@@ -174,14 +174,13 @@ static task<void> ice_dtls_sctp_session(net::io_context &ctx, ws_ptr ws) {
         local_pass = hex(buf, 32); // 64 hex chars, ok per spec (22-256)
     }
 
-    agent_config cfg = {
-        .username = local_user,
-        .password = local_pass,
-        .ice_controlling = false,
-        .use_loopback = true,
-        .stun_servers = {{net::ip::make_address("14.29.112.241"), 20002}},
-        .component_count = 1,
-        .enable_mdns = true};
+    agent_config cfg = {.username = local_user,
+                        .password = local_pass,
+                        .ice_controlling = false,
+                        .use_loopback = true,
+                        .ice_servers = {.urls = {"stun:14.29.112.241:20002"}},
+                        .component_count = 1,
+                        .enable_mdns = true};
     cfg.trickle_ice = false;
     cfg.connectivity_check_timeout = std::chrono::milliseconds(30 * 1000);
 

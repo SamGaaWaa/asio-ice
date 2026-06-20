@@ -10,6 +10,8 @@
 #include "asioice/detail/scope_guard.hpp"
 #include "asioice/detail/asio2exec.hpp"
 
+#include "ctre.hpp"
+
 #include <exec/start_detached.hpp>
 #include <exec/repeat_until.hpp>
 
@@ -18,6 +20,111 @@
 #include <iostream>
 
 namespace asioice {
+
+static void parse_ice_servers(const std::vector<std::string> &urls,
+                              std::vector<resolved_result> &stun_results,
+                              std::vector<resolved_result> &turn_results) {
+    // 正则表达式解析：
+    // 1. (stun|stuns|turn|turns)      -> scheme
+    // 2. :                            -> 冒号
+    // 3. (\[[0-9a-fA-F:]+\]|[^:?]+)   -> host (支持 IPv6 或普通域名/IPv4)
+    // 4. (?::(\d+))?                  -> 捕获可选的端口
+    // 5. (?:\?transport=(udp|tcp))?   -> 捕获可选的 transport 参数
+    for (const auto &url : urls) {
+        auto match =
+            ctre::match<"(stun|stuns|turn|turns):(\\[[0-9a-fA-F:]+\\]|[^:?]+)(?"
+                        "::(\\d+))?(?:\\?transport=(udp|tcp))?">(url);
+        if (!match) {
+            ICE_IN_DEBUG {
+                std::cerr << "ICE server with invalid url: " << url << '\n';
+            }
+            continue;
+        }
+        resolved_result res{};
+
+        std::string_view scheme_str = match.get<1>().to_view();
+        if (scheme_str == "stun") {
+            res.scheme = ice_server_scheme::stun;
+            res.port = 3478;
+        } else if (scheme_str == "stuns") {
+            res.scheme = ice_server_scheme::stuns;
+            res.port = 5349;
+        } else if (scheme_str == "turn") {
+            res.scheme = ice_server_scheme::turn;
+            res.port = 3478;
+        } else if (scheme_str == "turns") {
+            res.scheme = ice_server_scheme::turns;
+            res.port = 5349;
+        }
+
+        res.host = match.get<2>().to_string();
+
+        if (match.get<3>()) {
+            uint16_t port = 0;
+            std::string_view port_str = match.get<3>().to_view();
+            if (auto ret = std::from_chars(
+                    port_str.data(), port_str.data() + port_str.size(), port);
+                ret.ec == std::errc{}) {
+                res.port = port;
+            }
+        }
+
+        if (match.get<4>() && match.get<4>().to_view() == "tcp") {
+            res.transport = ice_server_transport::tcp;
+        }
+
+        if (res.scheme == ice_server_scheme::stun ||
+            res.scheme == ice_server_scheme::stuns)
+            stun_results.emplace_back(std::move(res));
+        else
+            turn_results.emplace_back(std::move(res));
+    }
+}
+
+static asioice::task<std::vector<asioice::endpoint>>
+resolve_host(net::any_io_executor ex, const resolved_result &res) {
+    std::vector<asioice::endpoint> results;
+
+    uint16_t port = res.port;
+
+    std::string_view host = res.host;
+    if (host.size() > 2 && host.front() == '[' && host.back() == ']') {
+        host.remove_prefix(1);
+        host.remove_suffix(1);
+    }
+#if ASIOICE_USE_BOOST_ASIO > 0
+    boost::system::error_code ec;
+#else
+    std::error_code ec;
+#endif
+    auto addr = net::ip::make_address(host, ec);
+    if (!ec) {
+        results.emplace_back(addr, port);
+        co_return results;
+    }
+
+    net::ip::udp::resolver resolver(ex);
+    net::ip::udp::resolver::results_type rr;
+    std::tie(ec, rr) =
+        co_await resolver.async_resolve(host, "0", utils::use_sender);
+
+    if (ec) {
+        std::cerr << "DNS resolve failed for " << host << ": " << ec.message()
+                  << "\n";
+        co_return results;
+    }
+
+    if (rr.empty()) {
+        std::cerr << "DNS resolve no result for " << host << '\n';
+        co_return results;
+    }
+
+    for (const auto &entry : rr) {
+        results.emplace_back(entry.endpoint().address(), port);
+    }
+
+    co_return results;
+}
 
 agent_base_impl::agent_base_impl(net::any_io_executor ex, agent_config config,
                                  agent_base *agent)
@@ -33,13 +140,14 @@ agent_base_impl::agent_base_impl(net::any_io_executor ex, agent_config config,
             "_config.enable_mdns && _config.mdns == nullptr"};
 #endif
     asioice::hash::random_bytes(&_tie_breaker, sizeof(_tie_breaker));
+    parse_ice_servers(_config.ice_servers.urls, _stun_servers, _turn_servers);
 }
 
 asioice::task<void> agent_base_impl::server_reflexive_candidate(
     std::vector<asioice::candidate> &srflx_candidates,
     const asioice::candidate &local_candidate,
-    stun::transaction_set &transactions,
-    const asioice::endpoint &stun_server) noexcept try {
+    stun::transaction_set &transactions, asioice::endpoint stun_server) noexcept
+    try {
     if (local_candidate.type != candidate_type::host)
         co_return;
     auto transport = local_candidate.transport;
@@ -107,39 +215,39 @@ asioice::task<void> agent_base_impl::server_reflexive_candidate(
 asioice::task<void> agent_base_impl::server_reflexive_candidate(
     std::vector<asioice::candidate> &srflx_candidates,
     const std::vector<asioice::candidate> &local_candidates,
-    const std::vector<asioice::endpoint> &stun_servers) noexcept try {
+    const std::vector<resolved_result> &stun_servers) noexcept try {
     if (stun_servers.empty()) {
         ICE_IN_DEBUG { std::cerr << "no STUN servers\n"; }
         co_return;
     }
     exec::async_scope scope;
 
-    ICE_IN_DEBUG {
-        for (const auto &endpoint : stun_servers) {
-            std::cout << "resolved STUN server: " << endpoint.address() << ':'
-                      << endpoint.port() << '\n';
-        }
-    }
-
     // TODO: Use global transaction set
-    std::unique_ptr<stun::transaction_set[]> transaction_sets =
+    auto transaction_sets =
         std::make_unique<stun::transaction_set[]>(stun_servers.size());
     for (std::size_t i = 0; i < stun_servers.size(); ++i) {
-        const auto &endpoint = stun_servers[i];
         for (const auto &local_candidate : local_candidates) {
-            // const typename Self::raw_transport *transport =
-            //     local_candidate.transport.get<typename
-            //     Self::raw_transport>();
+            const auto &server = stun_servers[i];
+            if (server.scheme == ice_server_scheme::stuns) {
+                ICE_IN_DEBUG { std::cerr << "stuns not supported yet\n"; }
+                continue;
+            }
             const auto &transport = local_candidate.transport;
-            if (transport.local_endpoint().address().is_v4() &&
-                !endpoint.address().is_v4())
-                continue;
-            if (transport.local_endpoint().address().is_v6() &&
-                !endpoint.address().is_v6())
-                continue;
-            scope.spawn(this->server_reflexive_candidate(
-                srflx_candidates, local_candidate, transaction_sets[i],
-                endpoint));
+            scope.spawn(
+                resolve_host(_any_executor, server) |
+                stdexec::then([&, this](auto eps) {
+                    for (const auto &ep : eps) {
+                        if (transport.local_endpoint().address().is_v4() &&
+                            !ep.address().is_v4())
+                            continue;
+                        if (transport.local_endpoint().address().is_v6() &&
+                            !ep.address().is_v6())
+                            continue;
+                        scope.spawn(this->server_reflexive_candidate(
+                            srflx_candidates, local_candidate,
+                            transaction_sets[i], ep));
+                    }
+                }));
         }
     }
     co_await (utils::on_scope_empty(scope) |
@@ -261,13 +369,20 @@ asioice::task<void> agent_base_impl::get_component_candidates(
 
     // create TURN clients
     if (this->_agent) {
+        const auto &username = _config.ice_servers.username;
+        const auto &password = _config.ice_servers.password;
         for (const auto &c : host_candidates)
-            for (const auto &t : this->_config.turn_servers) {
-                scope.spawn(create_relayed_candidate(
-                    component_candidates,
-                    this->_agent->base_create_turn_client(
-                        c.transport, t.address, t.username, t.password),
-                    c.transport, component));
+            for (const auto &server : this->_turn_servers) {
+                scope.spawn(
+                    resolve_host(_any_executor, server) |
+                    stdexec::then([&, this](auto eps) {
+                        for (const auto &ep : eps)
+                            scope.spawn(create_relayed_candidate(
+                                component_candidates,
+                                this->_agent->base_create_turn_client(
+                                    c.transport, ep, username, password),
+                                c.transport, component));
+                    }));
             }
     }
 
@@ -281,12 +396,11 @@ asioice::task<void> agent_base_impl::get_component_candidates(
                           std::back_inserter(component_candidates));
     }
     if (this->_config.transport_policy == asioice::transport_policy::ALL &&
-        !this->_config.stun_servers.empty() &&
-        this->_config.turn_servers.empty()) {
+        !this->_stun_servers.empty() && this->_turn_servers.empty()) {
         co_await this->server_reflexive_candidate(
-            component_candidates, host_candidates, this->_config.stun_servers);
+            component_candidates, host_candidates, this->_stun_servers);
     }
-    if (!this->_config.turn_servers.empty()) {
+    if (!this->_turn_servers.empty()) {
         co_await (utils::on_scope_empty(scope) |
                   stdexec::continues_on(utils::scheduler{this->_any_executor}));
     }
@@ -362,7 +476,7 @@ asioice::task<void> agent_base_impl::do_gather_candidates() {
         throw std::runtime_error("component_count must be greater than 0");
     }
     if (this->_config.transport_policy == asioice::transport_policy::RELAY &&
-        this->_config.turn_servers.empty()) {
+        this->_turn_servers.empty()) {
         throw std::runtime_error{"No TURN servers"};
     }
     utils::scope_guard on_exit(
@@ -1038,9 +1152,9 @@ asioice::task<void> agent_base_impl::do_check(check_task ct) {
             it == this->_valid_list.end()) {
             valid_p->set_state(asioice::candidate_pair::state_t::SUCCEEDED);
             to_nominate = valid_p.get();
-            this->_valid_list.emplace_back(
-                std::move(valid_p), std::move(ct.pair), false,
-                this->_generation);
+            this->_valid_list.emplace_back(std::move(valid_p),
+                                           std::move(ct.pair), false,
+                                           this->_generation);
         } else {
             to_nominate = it->pair.get();
         }

@@ -31,6 +31,17 @@ namespace asioice {
 
 enum struct check_list_state_t { RUNNING, COMPLETED, FAILED };
 
+enum struct ice_server_scheme : char { stun, stuns, turn, turns };
+
+enum struct ice_server_transport : char { udp, tcp };
+
+struct resolved_result {
+    ice_server_scheme scheme{ice_server_scheme::stun};
+    std::string host{};
+    uint16_t port{0};
+    ice_server_transport transport{ice_server_transport::udp};
+};
+
 struct agent_base;
 
 struct agent_base_impl : std::enable_shared_from_this<agent_base_impl> {
@@ -239,12 +250,12 @@ struct agent_base_impl : std::enable_shared_from_this<agent_base_impl> {
         std::vector<asioice::candidate> &srflx_candidates,
         const asioice::candidate &local_candidate,
         stun::transaction_set &transactions,
-        const asioice::endpoint &stun_server) noexcept;
+        asioice::endpoint stun_server) noexcept;
 
     asioice::task<void> server_reflexive_candidate(
         std::vector<asioice::candidate> &srflx_candidates,
         const std::vector<asioice::candidate> &local_candidates,
-        const std::vector<asioice::endpoint> &stun_servers) noexcept;
+        const std::vector<resolved_result> &stun_servers) noexcept;
 
     asioice::task<void> create_relayed_candidate(
         std::vector<asioice::candidate> &component_candidates,
@@ -340,6 +351,8 @@ struct agent_base_impl : std::enable_shared_from_this<agent_base_impl> {
     stun::transaction_set _transactions{};    // use for connectivity checks
     transaction_state_set _transaction_states{};
     agent_config _config;
+    std::vector<resolved_result> _stun_servers{};
+    std::vector<resolved_result> _turn_servers{};
     std::shared_ptr<io_buffer_pool> _pool;
     bool _ice_controlling = true;
     bool _remote_is_lite = false;
