@@ -64,6 +64,10 @@ template <class Sock> struct basic_agent {
         _impl->set_remote_password(std::move(password));
     }
 
+    void set_remote_is_lite(bool lite) noexcept {
+        _impl->set_remote_is_lite(lite);
+    }
+
     agent_state_t state() const noexcept { return _impl->state(); }
 
     auto on_state_change() noexcept { return _impl->on_state_change(); }

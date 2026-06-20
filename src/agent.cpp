@@ -81,6 +81,10 @@ void agent::set_remote_password(std::string password) noexcept {
         ->set_remote_password(std::move(password));
 }
 
+void agent::set_remote_is_lite(bool lite) noexcept {
+    static_cast<udp_agent_impl *>(_impl.get())->set_remote_is_lite(lite);
+}
+
 agent_state_t agent::state() const noexcept {
     return static_cast<udp_agent_impl *>(_impl.get())->state();
 }

@@ -73,6 +73,8 @@ struct agent_base {
     const std::string &remote_password() const noexcept;
     void set_remote_password(std::string password) noexcept;
 
+    void set_remote_is_lite(bool lite) noexcept;
+
     std::shared_ptr<io_buffer_pool> &buffer_pool() noexcept;
     const std::shared_ptr<io_buffer_pool> &buffer_pool() const noexcept;
 

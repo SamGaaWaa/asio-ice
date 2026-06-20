@@ -65,6 +65,12 @@ struct agent_base_impl : std::enable_shared_from_this<agent_base_impl> {
         _remote_password = std::move(password);
     }
 
+    void set_remote_is_lite(bool lite) noexcept {
+        _remote_is_lite = lite;
+        if (lite && !_ice_controlling)
+            switch_role(true);
+    }
+
     agent_state_t state() const noexcept { return _state; }
     auto on_state_change() noexcept {
         return _state.on_change() |

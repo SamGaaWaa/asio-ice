@@ -887,6 +887,8 @@ asioice::task<bool> agent_base_impl::do_connect() noexcept {
 }
 
 void agent_base_impl::switch_role(bool ice_controlling) noexcept {
+    if (this->_remote_is_lite && !ice_controlling)
+        return;
     ICE_IN_DEBUG {
         std::cout << "Switching to "
                   << (ice_controlling ? "controlling" : "controlled")
@@ -924,10 +926,9 @@ asioice::task<void> agent_base_impl::do_check(check_task ct) {
 
     stun::message::integrity subsequent_algo{stun::message::integrity::SHA1};
     for (int i = 0; i < 10; ++i) {
-        bool nominate = this->_ice_controlling && !this->_remote_is_lite;
         stun::message req;
         this->build_request(req, pair);
-        req.use_candidate = ct.use_candidate;
+        req.use_candidate = ct.use_candidate || this->_remote_is_lite;
         if (i == 0) {
             req.integrities.emplace_back(stun::message::integrity::SHA1);
             req.integrities.emplace_back(stun::message::integrity::SHA256);
@@ -1002,6 +1003,8 @@ asioice::task<void> agent_base_impl::do_check(check_task ct) {
             }
 
             if (resp.error_code->code == 487) {
+                if (this->_remote_is_lite)
+                    co_return;
                 // switch role
                 if (req.ice_controlled)
                     this->switch_role(true);
@@ -1277,6 +1280,8 @@ void agent_base_impl::request_handler(asioice::any_transport &transport,
                                       const asioice::endpoint &source,
                                       asioice::io_buffer_ptr buf) {
     if (this->_state == agent_state_t::CLOSED)
+        return;
+    if (this->_remote_is_lite)
         return;
     if (this->_outgoing_request_handler_count > 256) {
         ICE_IN_DEBUG {

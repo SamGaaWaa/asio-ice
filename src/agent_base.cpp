@@ -53,6 +53,10 @@ void agent_base::set_remote_password(std::string password) noexcept {
     _impl->set_remote_password(std::move(password));
 }
 
+void agent_base::set_remote_is_lite(bool lite) noexcept {
+    _impl->set_remote_is_lite(lite);
+}
+
 std::shared_ptr<io_buffer_pool> &agent_base::buffer_pool() noexcept {
     return _impl->buffer_pool();
 }

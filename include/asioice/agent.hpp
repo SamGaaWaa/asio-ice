@@ -73,6 +73,8 @@ struct agent {
 
     void set_remote_password(std::string password) noexcept;
 
+    void set_remote_is_lite(bool lite) noexcept;
+
     agent_state_t state() const noexcept;
 
     asioice::task<void> on_state_change() noexcept;
