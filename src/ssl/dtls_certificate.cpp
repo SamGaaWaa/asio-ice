@@ -45,8 +45,7 @@ constexpr const ::EVP_MD *to_evp_md(hash_algorithm algo) noexcept {
     return ::EVP_sha256();
 }
 
-static std::string compute_fingerprint(::X509 *cert,
-                                       hash_algorithm algo) {
+static std::string compute_fingerprint(::X509 *cert, hash_algorithm algo) {
     unsigned char md[EVP_MAX_MD_SIZE];
     unsigned int n;
     if (!::X509_digest(cert, to_evp_md(algo), md, &n))
@@ -82,7 +81,7 @@ std::string fingerprint::hash_name() const {
 }
 
 std::string fingerprint::to_sdp() const {
-    return hash_name() + " " + value;
+    return "fingerprint:" + hash_name() + " " + value;
 }
 
 std::optional<fingerprint> fingerprint::from_sdp(std::string_view line) {
@@ -155,8 +154,7 @@ static ::EVP_PKEY *generate_key(key_type kt) noexcept {
     return nullptr;
 }
 
-static bool generate_self_signed_cert(::X509 *&out_cert,
-                                      ::EVP_PKEY *&out_pkey,
+static bool generate_self_signed_cert(::X509 *&out_cert, ::EVP_PKEY *&out_pkey,
                                       key_type kt,
                                       hash_algorithm sign_algo) noexcept {
     out_cert = nullptr;
@@ -211,8 +209,8 @@ static ::SSL_CTX *make_ssl_ctx() {
 
 static void configure_ssl_ctx(::SSL_CTX *ctx) {
     ::SSL_CTX_set_read_ahead(ctx, 1);
-    ::SSL_CTX_set_verify(
-        ctx, SSL_VERIFY_PEER | SSL_VERIFY_FAIL_IF_NO_PEER_CERT, nullptr);
+    ::SSL_CTX_set_verify(ctx, SSL_VERIFY_PEER | SSL_VERIFY_FAIL_IF_NO_PEER_CERT,
+                         nullptr);
     ::SSL_CTX_set_tlsext_use_srtp(
         ctx, "SRTP_AES128_CM_SHA1_80:SRTP_AES128_CM_SHA1_32:"
              "SRTP_AEAD_AES_128_GCM:SRTP_AEAD_AES_256_GCM");
@@ -221,8 +219,7 @@ static void configure_ssl_ctx(::SSL_CTX *ctx) {
     ::SSL_CTX_set_alpn_protos(ctx, alpn, sizeof(alpn) - 1);
 }
 
-static void attach_cert_to_ctx(::SSL_CTX *ctx, ::X509 *cert,
-                                ::EVP_PKEY *pkey) {
+static void attach_cert_to_ctx(::SSL_CTX *ctx, ::X509 *cert, ::EVP_PKEY *pkey) {
     if (::SSL_CTX_use_certificate(ctx, cert) <= 0)
         throw std::runtime_error{"SSL_CTX_use_certificate failed"};
     if (::SSL_CTX_use_PrivateKey(ctx, pkey) <= 0)
@@ -259,21 +256,19 @@ dtls_certificate::dtls_certificate(std::unique_ptr<impl> impl)
 // ---------------------------------------------------------------------------
 
 dtls_certificate dtls_certificate::from_pem(std::string_view cert_pem,
-                                             std::string_view key_pem) {
-    ::BIO *cert_bio = ::BIO_new_mem_buf(cert_pem.data(),
-                                         static_cast<int>(cert_pem.size()));
+                                            std::string_view key_pem) {
+    ::BIO *cert_bio =
+        ::BIO_new_mem_buf(cert_pem.data(), static_cast<int>(cert_pem.size()));
     if (!cert_bio)
         throw std::runtime_error{"BIO_new_mem_buf(cert) failed"};
-    ::X509 *cert =
-        ::PEM_read_bio_X509(cert_bio, nullptr, nullptr, nullptr);
+    ::X509 *cert = ::PEM_read_bio_X509(cert_bio, nullptr, nullptr, nullptr);
     ::BIO_free(cert_bio);
     if (!cert)
         throw std::runtime_error{"PEM_read_bio_X509 failed"};
-    utils::scope_guard cert_guard{
-        [cert]() noexcept { ::X509_free(cert); }};
+    utils::scope_guard cert_guard{[cert]() noexcept { ::X509_free(cert); }};
 
-    ::BIO *key_bio = ::BIO_new_mem_buf(key_pem.data(),
-                                        static_cast<int>(key_pem.size()));
+    ::BIO *key_bio =
+        ::BIO_new_mem_buf(key_pem.data(), static_cast<int>(key_pem.size()));
     if (!key_bio)
         throw std::runtime_error{"BIO_new_mem_buf(key) failed"};
     ::EVP_PKEY *pkey =
@@ -281,8 +276,7 @@ dtls_certificate dtls_certificate::from_pem(std::string_view cert_pem,
     ::BIO_free(key_bio);
     if (!pkey)
         throw std::runtime_error{"PEM_read_bio_PrivateKey failed"};
-    utils::scope_guard pkey_guard{
-        [pkey]() noexcept { ::EVP_PKEY_free(pkey); }};
+    utils::scope_guard pkey_guard{[pkey]() noexcept { ::EVP_PKEY_free(pkey); }};
 
     auto impl = std::make_unique<dtls_certificate::impl>();
     impl->ctx = make_ssl_ctx();
@@ -300,23 +294,21 @@ dtls_certificate dtls_certificate::from_pem(std::string_view cert_pem,
     return dtls_certificate{std::move(impl)};
 }
 
-dtls_certificate dtls_certificate::from_der(
-    std::span<const uint8_t> cert_der, std::span<const uint8_t> key_der) {
+dtls_certificate dtls_certificate::from_der(std::span<const uint8_t> cert_der,
+                                            std::span<const uint8_t> key_der) {
     const unsigned char *cert_ptr = cert_der.data();
-    ::X509 *cert = ::d2i_X509(nullptr, &cert_ptr,
-                              static_cast<long>(cert_der.size()));
+    ::X509 *cert =
+        ::d2i_X509(nullptr, &cert_ptr, static_cast<long>(cert_der.size()));
     if (!cert)
         throw std::runtime_error{"d2i_X509 failed"};
-    utils::scope_guard cert_guard{
-        [cert]() noexcept { ::X509_free(cert); }};
+    utils::scope_guard cert_guard{[cert]() noexcept { ::X509_free(cert); }};
 
     const unsigned char *key_ptr = key_der.data();
-    ::EVP_PKEY *pkey = ::d2i_AutoPrivateKey(
-        nullptr, &key_ptr, static_cast<long>(key_der.size()));
+    ::EVP_PKEY *pkey = ::d2i_AutoPrivateKey(nullptr, &key_ptr,
+                                            static_cast<long>(key_der.size()));
     if (!pkey)
         throw std::runtime_error{"d2i_AutoPrivateKey failed"};
-    utils::scope_guard pkey_guard{
-        [pkey]() noexcept { ::EVP_PKEY_free(pkey); }};
+    utils::scope_guard pkey_guard{[pkey]() noexcept { ::EVP_PKEY_free(pkey); }};
 
     auto impl = std::make_unique<dtls_certificate::impl>();
     impl->ctx = make_ssl_ctx();
@@ -350,8 +342,7 @@ fingerprint dtls_certificate::get_fingerprint(hash_algorithm algo) const {
 std::string dtls_certificate::cert_pem() const {
     assert(_impl && _impl->cert);
     ::BIO *bio = ::BIO_new(::BIO_s_mem());
-    utils::scope_guard bio_guard{
-        [bio]() noexcept { ::BIO_free(bio); }};
+    utils::scope_guard bio_guard{[bio]() noexcept { ::BIO_free(bio); }};
     if (::PEM_write_bio_X509(bio, _impl->cert) <= 0)
         throw std::runtime_error{"PEM_write_bio_X509 failed"};
     char *data = nullptr;
@@ -362,8 +353,7 @@ std::string dtls_certificate::cert_pem() const {
 std::string dtls_certificate::key_pem() const {
     assert(_impl && _impl->pkey);
     ::BIO *bio = ::BIO_new(::BIO_s_mem());
-    utils::scope_guard bio_guard{
-        [bio]() noexcept { ::BIO_free(bio); }};
+    utils::scope_guard bio_guard{[bio]() noexcept { ::BIO_free(bio); }};
     if (::PEM_write_bio_PrivateKey(bio, _impl->pkey, nullptr, nullptr, 0,
                                    nullptr, nullptr) <= 0)
         throw std::runtime_error{"PEM_write_bio_PrivateKey failed"};
