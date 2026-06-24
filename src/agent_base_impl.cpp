@@ -235,7 +235,7 @@ asioice::task<void> agent_base_impl::server_reflexive_candidate(
             const auto &transport = local_candidate.transport;
             scope.spawn(
                 resolve_host(_any_executor, server) |
-                stdexec::then([&, this](auto eps) {
+                stdexec::then([&, this, i](auto eps) {
                     for (const auto &ep : eps) {
                         if (transport.local_endpoint().address().is_v4() &&
                             !ep.address().is_v4())
