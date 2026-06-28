@@ -119,6 +119,9 @@ struct transaction
             }
             _timer.expires_after(retry_rto);
             retry_rto *= 2;
+            // TODO: optimize this
+            if (retry_rto.count() > 2000)
+                retry_rto = std::chrono::milliseconds(2000);
             ec = co_await _timer.async_wait(utils::use_sender);
             if (ec) {
                 ICE_IN_DEBUG {

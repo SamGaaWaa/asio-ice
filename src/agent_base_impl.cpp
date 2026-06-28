@@ -160,7 +160,7 @@ asioice::task<void> agent_base_impl::server_reflexive_candidate(
     stun::message resp;
     asioice::endpoint from;
     auto result = co_await (stun::basic_request(transport, transactions, req,
-                                                stun_server, resp, from, 7) |
+                                                stun_server, resp, from, 10) |
                             stdexec::stopped_as_optional());
     if (!result || !*result) {
         ICE_IN_DEBUG {
