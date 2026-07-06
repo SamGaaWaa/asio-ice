@@ -13,6 +13,7 @@
 #include "asioice/detail/scope_guard.hpp"
 #include "asioice/detail/property.hpp"
 #include "asioice/detail/binary.hpp"
+#include "asioice/impl/data_channel_types.hpp"
 
 #include <exec/async_scope.hpp>
 #include <exec/repeat_until.hpp>
@@ -36,28 +37,6 @@
 #include <bit>
 
 namespace asioice::impl {
-
-struct data_channel_message {
-    std::vector<uint8_t> data;
-    bool binary;
-};
-
-enum struct data_channel_priority : uint16_t {
-    very_low = 128,
-    low = 256,
-    medium = 512,
-    high = 1024
-};
-
-struct data_channel_options {
-    bool ordered = true;
-    std::optional<uint32_t> max_packet_life_time{};
-    std::optional<uint32_t> max_retransmits{};
-    std::string protocol = "";
-    bool negotiated = false;
-    uint16_t stream_id = 0;
-    data_channel_priority priority = data_channel_priority::low;
-};
 
 template <class Sctp>
 class data_channel_manager_impl
@@ -86,7 +65,7 @@ class data_channel_manager_impl
 
     struct data_channel : std::enable_shared_from_this<data_channel> {
         using executor_type = typename Sctp::executor_type;
-        enum state_t : char { connecting, open, closing, closed };
+        enum struct state_t : char { connecting, open, closing, closed };
 
         data_channel(
             std::shared_ptr<data_channel_manager_impl> manager) noexcept
