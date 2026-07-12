@@ -32,38 +32,34 @@ namespace asioice {
 
 namespace __any_transport_detail {
 
-using allocator_query =
-    exec::queries<std::pmr::polymorphic_allocator<std::byte>(
-        exec::get_frame_allocator_t) noexcept>;
+// using allocator_query =
+//     exec::queries<std::pmr::polymorphic_allocator<std::byte>(
+//         exec::get_frame_allocator_t) noexcept>;
 
 using sendto_result_type1 = exec::function<
     stdexec::sender_tag(net::const_buffer data, asioice::endpoint dst),
     stdexec::completion_signatures<
         stdexec::set_value_t(std::tuple<std::error_code, std::size_t>),
-        stdexec::set_error_t(std::exception_ptr), stdexec::set_stopped_t()>,
-    allocator_query>;
+        stdexec::set_error_t(std::exception_ptr), stdexec::set_stopped_t()>>;
 
 using sendto_result_type2 = exec::function<
     stdexec::sender_tag(std::span<const net::const_buffer> data,
                         asioice::endpoint dst),
     stdexec::completion_signatures<
         stdexec::set_value_t(std::tuple<std::error_code, std::size_t>),
-        stdexec::set_error_t(std::exception_ptr), stdexec::set_stopped_t()>,
-    allocator_query>;
+        stdexec::set_error_t(std::exception_ptr), stdexec::set_stopped_t()>>;
 
 using send_result_type1 = exec::function<
     stdexec::sender_tag(net::const_buffer data),
     stdexec::completion_signatures<
         stdexec::set_value_t(std::tuple<std::error_code, std::size_t>),
-        stdexec::set_error_t(std::exception_ptr), stdexec::set_stopped_t()>,
-    allocator_query>;
+        stdexec::set_error_t(std::exception_ptr), stdexec::set_stopped_t()>>;
 
 using send_result_type2 = exec::function<
     stdexec::sender_tag(std::span<const net::const_buffer> data),
     stdexec::completion_signatures<
         stdexec::set_value_t(std::tuple<std::error_code, std::size_t>),
-        stdexec::set_error_t(std::exception_ptr), stdexec::set_stopped_t()>,
-    allocator_query>;
+        stdexec::set_error_t(std::exception_ptr), stdexec::set_stopped_t()>>;
 
 struct interface {
     virtual void start() = 0;

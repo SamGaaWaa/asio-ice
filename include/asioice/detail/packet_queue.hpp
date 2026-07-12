@@ -27,6 +27,8 @@ struct packet_queue {
             throw std::runtime_error{"max_payload_bytes < max_packet_size"};
     }
 
+    bool empty() const noexcept { return _q.empty(); }
+
     bool write(std::span<const uint8_t> data) {
         if (data.empty())
             return true;
@@ -34,14 +36,13 @@ struct packet_queue {
         if (_bytes + fs > _max_bytes) [[unlikely]]
             return false;
         if (fs > max_packet_size) [[unlikely]]
-            return false;
+            throw std::runtime_error{
+                "write: frame size greater then max_packet_size"};
         if (_q.empty() || _q.back().end_offset + fs > max_packet_size)
             _q.emplace_back();
         write_frame(data);
         return true;
     }
-
-    bool empty() const noexcept { return _q.empty(); }
 
     std::span<const uint8_t> peek() const noexcept {
         assert(!empty());

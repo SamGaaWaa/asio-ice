@@ -60,17 +60,19 @@ template <class... Args> struct shared_promise {
     shared_promise &operator=(shared_promise &&) = delete;
 
     void set_value(const Args &...args) noexcept {
+        if (empty())
+            return;
         operation_list_type tmp;
         tmp.swap(_operations);
-        while (!tmp.empty()) {
+        do {
             auto &op = tmp.front();
             tmp.pop_front();
             op.set_value(args...);
-        }
+        } while (!tmp.empty());
     }
 
     void set_one_value(const Args &...args) noexcept {
-        if (_operations.empty())
+        if (empty())
             return;
         auto &op = _operations.front();
         _operations.pop_front();
@@ -78,17 +80,19 @@ template <class... Args> struct shared_promise {
     }
 
     void set_error(const std::exception_ptr &error) noexcept {
+        if (empty())
+            return;
         operation_list_type tmp;
         tmp.swap(_operations);
-        while (!tmp.empty()) {
+        do {
             auto &op = tmp.front();
             tmp.pop_front();
             op.set_error(error);
-        }
+        } while (!tmp.empty());
     }
 
     void set_one_error(const std::exception_ptr &error) noexcept {
-        if (_operations.empty())
+        if (empty())
             return;
         auto &op = _operations.front();
         _operations.pop_front();
@@ -96,17 +100,19 @@ template <class... Args> struct shared_promise {
     }
 
     void set_stopped() noexcept {
+        if (empty())
+            return;
         operation_list_type tmp;
         tmp.swap(_operations);
-        while (!tmp.empty()) {
+        do {
             auto &op = tmp.front();
             tmp.pop_front();
             op.set_stopped();
-        }
+        } while (!tmp.empty());
     }
 
     void set_one_stopped() noexcept {
-        if (_operations.empty())
+        if (empty())
             return;
         auto &op = _operations.front();
         _operations.pop_front();
@@ -259,17 +265,19 @@ template <> struct shared_promise<void> {
     shared_promise &operator=(shared_promise &&) = delete;
 
     void set_value() noexcept {
+        if (empty())
+            return;
         operation_list_type tmp;
         tmp.swap(_operations);
-        while (!tmp.empty()) {
+        do {
             auto &op = tmp.front();
             tmp.pop_front();
             op.set_value();
-        }
+        } while (!tmp.empty());
     }
 
     void set_one_value() noexcept {
-        if (_operations.empty())
+        if (empty())
             return;
         auto &op = _operations.front();
         _operations.pop_front();
@@ -277,17 +285,19 @@ template <> struct shared_promise<void> {
     }
 
     void set_error(const std::exception_ptr &error) noexcept {
+        if (empty())
+            return;
         operation_list_type tmp;
         tmp.swap(_operations);
-        while (!tmp.empty()) {
+        do {
             auto &op = tmp.front();
             tmp.pop_front();
             op.set_error(error);
-        }
+        } while (!tmp.empty());
     }
 
     void set_one_error(const std::exception_ptr &error) noexcept {
-        if (_operations.empty())
+        if (empty())
             return;
         auto &op = _operations.front();
         _operations.pop_front();
@@ -295,17 +305,19 @@ template <> struct shared_promise<void> {
     }
 
     void set_stopped() noexcept {
+        if (empty())
+            return;
         operation_list_type tmp;
         tmp.swap(_operations);
-        while (!tmp.empty()) {
+        do {
             auto &op = tmp.front();
             tmp.pop_front();
             op.set_stopped();
-        }
+        } while (!tmp.empty());
     }
 
     void set_one_stopped() noexcept {
-        if (_operations.empty())
+        if (empty())
             return;
         auto &op = _operations.front();
         _operations.pop_front();
