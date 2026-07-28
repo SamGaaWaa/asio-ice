@@ -78,7 +78,7 @@ struct agent_base_impl : std::enable_shared_from_this<agent_base_impl> {
 
     void set_remote_is_lite(bool lite) noexcept {
         _remote_is_lite = lite;
-        if (lite && !_ice_controlling)
+        if (lite && !_config.ice_controlling)
             switch_role(true);
     }
 
@@ -354,7 +354,6 @@ struct agent_base_impl : std::enable_shared_from_this<agent_base_impl> {
     std::vector<resolved_result> _stun_servers{};
     std::vector<resolved_result> _turn_servers{};
     std::shared_ptr<io_buffer_pool> _pool;
-    bool _ice_controlling = true;
     bool _remote_is_lite = false;
     std::string _remote_username{};
     std::string _remote_password{};

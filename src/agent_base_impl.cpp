@@ -129,7 +129,6 @@ resolve_host(net::any_io_executor ex, const resolved_result &res) {
 agent_base_impl::agent_base_impl(net::any_io_executor ex, agent_config config,
                                  agent_base *agent)
     : _any_executor(std::move(ex)), _config(std::move(config)), _agent(agent),
-      _ice_controlling(_config.ice_controlling),
       _pool(std::make_shared<io_buffer_pool>(_config.max_buffer_pool_size)) {
 #if ASIOICE_USE_CPPMDNS
     if (_config.enable_mdns && _config.mdns == nullptr)
@@ -520,7 +519,7 @@ void agent_base_impl::pair_local_candidate(const asioice::candidate &c) {
         if (!c.can_pair_with(remote_c))
             continue;
         auto priority = asioice::candidate_pair::compute_priority(
-            c, remote_c, this->_ice_controlling);
+            c, remote_c, this->_config.ice_controlling);
         // The agent prunes each checklist.  This is done by removing a
         // candidate pair if it is redundant with a higher-priority candidate
         // pair in the same checklist.  Two candidate pairs are redundant if
@@ -559,7 +558,7 @@ void agent_base_impl::pair_remote_candidate(const asioice::candidate &c) {
         if (!local_c.can_pair_with(c))
             continue;
         auto priority = asioice::candidate_pair::compute_priority(
-            local_c, c, this->_ice_controlling);
+            local_c, c, this->_config.ice_controlling);
         // The agent prunes each checklist.  This is done by removing a
         // candidate pair if it is redundant with a higher-priority candidate
         // pair in the same checklist.  Two candidate pairs are redundant if
@@ -1008,7 +1007,7 @@ void agent_base_impl::switch_role(bool ice_controlling) noexcept {
                   << (ice_controlling ? "controlling" : "controlled")
                   << " role\n";
     }
-    this->_ice_controlling = ice_controlling;
+    this->_config.ice_controlling = ice_controlling;
     for (auto &p : this->_check_list) {
         p->set_priority(ice_controlling);
     }
@@ -1159,10 +1158,10 @@ asioice::task<void> agent_base_impl::do_check(check_task ct) {
             to_nominate = it->pair.get();
         }
         pair.set_state(asioice::candidate_pair::state_t::SUCCEEDED);
-        if (this->_ice_controlling && req.use_candidate) {
+        if (this->_config.ice_controlling && req.use_candidate) {
             if (this->set_nominated(*to_nominate))
                 this->generate_gathering_end_indication();
-        } else if (!this->_ice_controlling && req.use_candidate) {
+        } else if (!this->_config.ice_controlling && req.use_candidate) {
             if (this->set_nominated(*to_nominate))
                 this->generate_gathering_end_indication();
         }
@@ -1232,7 +1231,7 @@ agent_base_impl::construct_valid_pair(const stun::message &req,
     }
     auto valid_p = std::make_shared<asioice::candidate_pair>(
         *local_it, pair.remote_candidate());
-    valid_p->set_priority(this->_ice_controlling);
+    valid_p->set_priority(this->_config.ice_controlling);
     return valid_p;
 }
 
@@ -1258,7 +1257,7 @@ void agent_base_impl::build_request(stun::message &req,
         asioice::candidate_priority(pair.component(), candidate_type::prflx);
     req.use_fingerprint(true);
 
-    if (this->_ice_controlling) {
+    if (this->_config.ice_controlling) {
         req.ice_controlling = this->_tie_breaker;
     } else {
         req.ice_controlled = this->_tie_breaker;
@@ -1475,7 +1474,7 @@ agent_base_impl::do_handle_request(asioice::any_transport transport,
         co_return;
     }
 
-    if (this->_ice_controlling && req.ice_controlling.has_value()) {
+    if (this->_config.ice_controlling && req.ice_controlling.has_value()) {
         if (this->_tie_breaker >= *req.ice_controlling) {
             resp.cls = stun::class_t::STUN_CLASS_RESP_ERROR;
             resp.error_code.emplace(487, "Role Conflict");
@@ -1483,7 +1482,8 @@ agent_base_impl::do_handle_request(asioice::any_transport transport,
             co_return;
         }
         this->switch_role(false);
-    } else if (!this->_ice_controlling && req.ice_controlled.has_value()) {
+    } else if (!this->_config.ice_controlling &&
+               req.ice_controlled.has_value()) {
         if (this->_tie_breaker >= *req.ice_controlled) {
             this->switch_role(true);
         } else {
@@ -1515,7 +1515,7 @@ agent_base_impl::do_handle_request(asioice::any_transport transport,
             co_return;
     }
 
-    bool use_candidate = !this->_ice_controlling && req.use_candidate;
+    bool use_candidate = !this->_config.ice_controlling && req.use_candidate;
     asioice::candidate *local = nullptr;
     if (auto it = std::ranges::find_if(this->_local_candidates,
                                        [&](const auto &c) noexcept {
@@ -1625,7 +1625,7 @@ agent_base_impl::do_handle_request(asioice::any_transport transport,
     this->_check_list.push_back(
         std::make_shared<asioice::candidate_pair>(*local, *remote));
     auto *p = this->_check_list.back().get();
-    p->set_priority(this->_ice_controlling);
+    p->set_priority(this->_config.ice_controlling);
     this->sort_check_list();
     p->set_state(asioice::candidate_pair::state_t::WAITING);
     this->_triggered_check_queue.emplace_back(
@@ -1784,7 +1784,8 @@ agent_base_impl::nominated_pairs() const {
 
 void agent_base_impl::default_nominate() {
     if (this->_state == agent_state_t::CLOSED ||
-        this->_state == agent_state_t::CONNECTED || !this->_ice_controlling)
+        this->_state == agent_state_t::CONNECTED ||
+        !this->_config.ice_controlling)
         return;
     std::ranges::sort(this->_valid_list,
                       [](const auto &a, const auto &b) noexcept {
@@ -1986,8 +1987,7 @@ void agent_base_impl::generate_gathering_end_indication() noexcept {
     this->_local_candidates_end = true;
     if (!old && this->_on_local_candidates) {
         try {
-            auto cb = std::move(this->_on_local_candidates);
-            cb(std::span<const asioice::candidate>{});
+            this->_on_local_candidates(std::span<const asioice::candidate>{});
         } catch (...) {
         }
     }
