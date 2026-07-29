@@ -14,3 +14,4 @@ example/aioice/__pychache__
 venv
 example/werift/node_modules
 example/werift/package-lock.json
+include/asioice/config.hpp
