@@ -47,7 +47,7 @@ if(NOT CPPMDNS_USE_BOOST_ASIO)
     target_compile_definitions(cppmdns_compile_flags INTERFACE ASIO_STANDALONE)
 endif()
 
-target_link_libraries(cppmdns PRIVATE cppmdns_compile_flags)
+target_link_libraries(cppmdns PRIVATE cppmdns_compile_flags samlog)
 target_include_directories(cppmdns PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/include")
 target_include_directories(cppmdns PUBLIC ${STDEXEC_DIR})
 target_include_directories(cppmdns PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/3rd/asio2exec")

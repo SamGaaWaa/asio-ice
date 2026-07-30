@@ -6,6 +6,7 @@
 #include "asioice/detail/switch_case.hpp"
 #include "asioice/detail/if_else.hpp"
 #include "asioice/socket_transport.hpp"
+#include "samlog.hpp"
 
 namespace asioice::impl {
 
@@ -103,31 +104,34 @@ template <class Sock> struct basic_agent_impl final : agent_base {
             sock.open(net::ip::udp::v6(), ec);
         }
         if (ec) {
-            ICE_IN_DEBUG {
-                std::cerr << "Failed to open socket: " << ec.message() << '\n';
-            }
+            SAMLOG_WARN(auto sink) {
+                char buf[256];
+                sink({buf, sizeof(buf)}, "Failed to open socket: {}\n",
+                     ec.message());
+            };
             return {};
         }
 
         // TODO: support port ranges
         sock.bind(asioice::endpoint(local_addr, 0), ec);
         if (ec) {
-            ICE_IN_DEBUG {
-                std::cerr << "Failed to bind address \""
-                          << local_addr.to_string() << "\": " << ec.message()
-                          << '\n';
-            }
+            SAMLOG_WARN(auto sink) {
+                char buf[256];
+                sink({buf, sizeof(buf)}, "Failed to bind address \"{}\": {}\n",
+                     local_addr.to_string(), ec.message());
+            };
             return {};
         }
 
         auto transport = std::make_shared<raw_transport>(std::move(sock));
         transport->set_buffer_pool(this->buffer_pool());
 
-        ICE_IN_DEBUG {
-            std::cout << "Host transport bound to "
-                      << transport->local_endpoint().address() << ':'
-                      << transport->local_endpoint().port() << '\n';
-        }
+        SAMLOG_TRACE(auto sink) {
+            char buf[256];
+            sink({buf, sizeof(buf)}, "Host transport bound to {}:{}\n",
+                 transport->local_endpoint().address().to_string(),
+                 transport->local_endpoint().port());
+        };
         return transport;
     }
 

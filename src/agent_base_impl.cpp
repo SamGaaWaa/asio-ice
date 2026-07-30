@@ -9,6 +9,7 @@
 #include "asioice/detail/ignore.hpp"
 #include "asioice/detail/scope_guard.hpp"
 #include "asioice/detail/asio2exec.hpp"
+#include "samlog.hpp"
 
 #include "ctre.hpp"
 
@@ -17,7 +18,6 @@
 
 #include <ranges>
 #include <algorithm>
-#include <iostream>
 
 namespace asioice {
 
@@ -35,9 +35,11 @@ static void parse_ice_servers(const std::vector<std::string> &urls,
             ctre::match<"(stun|stuns|turn|turns):(\\[[0-9a-fA-F:]+\\]|[^:?]+)(?"
                         "::(\\d+))?(?:\\?transport=(udp|tcp))?">(url);
         if (!match) {
-            ICE_IN_DEBUG {
-                std::cerr << "ICE server with invalid url: " << url << '\n';
-            }
+            SAMLOG_WARN(auto sink) {
+                char buf[256];
+                sink({buf, sizeof(buf)}, "ICE server with invalid url: {}\n",
+                     url);
+            };
             continue;
         }
         resolved_result res{};
@@ -109,13 +111,19 @@ resolve_host(net::any_io_executor ex, const resolved_result &res) {
         co_await resolver.async_resolve(host, "0", utils::use_sender);
 
     if (ec) {
-        std::cerr << "DNS resolve failed for " << host << ": " << ec.message()
-                  << "\n";
+        SAMLOG_WARN(auto sink) {
+            char buf[256];
+            sink({buf, sizeof(buf)}, "DNS resolve failed for {}: {}\n", host,
+                 ec.message());
+        };
         co_return results;
     }
 
     if (rr.empty()) {
-        std::cerr << "DNS resolve no result for " << host << '\n';
+        SAMLOG_WARN(auto sink) {
+            char buf[256];
+            sink({buf, sizeof(buf)}, "DNS resolve no result for {}\n", host);
+        };
         co_return results;
     }
 
@@ -162,15 +170,15 @@ asioice::task<void> agent_base_impl::server_reflexive_candidate(
                                                 stun_server, resp, from, 10) |
                             stdexec::stopped_as_optional());
     if (!result || !*result) {
-        ICE_IN_DEBUG {
-            std::cerr << "server_reflexive_candidate: error or timeout\n";
-        }
+        SAMLOG_WARN(auto sink) {
+            sink("server_reflexive_candidate: error or timeout\n");
+        };
         co_return;
     }
     if (from != stun_server) {
-        ICE_IN_DEBUG {
-            std::cerr << "server_reflexive_candidate: from != stun_server\n";
-        }
+        SAMLOG_WARN(auto sink) {
+            sink("server_reflexive_candidate: from != stun_server\n");
+        };
         co_return;
     }
     asioice::endpoint ep;
@@ -205,9 +213,10 @@ asioice::task<void> agent_base_impl::server_reflexive_candidate(
     this->pair_local_candidate(local_candidate);
     srflx_candidates.emplace_back(std::move(srflx));
 } catch (const std::exception &e) {
-    ICE_IN_DEBUG {
-        std::cerr << "server_reflexive_candidate: " << e.what() << "\n";
-    }
+    SAMLOG_WARN(auto sink) {
+        char buf[256];
+        sink({buf, sizeof(buf)}, "server_reflexive_candidate: {}\n", e.what());
+    };
     co_return;
 }
 
@@ -216,7 +225,7 @@ asioice::task<void> agent_base_impl::server_reflexive_candidate(
     const std::vector<asioice::candidate> &local_candidates,
     const std::vector<resolved_result> &stun_servers) noexcept try {
     if (stun_servers.empty()) {
-        ICE_IN_DEBUG { std::cerr << "no STUN servers\n"; }
+        SAMLOG_WARN(auto sink) { sink("No STUN servers\n"); };
         co_return;
     }
     exec::async_scope scope;
@@ -228,7 +237,7 @@ asioice::task<void> agent_base_impl::server_reflexive_candidate(
         for (const auto &local_candidate : local_candidates) {
             const auto &server = stun_servers[i];
             if (server.scheme == ice_server_scheme::stuns) {
-                ICE_IN_DEBUG { std::cerr << "stuns not supported yet\n"; }
+                SAMLOG_WARN(auto sink) { sink("stuns not supported yet\n"); };
                 continue;
             }
             const auto &transport = local_candidate.transport;
@@ -252,7 +261,7 @@ asioice::task<void> agent_base_impl::server_reflexive_candidate(
     co_await (utils::on_scope_empty(scope) |
               stdexec::continues_on(utils::scheduler{this->_any_executor}));
 } catch (std::exception &e) {
-    ICE_IN_DEBUG { std::cerr << e.what() << '\n'; }
+    SAMLOG_WARN(auto sink) { sink(e.what()); };
     co_return;
 }
 
@@ -272,17 +281,21 @@ asioice::task<void> agent_base_impl::get_component_candidates(
         if ((!this->_config.use_ipv4 && address.is_v4()) ||
             (!this->_config.use_ipv6 && address.is_v6()) ||
             (!this->_config.use_loopback && address.is_loopback())) {
-            ICE_IN_DEBUG {
-                std::cerr << "Skipping address: " << address << '\n';
-            }
+            SAMLOG_TRACE(auto sink) {
+                char buf[256];
+                sink({buf, sizeof(buf)}, "Skipping address: {}\n",
+                     address.to_string());
+            };
             continue;
         }
         if (address.is_v6()) {
             net::ip::address_v6 addr = address.to_v6();
             if (addr.is_site_local() || addr.is_v4_mapped()) {
-                ICE_IN_DEBUG {
-                    std::cerr << "Skipping address: " << address << '\n';
-                }
+                SAMLOG_TRACE(auto sink) {
+                    char buf[256];
+                    sink({buf, sizeof(buf)}, "Skipping address: {}\n",
+                         address.to_string());
+                };
                 continue;
             }
         }
@@ -331,11 +344,12 @@ asioice::task<void> agent_base_impl::get_component_candidates(
                         this->_mdns_names[c.endpoint.address()] = mdns;
                         c.mdns_host = std::move(mdns);
                     }
-                    ICE_IN_DEBUG {
-                        std::cout << "mDNS publish result: \""
-                                  << c.endpoint.address().to_string()
-                                  << "\" -> \"" << c.mdns_host << "\"\n";
-                    }
+                    SAMLOG_TRACE(auto sink) {
+                        char buf[256];
+                        sink({buf, sizeof(buf)},
+                             "mDNS publish result: \"{}\" -> \"{}\"\n",
+                             c.endpoint.address().to_string(), c.mdns_host);
+                    };
                 });
             scope.spawn(utils::stop_when(
                             std::move(publish_task),
@@ -346,11 +360,12 @@ asioice::task<void> agent_base_impl::get_component_candidates(
                                     return timer.async_wait(utils::use_sender);
                                 })) |
                         stdexec::upon_stopped([&c] {
-                            ICE_IN_DEBUG {
-                                std::cout << "mDNS publish \""
-                                          << c.endpoint.address().to_string()
-                                          << "\" timeout\n";
-                            }
+                            SAMLOG_WARN(auto sink) {
+                                char buf[256];
+                                sink({buf, sizeof(buf)},
+                                     "mDNS publish \"{}\" timeout\n",
+                                     c.endpoint.address().to_string());
+                            };
                         }) |
                         utils::ignore());
         }
@@ -359,7 +374,6 @@ asioice::task<void> agent_base_impl::get_component_candidates(
                 utils::on_scope_empty(scope) |
                 stdexec::continues_on(utils::scheduler{this->_any_executor}));
         std::erase_if(host_candidates, [](const auto &c) {
-            std::cout << "MDNS: " << c.mdns_host << '\n';
             return !c.mdns_host.ends_with(".local");
         });
         if (host_candidates.empty())
@@ -412,10 +426,11 @@ asioice::task<void> agent_base_impl::create_relayed_candidate(
     uint8_t component) noexcept {
     auto ret = co_await client->create_allocation(std::chrono::seconds(60 * 5));
     if (!ret) {
-        ICE_IN_DEBUG {
-            std::cerr << "Create allocation for \""
-                      << client->local_endpoint().to_string() << "\" failed\n";
-        }
+        SAMLOG_WARN(auto sink) {
+            char buf[256];
+            sink({buf, sizeof(buf)}, "Create allocation for \"{}\" failed\n",
+                 client->local_endpoint().to_string());
+        };
         co_return;
     }
     const asioice::endpoint &relayed = *ret;
@@ -440,7 +455,11 @@ asioice::task<void> agent_base_impl::create_relayed_candidate(
                 c.mdns_host = this->_mdns_names.at(c.endpoint.address());
                 c.mdns_related = this->_mdns_names.at(c.related->address());
             } catch (const std::exception &e) {
-                ICE_IN_DEBUG { std::cerr << "mdns name not found\n"; }
+                SAMLOG_WARN(auto sink) {
+                    char buf[256];
+                    sink({buf, sizeof(buf)}, "mdns name not found: {}\n",
+                         e.what());
+                };
                 co_return;
             }
         tmp.emplace_back(std::move(c));
@@ -727,13 +746,14 @@ agent_base_impl::add_remote_candidate(asioice::candidate remote_c) {
             std::move(resolve_task),
             resolve_timer.async_wait(utils::use_sender));
         if (!ret) {
-            ICE_IN_DEBUG { std::cerr << "resolved mdns host is invalid\n"; }
+            SAMLOG_WARN(auto sink) { sink("resolved mdns host is invalid\n"); };
             co_return false;
         }
-        ICE_IN_DEBUG {
-            std::cout << "mDNS name \"" << remote_c.mdns_host << "\" resolved: "
-                      << remote_c.endpoint.address().to_string() << '\n';
-        }
+        SAMLOG_TRACE(auto sink) {
+            char buf[256];
+            sink({buf, sizeof(buf)}, "mDNS name \"{}\" resolved: {}\n",
+                 remote_c.mdns_host, remote_c.endpoint.address().to_string());
+        };
         std::string{}.swap(remote_c.mdns_host);
     }
 
@@ -745,18 +765,20 @@ agent_base_impl::add_remote_candidate(asioice::candidate remote_c) {
                                                      remote_c.transport_type);
             });
         it != this->_remote_candidates.end()) {
-        ICE_IN_DEBUG {
-            std::cout << "Remote candidate already exists: "
-                      << remote_c.to_string() << '\n';
-        }
+        SAMLOG_DEBUG(auto sink) {
+            char buf[256];
+            sink({buf, sizeof(buf)}, "Remote candidate already exists: {}\n",
+                 remote_c.to_string());
+        };
         co_return true;
     }
 
     if (!__validate_remote_candidate(remote_c)) {
-        ICE_IN_DEBUG {
-            std::cout << "Invalid remote candidate: " << remote_c.to_string()
-                      << '\n';
-        }
+        SAMLOG_WARN(auto sink) {
+            char buf[256];
+            sink({buf, sizeof(buf)}, "Invalid remote candidate: {}\n",
+                 remote_c.to_string());
+        };
         co_return false;
     }
     this->create_turn_permission(remote_c.endpoint.address());
@@ -891,16 +913,16 @@ asioice::task<bool> agent_base_impl::do_connect() noexcept {
         this->_remote_username.empty() || this->_remote_password.empty() ||
         (!this->_config.trickle_ice &&
          (!this->_local_candidates_end || !this->_remote_candidates_end))) {
-        ICE_IN_DEBUG {
-            std::cout << R"(
+        SAMLOG_DEBUG(auto sink) {
+            sink(R"(
                 this->_state == agent_state_t::CONNECTING ||
                 this->_state == agent_state_t::CLOSED ||
                 this->_state == agent_state_t::CONNECTED ||
                 this->_remote_username.empty() ||
                 this->_remote_password.empty() ||
                 (!this->_config.trickle_ice && (!this->_local_candidates_end || !this->_remote_candidates_end)
-            )";
-        }
+            )");
+        };
         co_return this->_state == agent_state_t::CONNECTED;
     }
     this->sort_check_list();
@@ -959,21 +981,25 @@ asioice::task<bool> agent_base_impl::do_connect() noexcept {
             if (auto ret = co_await std::move(wakeup); !ret || *ret)
                 break;
         } catch (const std::exception &e) {
-            ICE_IN_DEBUG { std::cout << "Exception: " << e.what() << '\n'; }
+            SAMLOG_WARN(auto sink) {
+                char buf[256];
+                sink({buf, sizeof(buf)}, "Exception: {}\n", e.what());
+            };
             break;
         }
     for (auto &trans : this->_transaction_states) {
         trans.transaction->stop_retring();
     }
     scope.request_stop();
-    ICE_IN_DEBUG { std::cout << "Waiting for all checks to finish\n"; }
+    SAMLOG_DEBUG(auto sink) { sink("Waiting for all checks to finish\n"); };
     co_await (utils::on_scope_empty(scope) |
               stdexec::continues_on(utils::scheduler{this->_any_executor}));
-    ICE_IN_DEBUG {
-        std::cout << "connect: "
-                  << (this->_state == agent_state_t::CONNECTED ? "success\n"
-                                                               : "failed\n");
-    }
+    SAMLOG_DEBUG(auto sink) {
+        char buf[256];
+        sink({buf, sizeof(buf)}, "connect: {}\n",
+             (this->_state == agent_state_t::CONNECTED ? "success\n"
+                                                       : "failed\n"));
+    };
     if (this->_state == agent_state_t::CONNECTED) {
         utils::detached_with_data(
             utils::stop_when(
@@ -1002,11 +1028,11 @@ asioice::task<bool> agent_base_impl::do_connect() noexcept {
 void agent_base_impl::switch_role(bool ice_controlling) noexcept {
     if (this->_remote_is_lite && !ice_controlling)
         return;
-    ICE_IN_DEBUG {
-        std::cout << "Switching to "
-                  << (ice_controlling ? "controlling" : "controlled")
-                  << " role\n";
-    }
+    SAMLOG_INFO(auto sink) {
+        char buf[256];
+        sink({buf, sizeof(buf)}, "Switching to {} role\n",
+             (ice_controlling ? "controlling" : "controlled"));
+    };
     this->_config.ice_controlling = ice_controlling;
     for (auto &p : this->_check_list) {
         p->set_priority(ice_controlling);
@@ -1056,42 +1082,41 @@ asioice::task<void> agent_base_impl::do_check(check_task ct) {
                 pair.local_candidate().transport.data());
             if (!client->has_permission(
                     pair.remote_candidate().endpoint.address())) {
-                ICE_IN_DEBUG {
-                    std::cout << "Creating permission for: "
-                              << pair.remote_candidate()
-                                     .endpoint.address()
-                                     .to_string()
-                              << '\n';
-                }
+                SAMLOG_DEBUG(auto sink) {
+                    char buf[256];
+                    sink(
+                        {buf, sizeof(buf)}, "Creating permission for: {}\n",
+                        pair.remote_candidate().endpoint.address().to_string());
+                };
                 bool ok = co_await client->create_permission(
                     pair.remote_candidate().endpoint.address());
                 if (!ok) {
-                    ICE_IN_DEBUG {
-                        std::cout << "Failed to create permission for: "
-                                  << pair.remote_candidate()
-                                         .endpoint.address()
-                                         .to_string()
-                                  << '\n';
-                    }
+                    SAMLOG_WARN(auto sink) {
+                        char buf[256];
+                        sink({buf, sizeof(buf)},
+                             "Failed to create permission for: {}\n",
+                             pair.remote_candidate()
+                                 .endpoint.address()
+                                 .to_string());
+                    };
                     co_return;
                 }
             }
         }
 
-        ICE_IN_DEBUG {
-            std::cout << "Performing check on pair: " << pair.to_string(0)
-                      << '\n';
-        }
+        SAMLOG_DEBUG(auto sink) {
+            sink("Performing check on pair: {}\n", pair.to_string(0));
+        };
         stun::message resp;
         ret = co_await this->request(pair, req, resp);
-        ICE_IN_DEBUG {
-            std::cout << "Check "
-                      << (ret == request_result::succeed
-                              ? "success: "
-                              : (ret == request_result::canceled ? "canceled: "
-                                                                 : "failed: "))
-                      << pair.to_string(0) << '\n';
-        }
+        SAMLOG_DEBUG(auto sink) {
+            sink("Check {}{}\n",
+                 (ret == request_result::succeed
+                      ? "success: "
+                      : (ret == request_result::canceled ? "canceled: "
+                                                         : "failed: ")),
+                 pair.to_string(0));
+        };
 
         if (ret == request_result::canceled) {
             on_exit.dismiss();
@@ -1110,10 +1135,11 @@ asioice::task<void> agent_base_impl::do_check(check_task ct) {
         subsequent_algo = resp.integrities.back();
         if (resp.cls == stun::class_t::STUN_CLASS_RESP_ERROR) {
             assert(resp.error_code.has_value());
-            ICE_IN_DEBUG {
-                std::cout << "ERROR response with error code: "
-                          << resp.error_code->reason << '\n';
-            }
+            SAMLOG_DEBUG(auto sink) {
+                char buf[256];
+                sink({buf, sizeof(buf)}, "ERROR response with error code: {}\n",
+                     resp.error_code->reason);
+            };
 
             if (resp.error_code->code == 487) {
                 if (this->_remote_is_lite)
@@ -1222,10 +1248,11 @@ agent_base_impl::construct_valid_pair(const stun::message &req,
             c.mdns_related = this->_mdns_names.at(c.related->address());
         }
         this->_local_candidates.emplace_back(std::move(c));
-        ICE_IN_DEBUG {
-            std::cout << "Peer-Reflexive Candidate: " << local_it->to_string()
-                      << '\n';
-        }
+        SAMLOG_DEBUG(auto sink) {
+            char buf[256];
+            sink({buf, sizeof(buf)}, "Peer-Reflexive Candidate: {}\n",
+                 local_it->to_string());
+        };
         local_it = this->_local_candidates.begin() +
                    (this->_local_candidates.size() - 1);
     }
@@ -1272,7 +1299,7 @@ agent_base_impl::request(asioice::candidate_pair &pair,
     auto it = this->_transactions.lower_bound(req.transaction_id);
     if (it != this->_transactions.end() &&
         it->request.transaction_id == req.transaction_id) {
-        ICE_IN_DEBUG { std::cout << "Transaction already in progress\n"; }
+        SAMLOG_WARN(auto sink) { sink("Transaction already in progress\n"); };
         co_return ret;
     }
     stun::transaction trans(this->_any_executor, req,
@@ -1292,11 +1319,11 @@ agent_base_impl::request(asioice::candidate_pair &pair,
         auto new_state =
             co_await (trans.on_state_change() | stdexec::stopped_as_optional());
         if (!new_state.has_value()) {
-            ICE_IN_DEBUG { std::cout << "STUN request timeout\n"; }
+            SAMLOG_DEBUG(auto sink) { sink("STUN request timeout\n"); };
             goto END;
         }
         if (trans.state() == stun::transaction::state_t::ERR) {
-            ICE_IN_DEBUG { std::cout << "STUN request error\n"; }
+            SAMLOG_DEBUG(auto sink) { sink("STUN request error\n"); };
             goto END;
         }
         assert(trans.state() == stun::transaction::state_t::DONE);
@@ -1311,19 +1338,23 @@ agent_base_impl::request(asioice::candidate_pair &pair,
         // Section 9.1.5), the algorithm in the response has to match;
         // otherwise, the response MUST be discarded.
         if (resp.integrities.empty() || resp.integrities.size() > 2) {
-            ICE_IN_DEBUG { std::cout << "Integrity algorithm mismatch\n"; }
+            SAMLOG_DEBUG(auto sink) { sink("Integrity algorithm mismatch\n"); };
             continue;
         }
         if (resp.integrities.size() == 1) {
             if (!std::ranges::contains(req.integrities,
                                        resp.integrities.front())) {
-                ICE_IN_DEBUG { std::cout << "Integrity algorithm mismatch\n"; }
+                SAMLOG_DEBUG(auto sink) {
+                    sink("Integrity algorithm mismatch\n");
+                };
                 continue;
             }
         } else {
             std::ranges::sort(resp.integrities);
             if (resp.integrities != req.integrities) {
-                ICE_IN_DEBUG { std::cout << "Integrity algorithm mismatch\n"; }
+                SAMLOG_DEBUG(auto sink) {
+                    sink("Integrity algorithm mismatch\n");
+                };
                 continue;
             }
         }
@@ -1348,25 +1379,27 @@ agent_base_impl::request(asioice::candidate_pair &pair,
             // all the responses received are discarded, then instead of
             // signaling a timeout after ending the transaction, the layer MUST
             // signal that the integrity protection was violated.
-            ICE_IN_DEBUG { std::cout << "Integrity check failed\n"; }
+            SAMLOG_DEBUG(auto sink) { sink("Integrity check failed\n"); };
             continue;
         }
 
         if (trans.response_transport !=
                 pair.local_candidate().transport.data() ||
             trans.response_source != pair.remote_candidate().endpoint) {
-            ICE_IN_DEBUG { std::cout << "Non-Symmetric Transport Addresses\n"; }
+            SAMLOG_WARN(auto sink) {
+                sink("Non-Symmetric Transport Addresses\n");
+            };
             break;
         }
 
         if (resp.cls == stun::class_t::STUN_CLASS_RESP_ERROR) {
             if (!resp.error_code.has_value()) {
-                ICE_IN_DEBUG { std::cout << "Unknown error\n"; }
+                SAMLOG_DEBUG(auto sink) { sink("Unknown error\n"); };
                 break;
             }
         } else {
             if (!resp.xor_mapped_address.has_value()) {
-                ICE_IN_DEBUG { std::cout << "Invalid response\n"; }
+                SAMLOG_DEBUG(auto sink) { sink("Invalid response\n"); };
                 break;
             }
         }
@@ -1397,9 +1430,9 @@ void agent_base_impl::request_handler(asioice::any_transport &transport,
     if (this->_remote_is_lite)
         return;
     if (this->_outgoing_request_handler_count > 256) {
-        ICE_IN_DEBUG {
-            std::cout << "outgoing_request_handler_count > 256, ignore\n";
-        }
+        SAMLOG_WARN(auto sink) {
+            sink("outgoing_request_handler_count > 256, ignore\n");
+        };
         return;
     }
     utils::detached_with_data(
@@ -1437,15 +1470,16 @@ agent_base_impl::do_handle_request(asioice::any_transport transport,
     ++this->_outgoing_request_handler_count;
     utils::scope_guard on_exit(
         [this]() noexcept { --this->_outgoing_request_handler_count; });
-    ICE_IN_DEBUG {
-        std::cout << "Connectivity check request from " << source.to_string()
-                  << " to " << transport.local_endpoint().to_string() << '\n';
-    }
+    SAMLOG_DEBUG(auto sink) {
+        char buf[256];
+        sink({buf, sizeof(buf)}, "Connectivity check request from {} to {}\n",
+             source.to_string(), transport.local_endpoint().to_string());
+    };
 
     stun::message req, resp;
     if (!req.parse(buf->data(), buf->size()) ||
         req.method != stun::method_t::STUN_METHOD_BINDING || !req.priority) {
-        ICE_IN_DEBUG { std::cout << "Invalid STUN message\n"; }
+        SAMLOG_DEBUG(auto sink) { sink("Invalid STUN message\n"); };
         co_return;
     }
     buf.reset();
@@ -1527,7 +1561,7 @@ agent_base_impl::do_handle_request(asioice::any_transport transport,
         it != this->_local_candidates.end()) {
         local = &(*it);
     } else {
-        ICE_IN_DEBUG { std::cerr << "Miss a host candidate\n"; }
+        SAMLOG_WARN(auto sink) { sink("Miss a host candidate\n"); };
         co_return;
     }
 
@@ -1551,10 +1585,11 @@ agent_base_impl::do_handle_request(asioice::any_transport transport,
                                .endpoint = source,
                                .type = asioice::candidate_type::prflx});
         remote = &this->_remote_candidates.back();
-        ICE_IN_DEBUG {
-            std::cout << "Peer-Reflexive Candidate: " << remote->to_string()
-                      << '\n';
-        }
+        SAMLOG_DEBUG(auto sink) {
+            char buf[256];
+            sink({buf, sizeof(buf)}, "Peer-Reflexive Candidate: {}\n",
+                 remote->to_string());
+        };
     }
 
     if (auto it = std::ranges::find_if(
@@ -1702,10 +1737,9 @@ bool agent_base_impl::set_nominated(asioice::candidate_pair &pair) noexcept {
             return pp.pair->component() == it->pair->component() &&
                    pp.nominated && pp.generation == this->_generation;
         })) {
-        ICE_IN_DEBUG {
-            std::cerr << "Nominated multiple candidate pairs: "
-                      << pair.to_string() << '\n';
-        }
+        SAMLOG_WARN(auto sink) {
+            sink("Nominated multiple candidate pairs: {}\n", pair.to_string());
+        };
         return false;
     }
 
@@ -1741,9 +1775,9 @@ bool agent_base_impl::set_nominated(asioice::candidate_pair &pair) noexcept {
         trans.transaction->stop_retring();
     }
 
-    ICE_IN_DEBUG {
-        std::cout << "New nominated pair: " << it->pair->to_string() << '\n';
-    }
+    SAMLOG_INFO(auto sink) {
+        sink("New nominated pair: {}\n", it->pair->to_string());
+    };
     for (uint8_t component = 1; component <= this->_config.component_count;
          ++component) {
         if (component == it->pair->component())
@@ -1758,7 +1792,7 @@ bool agent_base_impl::set_nominated(asioice::candidate_pair &pair) noexcept {
 
     // Once the state of each checklist in the checklist set is Completed,
     // the agent sets the state of the ICE session to Completed.
-    ICE_IN_DEBUG { std::cout << "Agent connected\n"; }
+    SAMLOG_INFO(auto sink) { sink("Agent connected\n"); };
     this->_state = agent_state_t::CONNECTED;
     return true;
 }
@@ -1916,7 +1950,7 @@ asioice::task<void> agent_base_impl::free_candidates() {
     this->_check_list.shrink_to_fit();
     this->_valid_list.shrink_to_fit();
     this->_triggered_check_queue.shrink_to_fit();
-    ICE_IN_DEBUG { std::cout << "Candidates freed\n"; }
+    SAMLOG_INFO(auto sink) { sink("Candidates freed\n"); };
 }
 
 void agent_base_impl::create_turn_permission(const net::ip::address &ip) {
@@ -1929,10 +1963,11 @@ void agent_base_impl::create_turn_permission(const net::ip::address &ip) {
             static_cast<turn::turn_interface *>(local_c.transport.data());
         assert(client);
         if (!client->has_permission(ip)) {
-            ICE_IN_DEBUG {
-                std::cout << "Creating permission for: " << ip.to_string()
-                          << '\n';
-            }
+            SAMLOG_DEBUG(auto sink) {
+                char buf[256];
+                sink({buf, sizeof(buf)}, "Creating permission for: {}\n",
+                     ip.to_string());
+            };
             utils::detached_with_data(
                 utils::stop_when(client->create_permission(ip),
                                  this->_promise.get_future()),
@@ -1949,10 +1984,11 @@ void agent_base_impl::create_channel_for_valid_pair() {
         auto client = static_cast<turn::turn_interface *>(
             valid_p.pair->local_candidate().transport.data());
         assert(client);
-        ICE_IN_DEBUG {
-            std::cout << "Creating channel for: " << valid_p.pair->to_string()
-                      << '\n';
-        }
+        SAMLOG_DEBUG(auto sink) {
+            char buf[256];
+            sink({buf, sizeof(buf)}, "Creating channel for: {}\n",
+                 valid_p.pair->to_string());
+        };
         utils::detached_with_data(
             utils::stop_when(
                 stdexec::just(client,
@@ -1976,9 +2012,11 @@ agent_base_impl::find_nominated_pair(uint8_t component) const noexcept {
             return valid_p.pair;
         }
     }
-    ICE_IN_DEBUG {
-        std::cerr << "No nominated pairs for component " << component << '\n';
-    }
+    SAMLOG_DEBUG(auto sink) {
+        char buf[256];
+        sink({buf, sizeof(buf)}, "No nominated pairs for component {}\n",
+             (int)component);
+    };
     return nullptr;
 }
 
@@ -2002,10 +2040,11 @@ void agent_base_impl::dispatch_received_data(asioice::io_buffer_ptr buffer,
     if (it != this->_receivers.end()) {
         (*it)->data_received(std::move(buffer));
     } else {
-        ICE_IN_DEBUG {
-            std::cerr << "No receiver for component "
-                      << static_cast<int>(component) << '\n';
-        }
+        SAMLOG_DEBUG(auto sink) {
+            char buf[256];
+            sink({buf, sizeof(buf)}, "No receiver for component {}\n",
+                 static_cast<int>(component));
+        };
     }
 }
 

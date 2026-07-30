@@ -41,7 +41,6 @@ namespace net = asio;
 #include <array>
 #include <deque>
 #include <expected>
-#include <iostream>
 #include <memory>
 #include <ranges>
 #include <stdexcept>

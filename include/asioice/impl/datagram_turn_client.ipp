@@ -7,7 +7,7 @@ asioice::task<bool> datagram_client<NextLayer>::request(
     auto it = this->_transactions.lower_bound(req.transaction_id);
     if (it != this->_transactions.end() &&
         it->request.transaction_id == req.transaction_id) {
-        ICE_IN_DEBUG { std::cout << "Transaction already in progress\n"; }
+        SAMLOG_DEBUG(auto sink) { sink("Transaction already in progress\n"); };
         co_return false;
     }
     stun::transaction trans(this->get_executor(), req, this->_server, resp);
@@ -84,7 +84,7 @@ asioice::task<bool> datagram_client<NextLayer>::request(
             // all the responses received are discarded, then instead of
             // signaling a timeout after ending the transaction, the layer MUST
             // signal that the integrity protection was violated.
-            ICE_IN_DEBUG { std::cout << "Integrity check failed\n"; }
+            SAMLOG_DEBUG(auto sink) { sink("Integrity check failed\n"); };
             continue;
         }
         ret = true;
@@ -137,14 +137,15 @@ asioice::task<bool> datagram_client<NextLayer>::request_with_retry(
     assert(resp.error_code.has_value());
     const auto code = resp.error_code->code;
     if (code != 401 && code != 438) {
-        ICE_IN_DEBUG {
-            std::cerr << "Unexpected error code: " << code
-                      << ", reason: " << resp.error_code->reason << "\n";
-        }
+        SAMLOG_DEBUG(auto sink) {
+            char buf[256];
+            sink({buf, sizeof(buf)}, "Unexpected error code: {}, reason: {}\n",
+                 code, resp.error_code->reason);
+        };
         co_return false;
     }
     if (resp.nonce.empty()) {
-        ICE_IN_DEBUG { std::cerr << "NONCE attribute not found\n"; }
+        SAMLOG_DEBUG(auto sink) { sink("NONCE attribute not found\n"); };
         co_return false;
     }
     if (resp.nonce.starts_with(stun::STUN_NONCE_COOKIE) &&
@@ -159,7 +160,7 @@ asioice::task<bool> datagram_client<NextLayer>::request_with_retry(
     }
     if (code == 401) {
         if (resp.realm.empty()) {
-            ICE_IN_DEBUG { std::cerr << "REALM attribute not found\n"; }
+            SAMLOG_DEBUG(auto sink) { sink("REALM attribute not found\n"); };
             co_return false;
         }
         req.fill_random_transaction_id();
@@ -188,9 +189,9 @@ asioice::task<bool> datagram_client<NextLayer>::request_with_retry(
                 // request with a new transaction.  The client MUST NOT perform
                 // this retry if it is not changing the USERNAME, USERHASH,
                 // REALM, or its associated password from the previous attempt.
-                ICE_IN_DEBUG {
-                    std::cout << "No supported password algorithms\n";
-                }
+                SAMLOG_DEBUG(auto sink) {
+                    sink("No supported password algorithms\n");
+                };
                 co_return false;
             }
             req.pwd_algorithm = *it;
@@ -213,7 +214,7 @@ asioice::task<bool> datagram_client<NextLayer>::request_with_retry(
         if (!success || resp_source != this->remote_endpoint() ||
             resp.cls != stun::class_t::STUN_CLASS_RESP_SUCCESS ||
             resp.method != req.method || resp.integrities.empty()) {
-            ICE_IN_DEBUG { std::cerr << "The second request failed\n"; }
+            SAMLOG_DEBUG(auto sink) { sink("The second request failed\n"); };
             co_return false;
         }
         this->_nonce = std::move(req.nonce);
@@ -225,14 +226,14 @@ asioice::task<bool> datagram_client<NextLayer>::request_with_retry(
         co_return true;
     }
     // Stale NONCE
-    ICE_IN_DEBUG { std::cout << "Stale nonce, retrying...\n"; }
+    SAMLOG_TRACE(auto sink) { sink("Stale nonce, retrying...\n"); };
     req.nonce = std::move(resp.nonce);
     req.fill_random_transaction_id();
     success = co_await this->request(req, resp_source, resp, retries);
     if (!success || resp_source != this->remote_endpoint() ||
         resp.cls != stun::class_t::STUN_CLASS_RESP_SUCCESS ||
         resp.method != req.method || resp.integrities.empty()) {
-        ICE_IN_DEBUG { std::cerr << "The second request failed\n"; }
+        SAMLOG_DEBUG(auto sink) { sink("The second request failed\n"); };
         co_return false;
     }
     this->_nonce = std::move(req.nonce);
@@ -246,7 +247,7 @@ template <class NextLayer> void datagram_client<NextLayer>::stop() noexcept {
 
     // Send delete request without waiting response
     if (this->_relayed_address) {
-        ICE_IN_DEBUG { std::cout << "Send delete allocation request\n"; }
+        SAMLOG_TRACE(auto sink) { sink("Send delete allocation request\n"); };
         stun::message req;
         req.method = stun::method_t::STUN_METHOD_REFRESH;
         req.fill_random_transaction_id();
@@ -290,13 +291,14 @@ asioice::task<void> datagram_client<NextLayer>::refresh_allocation_task() {
             co_await (this->refresh(std::chrono::seconds(this->_lifetime)) |
                       stdexec::stopped_as_optional());
         if (!success || !*success) {
-            ICE_IN_DEBUG { std::cerr << "Refresh task stopped\n"; }
+            SAMLOG_TRACE(auto sink) { sink("Refresh task stopped\n"); };
             co_return;
         }
-        ICE_IN_DEBUG {
-            std::cout << "Refresh task succeeded, lifetime: " << this->_lifetime
-                      << "\n";
-        }
+        SAMLOG_INFO(auto sink) {
+            char buf[256];
+            sink({buf, sizeof(buf)}, "Refresh task succeeded, lifetime: {}\n",
+                 this->_lifetime);
+        };
     }
 }
 
@@ -321,7 +323,7 @@ datagram_client<NextLayer>::create_allocation(auto lifetime, auto... self) {
     if (!this->is_running())
         co_return std::nullopt;
     if (this->_relayed_address) {
-        ICE_IN_DEBUG { std::cout << "WARN: Already allocated\n"; }
+        SAMLOG_DEBUG(auto sink) { sink("WARN: Already allocated\n"); };
         co_return std::nullopt;
     }
     stun::message req;
@@ -340,7 +342,7 @@ datagram_client<NextLayer>::create_allocation(auto lifetime, auto... self) {
     if (!success)
         co_return std::nullopt;
 
-    ICE_IN_DEBUG { std::cout << "Resp:\n" << resp.to_string() << '\n'; }
+    SAMLOG_TRACE(auto sink) { sink("Resp:\n{}\n", resp.to_string()); };
     if (!resp.lifetime || !resp.xor_relayed_address)
         co_return std::nullopt;
     this->_lifetime = *resp.lifetime;
@@ -355,7 +357,7 @@ asioice::task<bool> datagram_client<NextLayer>::refresh(auto time_to_expiry,
                                                         auto... self) {
     if (!this->is_running())
         co_return false;
-    ICE_IN_DEBUG { std::cout << "Refreshing\n"; }
+    SAMLOG_INFO(auto sink) { sink("Refreshing\n"); };
     stun::message req;
     req.cls = stun::class_t::STUN_CLASS_REQUEST;
     req.method = stun::method_t::STUN_METHOD_REFRESH;
@@ -427,7 +429,7 @@ datagram_client<NextLayer>::delete_allocation(auto... self) {
     bool success = co_await this->request_with_retry(req, resp, 7);
     if (!success)
         co_return;
-    ICE_IN_DEBUG { std::cout << "TURN allocation deleted\n"; }
+    SAMLOG_INFO(auto sink) { sink("TURN allocation deleted\n"); };
 }
 
 template <class NextLayer>
@@ -468,7 +470,9 @@ template <class NextLayer>
 asioice::task<void>
 datagram_client<NextLayer>::permission_state::refresh_task() {
     utils::scope_guard on_exit([this]() noexcept {
-        ICE_IN_DEBUG { std::cout << "permission_state::refresh_task exit\n"; }
+        SAMLOG_TRACE(auto sink) {
+            sink("permission_state::refresh_task exit\n");
+        };
         if (this->is_linked())
             this->unlink();
         while (!this->channels().empty()) {
@@ -493,17 +497,21 @@ datagram_client<NextLayer>::permission_state::refresh_task() {
         req.xor_peer_address.emplace_back(this->ip(), 0);
 
         if (co_await this->client().request_with_retry(req, resp, 7)) {
-            ICE_IN_DEBUG {
-                std::cout
-                    << "permission_state::refresh_task: refreshed permission \""
-                    << this->ip() << "\"\n";
-            }
+            SAMLOG_INFO(auto sink) {
+                char buf[256];
+                sink({buf, sizeof(buf)},
+                     "permission_state::refresh_task: refreshed permission "
+                     "\"{}\"\n",
+                     this->ip().to_string());
+            };
         } else {
-            ICE_IN_DEBUG {
-                std::cout << "permission_state::refresh_task: failed to "
-                             "refresh permission \""
-                          << this->ip() << "\"\n";
-            }
+            SAMLOG_WARN(auto sink) {
+                char buf[256];
+                sink({buf, sizeof(buf)},
+                     "permission_state::refresh_task: failed to refresh "
+                     "permission \"{}\"\n",
+                     this->ip().to_string());
+            };
             break;
         }
     }
@@ -537,7 +545,7 @@ datagram_client<NextLayer>::create_permission(std::ranges::view auto peers,
         std::ranges::any_of(
             peers, [](const auto &peer) noexcept { return !peer.is_v6(); }))
         co_return false;
-    ICE_IN_DEBUG { std::cout << "Creating or refreshing permissions\n"; }
+    SAMLOG_INFO(auto sink) { sink("Creating or refreshing permissions\n"); };
     stun::message req;
     req.cls = stun::class_t::STUN_CLASS_REQUEST;
     req.method = stun::method_t::STUN_METHOD_CREATE_PERMISSION;
@@ -610,10 +618,12 @@ datagram_client<NextLayer>::create_permission(std::ranges::view auto peers,
                   std::get<0>(std::get<1>(result));
     }
     if (!success) {
-        ICE_IN_DEBUG { std::cout << "Create or refresh permissions failed\n"; }
+        SAMLOG_WARN(auto sink) {
+            sink("Create or refresh permissions failed\n");
+        };
         co_return false;
     }
-    ICE_IN_DEBUG { std::cout << "Create or refresh permissions success\n"; }
+    SAMLOG_INFO(auto sink) { sink("Create or refresh permissions success\n"); };
     if (!this->_is_running)
         co_return true;
     for (const auto &peer : req.xor_peer_address) {
@@ -635,7 +645,11 @@ void datagram_client<NextLayer>::delete_permission(
     const net::ip::address &peer) noexcept {
     if (!this->is_running())
         return;
-    ICE_IN_DEBUG { std::cout << "Delete permission of \"" << peer << "\"\n"; }
+    SAMLOG_INFO(auto sink) {
+        char buf[256];
+        sink({buf, sizeof(buf)}, "Delete permission of \"{}\"\n",
+             peer.to_string());
+    };
     auto it = this->_permissions.find(peer);
     if (it == this->_permissions.end())
         return;
@@ -656,20 +670,22 @@ datagram_client<NextLayer>::async_send_to(ConstBufferSequence buffer_sequence,
     asioice::buffer_wrapper buffers{buffer_sequence};
     auto it = this->_peer_to_channel.find(destination);
     if (it != this->_peer_to_channel.end()) {
-        ICE_IN_DEBUG { std::cout << "Sending channel data\n"; }
+        SAMLOG_TRACE(auto sink) { sink("Sending channel data\n"); };
         co_return co_await this->send_channel_data(std::move(buffers),
                                                    it->channel());
     }
     auto permission = this->_permissions.find(destination.address());
     if (permission == this->_permissions.end()) {
-        ICE_IN_DEBUG {
-            std::cout << "No permission of " << destination.address() << "\n";
-        }
+        SAMLOG_WARN(auto sink) {
+            char buf[256];
+            sink({buf, sizeof(buf)}, "No permission of {}\n",
+                 destination.address().to_string());
+        };
         co_return std::make_tuple(std::make_error_code(std::errc::bad_address),
                                   0);
     }
     // send indication
-    ICE_IN_DEBUG { std::cout << "Sending indication\n"; }
+    SAMLOG_TRACE(auto sink) { sink("Sending indication\n"); };
     std::size_t data_size = net::buffer_size(buffers.buffers());
 
     stun::message msg;
@@ -723,17 +739,16 @@ datagram_client<NextLayer>::channel_bind(net::ip::udp::endpoint peer,
     if (!this->is_running())
         co_return false;
     if (!this->_relayed_address) {
-        ICE_IN_DEBUG { std::cout << "Haven't allocate.\n"; }
+        SAMLOG_WARN(auto sink) { sink("Haven't allocate.\n"); };
         co_return false;
     }
     if ((this->_relayed_address->address().is_v4() &&
          !peer.address().is_v4()) ||
         (this->_relayed_address->address().is_v6() &&
          !peer.address().is_v6())) {
-        ICE_IN_DEBUG {
-            std::cout << "Peer address is not the same type as the relayed "
-                         "address.\n";
-        }
+        SAMLOG_WARN(auto sink) {
+            sink("Peer address is not the same type as the relayed address.\n");
+        };
         co_return false;
     }
     uint16_t channel = 0;
@@ -743,10 +758,11 @@ datagram_client<NextLayer>::channel_bind(net::ip::udp::endpoint peer,
         channel = it->channel();
     } else
         channel = this->generate_channel_number();
-    ICE_IN_DEBUG {
-        std::cout << "Binding or refreshing channel: {" << peer.address() << ":"
-                  << peer.port() << ", " << channel << "}\n";
-    }
+    SAMLOG_INFO(auto sink) {
+        char buf[256];
+        sink({buf, sizeof(buf)}, "Binding or refreshing channel: ({}:{}, {})\n",
+             peer.address().to_string(), peer.port(), (int)channel);
+    };
     stun::message req;
     req.cls = stun::class_t::STUN_CLASS_REQUEST;
     req.method = stun::method_t::STUN_METHOD_CHANNEL_BIND;
@@ -758,16 +774,20 @@ datagram_client<NextLayer>::channel_bind(net::ip::udp::endpoint peer,
     stun::message resp;
     bool success = co_await this->request_with_retry(req, resp, 7);
     if (!success) {
-        ICE_IN_DEBUG {
-            std::cout << "Bind or refresh channel failed: {" << peer.address()
-                      << ":" << peer.port() << ", " << channel << "}\n";
-        }
+        SAMLOG_WARN(auto sink) {
+            char buf[256];
+            sink({buf, sizeof(buf)},
+                 "Bind or refresh channel failed: ({}:{}, {})\n",
+                 peer.address().to_string(), peer.port(), (int)channel);
+        };
         co_return false;
     }
-    ICE_IN_DEBUG {
-        std::cout << "Bind or refresh channel success: {" << peer.address()
-                  << ":" << peer.port() << ", " << channel << "}\n";
-    }
+    SAMLOG_INFO(auto sink) {
+        char buf[256];
+        sink({buf, sizeof(buf)},
+             "Bind or refresh channel success: ({}:{}, {})\n",
+             peer.address().to_string(), peer.port(), (int)channel);
+    };
     if (!this->is_running())
         co_return true;
     auto ch = this->_channel_to_peer.find(channel);
@@ -820,11 +840,13 @@ void datagram_client<NextLayer>::channel_state::start() {
 template <class NextLayer>
 asioice::task<void> datagram_client<NextLayer>::channel_state::refresh_task() {
     utils::scope_guard on_error([this]() noexcept {
-        ICE_IN_DEBUG {
-            std::cout << "refresh_task stopped, channel: " << this->channel()
-                      << ", peer: " << this->peer().address() << ':'
-                      << this->peer().port() << '\n';
-        }
+        SAMLOG_TRACE(auto sink) {
+            char buf[256];
+            sink({buf, sizeof(buf)},
+                 "refresh_task stopped, channel: {}, peer: {}:{}\n",
+                 (int)this->channel(), this->peer().address().to_string(),
+                 this->peer().port());
+        };
         this->remove_from_set();
         this->remove_from_permission();
     });
@@ -838,17 +860,21 @@ asioice::task<void> datagram_client<NextLayer>::channel_state::refresh_task() {
         std::optional<bool> ret = co_await stdexec::stopped_as_optional(
             this->client().channel_bind(this->peer()));
         if (!ret) {
-            ICE_IN_DEBUG {
-                std::cout << "channel_state::refresh_task cancelled, channel = "
-                          << this->channel() << '\n';
-            }
+            SAMLOG_TRACE(auto sink) {
+                char buf[256];
+                sink({buf, sizeof(buf)},
+                     "channel_state::refresh_task cancelled, channel = {}\n",
+                     (int)this->channel());
+            };
             break;
         }
         if (!*ret) {
-            ICE_IN_DEBUG {
-                std::cout << "channel_state::refresh_task failed, channel = "
-                          << this->channel() << '\n';
-            }
+            SAMLOG_WARN(auto sink) {
+                char buf[256];
+                sink({buf, sizeof(buf)},
+                     "channel_state::refresh_task failed, channel = {}\n",
+                     (int)this->channel());
+            };
             break;
         }
     }
@@ -862,11 +888,13 @@ asioice::task<void> datagram_client<NextLayer>::channel_state::refresh_task() {
        different transport address or the transport address to a different
        channel number.
     */
-    ICE_IN_DEBUG {
-        std::cout << "refresh_task expired, channel: " << this->channel()
-                  << ", peer: " << this->peer().address() << ':'
-                  << this->peer().port() << '\n';
-    }
+    SAMLOG_TRACE(auto sink) {
+        char buf[256];
+        sink({buf, sizeof(buf)},
+             "refresh_task expired, channel: {}, peer: {}:{}\n",
+             (int)this->channel(), this->peer().address().to_string(),
+             this->peer().port());
+    };
     this->set_permission(nullptr);
     utils::scope_guard on_exit([this]() noexcept { this->remove_from_set(); });
     timer.expires_after(std::chrono::seconds(60 * 5));
@@ -878,13 +906,17 @@ inline bool validate_turn_channel(const asioice::io_buffer_ptr &buf,
                                   uint16_t &channel_number,
                                   uint16_t &len) noexcept {
     if (buf->size() < 4) {
-        ICE_IN_DEBUG { std::cout << "WARNING: invalid turn channel message\n"; }
+        SAMLOG_DEBUG(auto sink) {
+            sink("WARNING: invalid turn channel message\n");
+        };
         return false;
     }
     channel_number = binary::read_big<uint16_t>(buf->data());
     len = binary::read_big<uint16_t>(buf->begin() + 2);
     if (channel_number < 0x4000 || channel_number > 0x4FFF) {
-        ICE_IN_DEBUG { std::cout << "WARNING: invalid turn channel number\n"; }
+        SAMLOG_DEBUG(auto sink) {
+            sink("WARNING: invalid turn channel number\n");
+        };
         return false;
     }
     if (buf->size() == len + 4)
@@ -893,7 +925,9 @@ inline bool validate_turn_channel(const asioice::io_buffer_ptr &buf,
         auto pad = 4 - (len & 3);
         if (buf->size() == len + 4 + pad)
             return true;
-        ICE_IN_DEBUG { std::cout << "WARNING: invalid turn channel message\n"; }
+        SAMLOG_DEBUG(auto sink) {
+            sink("WARNING: invalid turn channel message\n");
+        };
         return false;
     }
     return true;
@@ -914,9 +948,11 @@ bool datagram_client<NextLayer>::datagram_received(
         }
         auto it = this->_channel_to_peer.find(ch);
         if (it == this->_channel_to_peer.end()) {
-            ICE_IN_DEBUG {
-                std::cout << "WARNING: unknown channel: " << ch << '\n';
-            }
+            SAMLOG_DEBUG(auto sink) {
+                char buf[256];
+                sink({buf, sizeof(buf)}, "WARNING: unknown channel: {}\n",
+                     (int)ch);
+            };
             // ignore
             return true;
         }
@@ -948,7 +984,9 @@ bool datagram_client<NextLayer>::datagram_received(
             indication.method != stun::method_t::STUN_METHOD_DATA ||
             indication.xor_peer_address.size() != 1 ||
             !indication.has_turn_data()) {
-            ICE_IN_DEBUG { std::cout << "WARNING: invalid STUN indication\n"; }
+            SAMLOG_DEBUG(auto sink) {
+                sink("WARNING: invalid STUN indication\n");
+            };
             return true;
         }
         const std::byte *turn_data = indication.turn_data();

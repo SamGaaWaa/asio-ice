@@ -2,13 +2,13 @@
 #include "hash.hpp"
 #include "json.hpp"
 #include "asioice/detail/string_utils.hpp"
+#include "samlog.hpp"
 
 // #include <ctre.hpp>
 
 #include <charconv>
 #include <cstring>
 #include <iomanip>
-#include <iostream>
 #include <sstream>
 #include <string>
 
@@ -112,7 +112,7 @@ std::optional<candidate> candidate::from_sdp(std::string_view sdp,
                                              std::size_t *nread) noexcept {
     // 1. 检查前缀
     if (!sdp.starts_with("candidate:")) {
-        ICE_IN_DEBUG { std::cout << "Invalid SDP: " << sdp << '\n'; }
+        SAMLOG_WARN(auto sink) { sink("Invalid SDP: {}\n", sdp); };
         return {};
     }
 
@@ -146,7 +146,7 @@ std::optional<candidate> candidate::from_sdp(std::string_view sdp,
     if (fd_str.empty() || com_str.empty() || tran_str.empty() ||
         pri_str.empty() || addr_str.empty() || port_str.empty() ||
         typ_keyword != "typ" || type_str.empty()) {
-        ICE_IN_DEBUG { std::cout << "Invalid SDP: " << sdp << '\n'; }
+        SAMLOG_WARN(auto sink) { sink("Invalid SDP: {}\n", sdp); };
         return {};
     }
 

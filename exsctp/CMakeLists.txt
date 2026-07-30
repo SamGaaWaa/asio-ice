@@ -25,7 +25,7 @@ target_compile_options(exsctp_compile_flags INTERFACE
                        $<$<COMPILE_LANG_AND_ID:CXX,MSVC>:/Zc:__cplusplus /Zc:preprocessor /D_WIN32_WINNT=0x0601 /Zm200 /bigobj /W4 /wd4100 /wd4101 /wd4127 /wd4324 /wd4456 /wd4459>
                        )
 
-target_link_libraries(exsctp INTERFACE dcsctp Boost::boost exsctp_compile_flags)
+target_link_libraries(exsctp INTERFACE dcsctp Boost::boost exsctp_compile_flags samlog)
 target_include_directories(exsctp INTERFACE ${STDEXEC_DIR})
 target_include_directories(exsctp INTERFACE ${CMAKE_CURRENT_SOURCE_DIR})
 

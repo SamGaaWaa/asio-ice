@@ -11,6 +11,8 @@
 #include "asioice/detail/inplace_receiver.hpp"
 #include "asioice/detail/asio2exec.hpp"
 
+#include "samlog.hpp"
+
 #include <boost/intrusive/set.hpp>
 #include <boost/container/small_vector.hpp>
 
@@ -97,9 +99,9 @@ struct transaction
         {
             auto n = request.write_to(buf.data(), buf.size());
             if (n < 0) {
-                ICE_IN_DEBUG {
-                    std::cerr << "USERNAME, NONCE or REALM too long\n";
-                }
+                SAMLOG_DEBUG(auto sink) {
+                    sink("USERNAME, NONCE or REALM too long\n");
+                };
                 set_state(state_t::ERR);
                 co_return;
             }
@@ -110,10 +112,11 @@ struct transaction
             auto [ec, _] = co_await transport.async_send_to(
                 net::const_buffer(buf.data(), buf.size()), server);
             if (ec) {
-                ICE_IN_DEBUG {
-                    std::cerr << "STUN transaction failed: " << ec.message()
-                              << '\n';
-                }
+                SAMLOG_DEBUG(auto sink) {
+                    char buf[256];
+                    sink({buf, sizeof(buf)}, "STUN transaction failed: {}\n",
+                         ec.message());
+                };
                 set_state(state_t::ERR);
                 co_return;
             }
@@ -124,10 +127,11 @@ struct transaction
                 retry_rto = std::chrono::milliseconds(2000);
             ec = co_await _timer.async_wait(utils::use_sender);
             if (ec) {
-                ICE_IN_DEBUG {
-                    std::cerr << "STUN transaction failed: " << ec.message()
-                              << '\n';
-                }
+                SAMLOG_DEBUG(auto sink) {
+                    char buf[256];
+                    sink({buf, sizeof(buf)}, "STUN transaction failed: {}\n",
+                         ec.message());
+                };
                 set_state(state_t::ERR);
                 co_return;
             }
@@ -162,14 +166,14 @@ inline bool dispatch_stun_response(transaction_set &transactions,
 
     auto it = transactions.find(transaction_id);
     if (it == transactions.end()) {
-        ICE_IN_DEBUG { std::cout << "Unknown transaction id\n"; }
+        SAMLOG_DEBUG(auto sink) { sink("Unknown transaction id\n"); };
         // TODO: May be an application message
         return false;
     }
     it->response_transport = transport;
     it->response.reset();
     if (!it->response.parse(data, size)) {
-        ICE_IN_DEBUG { std::cerr << "Parse response failed\n"; }
+        SAMLOG_DEBUG(auto sink) { sink("Parse response failed\n"); };
         return false;
     }
     it->response_source = source;
@@ -187,7 +191,9 @@ struct basic_request_t {
         auto it = transactions.lower_bound(req.transaction_id);
         if (it != transactions.end() &&
             it->request.transaction_id == req.transaction_id) {
-            ICE_IN_DEBUG { std::cout << "Transaction already in progress\n"; }
+            SAMLOG_DEBUG(auto sink) {
+                sink("Transaction already in progress\n");
+            };
             co_return false;
         }
         stun::transaction trans(transport.get_executor(), req, server, resp);

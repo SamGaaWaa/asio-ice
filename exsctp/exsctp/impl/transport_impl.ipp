@@ -67,20 +67,24 @@ exsctp::task<void> transport_impl<Interface>::packet_sender() {
         auto packet = this->_send_q.peek();
         auto [ec, n] = co_await this->_interface->send(packet);
         if (ec) {
-            ICE_IN_DEBUG {
-                std::cerr << "packet_sender error: " << ec.message() << "\n";
-            }
+            SAMLOG_WARN(auto sink) {
+                char buf[256];
+                sink({buf, sizeof(buf)}, "packet_sender error: {}\n",
+                     ec.message());
+            };
             co_return;
         }
         if (n == 0) {
-            ICE_IN_DEBUG { std::cerr << "packet_sender sent 0 bytes\n"; }
+            SAMLOG_WARN(auto sink) { sink("packet_sender sent 0 bytes\n"); };
             co_return;
         }
         if (n < packet.size()) {
-            ICE_IN_DEBUG {
-                std::cerr << "packet_sender sent partial packet: " << n
-                          << " of " << packet.size() << " bytes\n";
-            }
+            SAMLOG_WARN(auto sink) {
+                char buf[256];
+                sink({buf, sizeof(buf)},
+                     "packet_sender sent partial packet: {} of {} bytes\n", n,
+                     packet.size());
+            };
         }
         this->_send_q.pop();
         if (buffered_high && !this->send_queue_buffered_high())

@@ -320,16 +320,22 @@ dtls_impl<NextLayer>::perform(Op op, auto... self) {
                 auto packet = this->_bio.out.peek();
                 auto [ec, n] = co_await this->next_layer().async_send(packet);
                 if (ec) {
-                    ICE_IN_DEBUG {
-                        std::cout << "next_layer().async_send_to failed: "
-                                  << ec.message() << '\n';
-                    }
+                    SAMLOG_WARN(auto sink) {
+                        char buf[256];
+                        sink({buf, sizeof(buf)},
+                             "next_layer().async_send_to failed: {}\n",
+                             ec.message());
+                    };
                     co_return std::make_tuple(ec, 0);
                 }
-                ICE_IN_DEBUG {
-                    if (n < packet.size())
-                        std::cout << "dtls_impl::async_send: short write drop "
-                                  << packet.size() - n << " bytes\n";
+                if (n < packet.size()) {
+                    SAMLOG_WARN(auto sink) {
+                        char buf[256];
+                        sink({buf, sizeof(buf)},
+                             "dtls_impl::async_send: short write drop {} "
+                             "bytes\n",
+                             packet.size() - n);
+                    };
                 }
                 this->_bio.out.pop();
             }
@@ -345,15 +351,18 @@ dtls_impl<NextLayer>::perform(Op op, auto... self) {
         case SSL_ERROR_WANT_WRITE:
             continue;
         case SSL_ERROR_SSL:
-            ICE_IN_DEBUG { std::cout << "perform error: SSL_ERROR_SSL\n"; }
+            SAMLOG_WARN(auto sink) { sink("perform error: SSL_ERROR_SSL\n"); };
             co_return std::make_tuple(
                 std::make_error_code(std::errc::protocol_error), 0);
         case SSL_ERROR_ZERO_RETURN:
-            ICE_IN_DEBUG { std::cout << "DTLS connection closed\n"; }
+            SAMLOG_INFO(auto sink) { sink("DTLS connection closed\n"); };
             this->_peer_closed = true;
             co_return std::make_tuple(std::error_code{}, 0);
         default:
-            ICE_IN_DEBUG { std::cout << "perform error: " << err << '\n'; }
+            SAMLOG_WARN(auto sink) {
+                char buf[256];
+                sink({buf, sizeof(buf)}, "perform error: {}\n", err);
+            };
             co_return std::make_tuple(std::make_error_code(std::errc::io_error),
                                       0);
         }
@@ -437,15 +446,16 @@ int dtls_impl<NextLayer>::verify_callback(int preverify_ok,
     if (!::X509_digest(cert, evp_md_from_hash_algo(algo), md, &n))
         return 0;
 
-    std::ostringstream oss;
+    std::string hex_str;
+    hex_str.reserve(n * 3);
     for (unsigned int i = 0; i < n; ++i) {
-        if (i != 0)
-            oss << ":";
-        oss << std::hex << std::uppercase << std::setfill('0') << std::setw(2)
-            << static_cast<int>(md[i]);
+        std::format_to(std::back_inserter(hex_str),
+                       "{:02X}:", static_cast<int>(md[i]));
     }
-    std::string computed = std::move(oss).str();
-    return (computed == self->_expected_remote_fingerprint.value) ? 1 : 0;
+    if (!hex_str.empty())
+        hex_str.pop_back();
+
+    return (hex_str == self->_expected_remote_fingerprint.value) ? 1 : 0;
 }
 
 template <class NextLayer>
@@ -459,8 +469,8 @@ void dtls_impl<NextLayer>::set_expected_remote_fingerprint(
 }
 
 template <class NextLayer>
-fingerprint dtls_impl<NextLayer>::get_remote_fingerprint(
-    hash_algorithm algo) const {
+fingerprint
+dtls_impl<NextLayer>::get_remote_fingerprint(hash_algorithm algo) const {
     ::X509 *peer_cert = ::SSL_get_peer_certificate(_ssl);
     if (!peer_cert)
         return fingerprint{algo, ""};
@@ -470,14 +480,17 @@ fingerprint dtls_impl<NextLayer>::get_remote_fingerprint(
     ::X509_free(peer_cert);
     if (!ok)
         return fingerprint{algo, ""};
-    std::ostringstream oss;
+
+    std::string hex_str;
+    hex_str.reserve(n * 3);
     for (unsigned int i = 0; i < n; ++i) {
-        if (i != 0)
-            oss << ":";
-        oss << std::hex << std::uppercase << std::setfill('0') << std::setw(2)
-            << static_cast<int>(md[i]);
+        std::format_to(std::back_inserter(hex_str),
+                       "{:02X}:", static_cast<int>(md[i]));
     }
-    return fingerprint{algo, std::move(oss).str()};
+    if (!hex_str.empty())
+        hex_str.pop_back();
+
+    return fingerprint{algo, std::move(hex_str)};
 }
 
 // ---------------------------------------------------------------------------

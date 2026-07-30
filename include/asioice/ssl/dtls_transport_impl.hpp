@@ -17,17 +17,15 @@
 #include "asioice/ssl/datagram_bio.hpp"
 #include "asioice/ssl/dtls_config.hpp"
 #include "asioice/detail/detached_with_data.hpp"
+#include "samlog.hpp"
 
 #include <memory>
 #include <deque>
 #include <concepts>
 #include <type_traits>
 #include <tuple>
-#include <sstream>
-#include <iomanip>
 #include <algorithm>
 #include <cctype>
-#include <iostream>
 
 namespace asioice::ssl::impl {
 
@@ -99,8 +97,7 @@ struct dtls_impl : asioice::datagram_receiver,
 
     std::optional<srtp_key_material> export_srtp_key_material();
 
-    void
-    set_expected_remote_fingerprint(fingerprint fp) noexcept;
+    void set_expected_remote_fingerprint(fingerprint fp) noexcept;
 
   private:
     struct send_op;

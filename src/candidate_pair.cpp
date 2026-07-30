@@ -2,6 +2,7 @@
 #include "asioice/detail/scope_guard.hpp"
 #include "asioice/detail/stun.hpp"
 #include "asioice/detail/asio2exec.hpp"
+#include "samlog.hpp"
 
 #include "json.hpp"
 
@@ -127,7 +128,7 @@ candidate_pair::keepalive_task(std::chrono::milliseconds ms,
     if (auto p = self.lock(); !p || p->_keepalive_started)
         co_return;
     else {
-        ICE_IN_DEBUG { std::cout << "Keepalive task started\n"; }
+        SAMLOG_INFO(auto sink) { sink("Keepalive task started\n"); };
         p->_keepalive_started = true;
         ex = p->local_candidate().transport.get_executor();
     }
@@ -135,7 +136,7 @@ candidate_pair::keepalive_task(std::chrono::milliseconds ms,
         auto p = self.lock();
         if (!p)
             return;
-        ICE_IN_DEBUG { std::cout << "Keepalive task exited\n"; }
+        SAMLOG_INFO(auto sink) { sink("Keepalive task exited\n"); };
         p->_keepalive_started = false;
     });
 
@@ -176,7 +177,7 @@ candidate_pair::keepalive_task(std::chrono::milliseconds ms,
         p = self.lock();
         if (!p)
             co_return;
-        ICE_IN_DEBUG { std::cout << "Sent keepalive indication\n"; }
+        SAMLOG_INFO(auto sink) { sink("Sent keepalive indication\n"); };
         p->update_keepalive_time();
     }
 }

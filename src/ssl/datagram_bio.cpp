@@ -1,10 +1,10 @@
 #include "asioice/config.hpp"
 #include "asioice/ssl/datagram_bio.hpp"
+#include "samlog.hpp"
 
 #include <cstring>
 #include <cassert>
 #include <algorithm>
-#include <iostream>
 
 namespace asioice::ssl::impl {
 
@@ -75,10 +75,13 @@ static int __read(::BIO *b, char *buf, int size) noexcept {
     asioice::io_buffer &input = self->in.peek();
     std::size_t nread = size > input.size() ? input.size() : size;
     std::memcpy(buf, input.data(), nread);
-    ICE_IN_DEBUG {
-        if (nread < input.size())
-            std::cout << "BIO_ice_datagram_method::read: drop "
-                      << input.size() - nread << " bytes\n";
+    if (nread < input.size()) {
+        SAMLOG_DEBUG(auto sink) {
+            char buf[256];
+            sink({buf, sizeof(buf)},
+                 "BIO_ice_datagram_method::read: drop {} bytes\n",
+                 input.size() - nread);
+        };
     }
     self->in.pop();
     return nread;

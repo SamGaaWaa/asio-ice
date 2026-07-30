@@ -24,6 +24,8 @@
 
 #include <exec/repeat_until.hpp>
 
+#include "samlog.hpp"
+
 namespace exsctp::impl {
 
 template <class Interface>

@@ -9,6 +9,7 @@
 #include "asioice/task.hpp"
 #include "asioice/detail/early_data_cache.hpp"
 #include "asioice/detail/detached_with_data.hpp"
+#include "samlog.hpp"
 
 #include <memory>
 

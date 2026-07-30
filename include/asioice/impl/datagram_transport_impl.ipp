@@ -33,9 +33,10 @@ asioice::task<void> datagram_transport_impl<Socket>::recv_loop() {
             auto [ec, n] = co_await this->socket().async_receive_from(
                 buf->prepare_back(buf->capacity()), ep, utils::use_sender);
             if (ec) {
-                ICE_IN_DEBUG {
-                    std::cerr << "recv_loop: " << ec.message() << "\n";
-                }
+                SAMLOG_WARN(auto sink) {
+                    char buf[256];
+                    sink({buf, sizeof(buf)}, "recv_loop: {}\n", ec.message());
+                };
                 co_return;
             }
             if (n == 0)
@@ -45,9 +46,10 @@ asioice::task<void> datagram_transport_impl<Socket>::recv_loop() {
             auto [ec, n] = co_await this->socket().async_receive(
                 buf->prepare_back(buf->capacity()), utils::use_sender);
             if (ec) {
-                ICE_IN_DEBUG {
-                    std::cerr << "recv_loop: " << ec.message() << "\n";
-                }
+                SAMLOG_WARN(auto sink) {
+                    char buf[256];
+                    sink({buf, sizeof(buf)}, "recv_loop: {}\n", ec.message());
+                };
                 co_return;
             }
             if (n == 0)

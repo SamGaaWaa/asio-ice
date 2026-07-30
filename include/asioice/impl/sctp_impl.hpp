@@ -13,6 +13,7 @@
 #include "asioice/detail/shared_promise.hpp"
 #include "asioice/detail/asio2exec.hpp"
 #include "exsctp/transport.hpp"
+#include "samlog.hpp"
 
 #if ASIOICE_USE_BOOST_ASIO > 0
 #include <boost/asio/steady_timer.hpp>
@@ -113,18 +114,19 @@ struct io_interface : std::enable_shared_from_this<io_interface<Layer>> {
             auto [ec, n] = co_await _next_layer->async_receive(
                 net::buffer(buf), utils::use_sender);
             if (ec) {
-                ICE_IN_DEBUG {
-                    std::cerr
-                        << "sctp::impl::io_interface::read_loop async_receive: "
-                        << ec.message() << '\n';
-                }
+                SAMLOG_WARN(auto sink) {
+                    char buf[256];
+                    sink({buf, sizeof(buf)},
+                         "sctp::impl::io_interface::read_loop async_receive: "
+                         "{}\n",
+                         ec.message());
+                };
                 co_return;
             }
             if (n == 0) {
-                ICE_IN_DEBUG {
-                    std::cerr
-                        << "sctp::impl::io_interface::read_loop: closed\n";
-                }
+                SAMLOG_INFO(auto sink) {
+                    sink("sctp::impl::io_interface::read_loop: closed\n");
+                };
                 co_return;
             }
             if (_on_data) [[likely]]

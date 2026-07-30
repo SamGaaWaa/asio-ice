@@ -14,6 +14,7 @@
 #include "asioice/detail/property.hpp"
 #include "asioice/detail/binary.hpp"
 #include "asioice/impl/data_channel_types.hpp"
+#include "samlog.hpp"
 
 #include <exec/async_scope.hpp>
 #include <exec/repeat_until.hpp>
@@ -32,7 +33,6 @@
 #include <span>
 #include <string>
 #include <stdexcept>
-#include <iostream>
 #include <ranges>
 #include <bit>
 
@@ -390,10 +390,11 @@ class data_channel_manager_impl
     void on_outgoing_reseted(std::span<const dcsctp::StreamID> ids,
                              bool success, std::string_view reason) {
         if (!success) {
-            ICE_IN_DEBUG {
+            SAMLOG_DEBUG(auto sink) {
+                char buf[256];
                 for (auto id : ids)
-                    std::cerr << "Reset stream " << *id << " failed\n";
-            }
+                    sink({buf, sizeof(buf)}, "Reset stream {} failed\n", *id);
+            };
             // fallthrough
         }
         for (const auto &id : ids) {
@@ -504,7 +505,7 @@ class data_channel_manager_impl
             options.max_packet_life_time = param;
             break;
         default:
-            ICE_IN_DEBUG { std::cerr << "Unknown datachannel type\n"; }
+            SAMLOG_DEBUG(auto sink) { sink("Unknown datachannel type\n"); };
             break;
         }
         return options;
@@ -547,29 +548,27 @@ class data_channel_manager_impl
             }
             if ((_is_client && (sid % 2) == 0) ||
                 (!_is_client && (sid % 2) != 0) || _channels.contains(sid)) {
-                ICE_IN_DEBUG {
-                    std::cerr
-                        << "(_is_client && (sid % 2) == 0) || (!_is_client && "
-                           "(sid % 2) != 0) || _channels.contains(sid)\n";
-                }
+                SAMLOG_WARN(auto sink) {
+                    sink("(_is_client && (sid % 2) == 0) || (!_is_client && "
+                         "(sid % 2) != 0) || _channels.contains(sid)\n");
+                };
                 co_return;
             }
             uint16_t label_len = binary::read_big<uint16_t, 8>(data.data());
             uint16_t proto_len = binary::read_big<uint16_t, 10>(data.data());
             if (data.size() < size_t(12) + label_len + proto_len) {
-                ICE_IN_DEBUG {
-                    std::cerr
-                        << "Invalid DCEP OPEN message: insufficient length\n";
-                }
+                SAMLOG_WARN(auto sink) {
+                    sink("Invalid DCEP OPEN message: insufficient length\n");
+                };
                 co_return;
             }
 
             auto opt = parse_reliability_options(data);
             if (opt.max_packet_life_time && opt.max_retransmits) {
-                ICE_IN_DEBUG {
-                    std::cerr << "Invalid open options: max_packet_life_time "
-                                 "&& max_retransmits\n";
-                }
+                SAMLOG_WARN(auto sink) {
+                    sink("Invalid open options: max_packet_life_time "
+                         "&& max_retransmits\n");
+                };
                 co_return;
             }
             switch (auto pri = binary::read_big<uint16_t, 2>(data.data());
@@ -581,7 +580,10 @@ class data_channel_manager_impl
                 opt.priority = static_cast<data_channel_priority>(pri);
                 break;
             default:
-                ICE_IN_DEBUG { std::cerr << "unknown priority:" << pri; }
+                SAMLOG_DEBUG(auto sink) {
+                    char buf[256];
+                    sink({buf, sizeof(buf)}, "unknown priority: {}\n", pri);
+                };
                 opt.priority = data_channel_priority::low;
                 break;
             }
@@ -603,9 +605,9 @@ class data_channel_manager_impl
                                     std::span<const uint8_t>{&ack, 1}};
             bool acked = co_await _sctp->send(ack_msg, exsctp::send_options{});
             if (!acked) {
-                ICE_IN_DEBUG {
-                    std::cerr << "Failed to send a DATA_CHANNEL_ACK Message\n";
-                }
+                SAMLOG_DEBUG(auto sink) {
+                    sink("Failed to send a DATA_CHANNEL_ACK Message\n");
+                };
                 co_return;
             }
             _channels[sid] = ch.get();
@@ -620,10 +622,9 @@ class data_channel_manager_impl
         } else if (msg_type == kDcepAck) {
             auto it = _channels.find(sid);
             if (it == _channels.end()) {
-                ICE_IN_DEBUG {
-                    std::cerr
-                        << "DATA_CHANNEL_ACK Message: unknown stream id\n";
-                }
+                SAMLOG_DEBUG(auto sink) {
+                    sink("DATA_CHANNEL_ACK Message: unknown stream id\n");
+                };
                 co_return;
             }
             if (it->second->state() == data_channel::state_t::connecting)
@@ -653,7 +654,7 @@ class data_channel_manager_impl
                 }
                 auto it = _channels.find(*sid);
                 if (it == _channels.end()) {
-                    ICE_IN_DEBUG { std::cerr << "Unknown stream id\n"; }
+                    SAMLOG_DEBUG(auto sink) { sink("Unknown stream id\n"); };
                     // TODO: reset stream
                     continue;
                 }

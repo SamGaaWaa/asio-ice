@@ -43,6 +43,8 @@ else()
     set(__ASIOICE_USE_CPPMDNS 0)
 endif()
 
+add_subdirectory(samlog)
+
 set(Boost_DEBUG ON)
 set(Boost_USE_STATIC_LIBS ON)
 find_package(Boost 1.89 CONFIG REQUIRED)
@@ -116,9 +118,9 @@ target_link_libraries(asioice_compile_flags INTERFACE
 target_compile_options(asioice_compile_flags INTERFACE
                        $<$<AND:$<COMPILE_LANG_AND_ID:CXX,GNU>,$<PLATFORM_ID:Windows>>:-Wa,-mbig-obj>
                        )
-target_link_libraries(asioice PRIVATE Boost::boost asioice_compile_flags)
+target_link_libraries(asioice PUBLIC Boost::boost asioice_compile_flags samlog)
 if(ASIOICE_USE_OPENSSL)
-    target_link_libraries(asioice PRIVATE OpenSSL::SSL OpenSSL::Crypto)
+    target_link_libraries(asioice PUBLIC OpenSSL::SSL OpenSSL::Crypto)
 endif()
 if(ASIOICE_ENABLE_SCTP_OVER_DTLS)
     target_link_libraries(asioice PUBLIC exsctp)

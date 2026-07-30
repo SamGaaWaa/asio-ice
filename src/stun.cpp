@@ -3,17 +3,16 @@
 #include "asioice/detail/binary.hpp"
 #include "hash.hpp"
 #include "asioice/detail/scope_guard.hpp"
+#include "samlog.hpp"
 
 #include "json.hpp"
 #include <boost/crc.hpp>
 
 #include <algorithm>
 #include <cstring>
-#include <iostream>
 #include <iterator>
 #include <ranges>
 #include <span>
-#include <sstream>
 
 namespace asioice::stun {
 
@@ -525,9 +524,13 @@ static const attr_t *find_attr(const void *data, std::size_t size,
 bool message::integrity::verify(std::string_view password, const void *data,
                                 std::size_t size) const {
     ICE_IN_DEBUG {
-        std::cout << "Check message integrity with key: " << password << '\n';
+        SAMLOG_TRACE(auto sink) {
+            char buf[256];
+            sink({buf, sizeof(buf)}, "Check message integrity with key: {}\n",
+                 password);
+        };
         if (message::is_not_stun(data, size)) {
-            std::cout << "Not STUN message\n";
+            SAMLOG_DEBUG(auto sink) { sink("Not STUN message\n"); };
             throw std::runtime_error("Not STUN message");
         }
     };
@@ -537,16 +540,16 @@ bool message::integrity::verify(std::string_view password, const void *data,
                       ? attr_type_t::STUN_ATTR_MESSAGE_INTEGRITY
                       : attr_type_t::STUN_ATTR_MESSAGE_INTEGRITY_SHA256);
     if (!attr) {
-        ICE_IN_DEBUG { std::cout << "No message integrity attribute\n"; }
+        SAMLOG_DEBUG(auto sink) { sink("No message integrity attribute\n"); };
         return false;
     }
     const uint8_t *begin = static_cast<const uint8_t *>(data);
     const uint8_t *const end = begin + size;
     const uint16_t hash_size = binary::ntoh<uint16_t>(attr->length);
     if (hash_size + 4 + (const uint8_t *)attr > end) {
-        ICE_IN_DEBUG {
-            std::cout << "Message integrity attribute length is invalid\n";
-        }
+        SAMLOG_DEBUG(auto sink) {
+            sink("Message integrity attribute length is invalid\n");
+        };
         return false;
     }
     uint16_t tmp_len = binary::hton<uint16_t>(
@@ -574,10 +577,12 @@ bool message::integrity::verify(std::string_view password, const void *data,
         if (std::memcmp(res, attr->value(), hash_size) != 0)
             return false;
     } else {
-        ICE_IN_DEBUG { std::cout << "Unknown message integrity algorithm\n"; }
+        SAMLOG_DEBUG(auto sink) {
+            sink("Unknown message integrity algorithm\n");
+        };
         return false;
     }
-    ICE_IN_DEBUG { std::cout << "Message integrity check success\n" << '\n'; }
+    SAMLOG_TRACE(auto sink) { sink("Message integrity check success\n"); };
     return true;
 }
 
@@ -586,7 +591,9 @@ bool message::integrity::verify(std::string_view key,
     ICE_IN_DEBUG {
         if (msg._raw_data.empty() ||
             is_not_stun(msg._raw_data.data(), msg._raw_data.size())) {
-            std::cout << "Message integrity check failed: not a STUN message\n";
+            SAMLOG_DEBUG(auto sink) {
+                sink("Message integrity check failed: not a STUN message\n");
+            };
             throw std::runtime_error(
                 "Message integrity check failed: not a STUN message");
         }
@@ -724,7 +731,7 @@ bool message::parse(const void *data, std::size_t buf_size,
             break;
         }
         case attr_type_t::STUN_ATTR_FINGERPRINT: {
-            ICE_IN_DEBUG { std::cout << "Check fingerprint\n"; }
+            SAMLOG_TRACE(auto sink) { sink("Check fingerprint\n"); };
             if (attr_len != 4)
                 return false;
             fingerprint = true;
@@ -736,9 +743,9 @@ bool message::parse(const void *data, std::size_t buf_size,
             crc.process_bytes(begin + 4, iter.data() - begin - 4);
             if ((crc.checksum() ^ 0x5354554e) !=
                 binary::read_big<uint32_t>(attr.value())) {
-                ICE_IN_DEBUG {
-                    std::cerr << "STUN fingerprint check failed.\n";
-                }
+                SAMLOG_DEBUG(auto sink) {
+                    sink("STUN fingerprint check failed.\n");
+                };
                 return false;
             }
             this->_checked_fingerprint = true;
@@ -763,18 +770,21 @@ bool message::parse(const void *data, std::size_t buf_size,
                     bytes + 1, nonce.data() + STUN_NONCE_COOKIE.length(), 4);
                 if (n_in != 4 || n_out != 3) {
                     _security_features = 0;
-                    ICE_IN_DEBUG {
-                        std::cerr << "Nonce has cookie, but the encoded "
-                                     "Security Feature bits field is invalid: "
-                                  << this->nonce << '\n';
-                    }
+                    SAMLOG_DEBUG(auto sink) {
+                        char buf[256];
+                        sink({buf, sizeof(buf)},
+                             "Nonce has cookie, but the encoded "
+                             "Security Feature bits field is invalid: {}\n",
+                             this->nonce);
+                    };
                 } else {
                     _security_features = binary::read_big<uint32_t>(bytes);
-                    ICE_IN_DEBUG {
-                        std::cout
-                            << "STUN: Security features: " << _security_features
-                            << '\n';
-                    }
+                    SAMLOG_TRACE(auto sink) {
+                        char buf[256];
+                        sink({buf, sizeof(buf)},
+                             "STUN: Security features: {}\n",
+                             _security_features);
+                    };
                 }
             }
             break;
@@ -792,12 +802,13 @@ bool message::parse(const void *data, std::size_t buf_size,
             if (pwd_algo_len > 256 ||
                 sizeof(value_password_algorithm_t) + pwd_algo_len > attr_len)
                 return false;
-            ICE_IN_DEBUG {
-                if (pwd_algo_type != password_algorithm::MD5 &&
-                    pwd_algo_type != password_algorithm::SHA256) {
-                    std::cerr << "Unknown password algorithm:" << pwd_algo_type
-                              << '\n';
-                }
+            if (pwd_algo_type != password_algorithm::MD5 &&
+                pwd_algo_type != password_algorithm::SHA256) {
+                SAMLOG_DEBUG(auto sink) {
+                    char buf[256];
+                    sink({buf, sizeof(buf)}, "Unknown password algorithm: {}\n",
+                         pwd_algo_type);
+                };
             }
             this->pwd_algorithm.emplace(
                 pwd_algo_type,
@@ -824,14 +835,15 @@ bool message::parse(const void *data, std::size_t buf_size,
                             pwd_algo_len >
                         pwd_end.data())
                     return false;
-                ICE_IN_DEBUG {
-                    if (pwd_algo_type != password_algorithm::MD5 &&
-                        pwd_algo_type != password_algorithm::SHA256) {
-                        std::cerr
-                            << "Unknown password algorithm:" << pwd_algo_type
-                            << '\n';
-                    }
+                if (pwd_algo_type != password_algorithm::MD5 &&
+                    pwd_algo_type != password_algorithm::SHA256) {
+                    SAMLOG_DEBUG(auto sink) {
+                        char buf[256];
+                        sink({buf, sizeof(buf)},
+                             "Unknown password algorithm: {}\n", pwd_algo_type);
+                    };
                 }
+
                 this->pwd_algorithms.emplace_back(
                     pwd_algo_type, std::span<const std::byte>{
                                        reinterpret_cast<const std::byte *>(
@@ -1398,7 +1410,7 @@ int message::write_to(void *buf, size_t length) const noexcept {
             iter->length = binary::hton<uint16_t>(hash::sha256::digest_size);
             break;
         default:
-            ICE_IN_DEBUG { std::cerr << "Unknown integrity algorithm\n"; }
+            SAMLOG_DEBUG(auto sink) { sink("Unknown integrity algorithm\n"); };
             continue;
         }
         if (iter->value() + attr_size > buf_end)
@@ -1442,7 +1454,7 @@ int message::write_to(void *buf, size_t length) const noexcept {
                                 iter.data() - buf_begin - sizeof(header_t));
     return iter.data() - buf_begin;
 overflow:
-    ICE_IN_DEBUG { std::cerr << "Buffer is too small.\n"; };
+    SAMLOG_WARN(auto sink) { sink("Buffer is too small.\n"); };
     return -1;
 }
 
