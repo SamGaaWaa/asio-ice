@@ -1,5 +1,6 @@
 #include "asioice/ssl/dtls_config.hpp"
 #include "asioice/detail/scope_guard.hpp"
+#include "asioice/detail/string_utils.hpp"
 
 #include <openssl/ssl.h>
 #include <openssl/err.h>
@@ -11,8 +12,6 @@
 #include <openssl/ec.h>
 #include <openssl/bio.h>
 
-#include <sstream>
-#include <iomanip>
 #include <algorithm>
 #include <cassert>
 #include <utility>
@@ -50,14 +49,7 @@ static std::string compute_fingerprint(::X509 *cert, hash_algorithm algo) {
     unsigned int n;
     if (!::X509_digest(cert, to_evp_md(algo), md, &n))
         throw std::runtime_error{"X509_digest failed"};
-    std::ostringstream oss;
-    for (unsigned int i = 0; i < n; ++i) {
-        if (i != 0)
-            oss << ":";
-        oss << std::hex << std::uppercase << std::setfill('0') << std::setw(2)
-            << static_cast<int>(md[i]);
-    }
-    return std::move(oss).str();
+    return utils::dot_hex(md, n);
 }
 
 } // namespace

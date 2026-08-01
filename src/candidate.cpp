@@ -8,9 +8,8 @@
 
 #include <charconv>
 #include <cstring>
-#include <iomanip>
-#include <sstream>
 #include <string>
+#include <format>
 
 namespace asioice {
 
@@ -104,8 +103,7 @@ bool candidate::can_pair_with(const candidate &other) const noexcept {
              other.endpoint.address().is_v4()) ||
             (this->endpoint.address().is_v6() &&
              other.endpoint.address().is_v6())) &&
-           utils::case_insensitive_equal(this->transport_type,
-                                         other.transport_type);
+           utils::nceq(this->transport_type, other.transport_type);
 }
 
 std::optional<candidate> candidate::from_sdp(std::string_view sdp,
@@ -244,23 +242,22 @@ std::optional<candidate> candidate::from_sdp(std::string_view sdp,
 }
 
 std::string candidate::to_sdp() const {
-    std::ostringstream sdp;
-    sdp << "candidate:" << this->foundation << ' ' << (int)this->component
-        << ' ' << this->transport_type << ' ' << this->priority << ' '
-        << (!this->mdns_host.empty() ? this->mdns_host
-                                     : this->endpoint.address().to_string())
-        << ' ' << this->endpoint.port() << " typ "
-        << type_to_string(this->type);
+    auto sdp = std::format(
+        "candidate:{} {} {} {} {} {} typ {}", this->foundation,
+        (int)this->component, this->transport_type, this->priority,
+        (!this->mdns_host.empty() ? this->mdns_host
+                                  : this->endpoint.address().to_string()),
+        this->endpoint.port(), type_to_string(this->type));
     if (this->related) {
-        sdp << " raddr "
-            << (!this->mdns_related.empty()
-                    ? this->mdns_related
-                    : this->related->address().to_string())
-            << " rport " << this->related->port();
+        std::format_to(std::back_inserter(sdp), " raddr {} rport {}",
+                       (!this->mdns_related.empty()
+                            ? this->mdns_related
+                            : this->related->address().to_string()),
+                       this->related->port());
     }
     if (!this->tcptype.empty())
-        sdp << " tcptype " << this->tcptype;
-    return std::move(sdp).str();
+        std::format_to(std::back_inserter(sdp), " tcptype {}", this->tcptype);
+    return sdp;
 }
 
 } // namespace asioice

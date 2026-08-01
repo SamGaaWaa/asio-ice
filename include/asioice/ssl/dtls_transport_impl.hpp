@@ -1,10 +1,9 @@
 #pragma once
 
-#include "asioice/config.hpp"
-
 #include <openssl/err.h>
 #include <openssl/ssl.h>
 
+#include "asioice/config.hpp"
 #include "asioice/concepts.hpp"
 #include "asioice/detail/asio2exec.hpp"
 #include "asioice/detail/receiver.hpp"
@@ -17,6 +16,7 @@
 #include "asioice/ssl/datagram_bio.hpp"
 #include "asioice/ssl/dtls_config.hpp"
 #include "asioice/detail/detached_with_data.hpp"
+#include "asioice/detail/string_utils.hpp"
 #include "samlog.hpp"
 
 #include <memory>

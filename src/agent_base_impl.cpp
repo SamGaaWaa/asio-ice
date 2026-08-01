@@ -553,8 +553,7 @@ void agent_base_impl::pair_local_candidate(const asioice::candidate &c) {
                             asioice::candidate_pair::state_t::FROZEN) &&
                        p->local_candidate().endpoint == c.endpoint &&
                        p->remote_candidate().endpoint == remote_c.endpoint &&
-                       utils::case_insensitive_equal(p->transport_type(),
-                                                     c.transport_type);
+                       utils::nceq(p->transport_type(), c.transport_type);
             });
         if (it != this->_check_list.end()) {
             const auto &p = *it;
@@ -592,8 +591,7 @@ void agent_base_impl::pair_remote_candidate(const asioice::candidate &c) {
                             asioice::candidate_pair::state_t::FROZEN) &&
                        p->local_candidate().endpoint == local_c.endpoint &&
                        p->remote_candidate().endpoint == c.endpoint &&
-                       utils::case_insensitive_equal(p->transport_type(),
-                                                     c.transport_type);
+                       utils::nceq(p->transport_type(), c.transport_type);
             });
         if (it != this->_check_list.end()) {
             const auto &p = *it;
@@ -761,8 +759,7 @@ agent_base_impl::add_remote_candidate(asioice::candidate remote_c) {
             this->_remote_candidates,
             [&](const auto &c) noexcept {
                 return c.endpoint == remote_c.endpoint &&
-                       utils::case_insensitive_equal(c.transport_type,
-                                                     remote_c.transport_type);
+                       utils::nceq(c.transport_type, remote_c.transport_type);
             });
         it != this->_remote_candidates.end()) {
         SAMLOG_DEBUG(auto sink) {
@@ -1170,7 +1167,7 @@ asioice::task<void> agent_base_impl::do_check(check_task ct) {
                                valid_p->local_candidate().endpoint &&
                            p->remote_candidate().endpoint ==
                                valid_p->remote_candidate().endpoint &&
-                           utils::case_insensitive_equal(
+                           utils::nceq(
                                p->local_candidate().transport_type,
                                valid_p->local_candidate().transport_type);
                 });
@@ -1214,17 +1211,16 @@ agent_base_impl::construct_valid_pair(const stun::message &req,
             return p->local_candidate().endpoint == *resp.xor_mapped_address &&
                    p->remote_candidate().endpoint ==
                        pair.remote_candidate().endpoint &&
-                   utils::case_insensitive_equal(
-                       p->local_candidate().transport_type,
-                       pair.local_candidate().transport_type);
+                   utils::nceq(p->local_candidate().transport_type,
+                               pair.local_candidate().transport_type);
         });
     if (valid_it != this->_check_list.end())
         return *valid_it;
     auto local_it = std::ranges::find_if(
         this->_local_candidates, [&](const auto &c) noexcept {
             return c.endpoint == *resp.xor_mapped_address &&
-                   utils::case_insensitive_equal(
-                       c.transport_type, pair.local_candidate().transport_type);
+                   utils::nceq(c.transport_type,
+                               pair.local_candidate().transport_type);
         });
     if (local_it == this->_local_candidates.end()) {
         // Peer-Reflexive Candidates
@@ -1551,13 +1547,12 @@ agent_base_impl::do_handle_request(asioice::any_transport transport,
 
     bool use_candidate = !this->_config.ice_controlling && req.use_candidate;
     asioice::candidate *local = nullptr;
-    if (auto it = std::ranges::find_if(this->_local_candidates,
-                                       [&](const auto &c) noexcept {
-                                           return c.transport == transport &&
-                                                  utils::case_insensitive_equal(
-                                                      this->_config.transport,
-                                                      c.transport_type);
-                                       });
+    if (auto it = std::ranges::find_if(
+            this->_local_candidates,
+            [&](const auto &c) noexcept {
+                return c.transport == transport &&
+                       utils::nceq(this->_config.transport, c.transport_type);
+            });
         it != this->_local_candidates.end()) {
         local = &(*it);
     } else {
@@ -1566,13 +1561,12 @@ agent_base_impl::do_handle_request(asioice::any_transport transport,
     }
 
     asioice::candidate *remote = nullptr;
-    if (auto it = std::ranges::find_if(this->_remote_candidates,
-                                       [&](const auto &c) noexcept {
-                                           return c.endpoint == source &&
-                                                  utils::case_insensitive_equal(
-                                                      this->_config.transport,
-                                                      c.transport_type);
-                                       });
+    if (auto it = std::ranges::find_if(
+            this->_remote_candidates,
+            [&](const auto &c) noexcept {
+                return c.endpoint == source &&
+                       utils::nceq(this->_config.transport, c.transport_type);
+            });
         it != this->_remote_candidates.end()) {
         remote = &(*it);
     } else {
@@ -1597,9 +1591,8 @@ agent_base_impl::do_handle_request(asioice::any_transport transport,
             [&](const auto &p) noexcept {
                 return p->local_candidate().endpoint == local->endpoint &&
                        p->remote_candidate().endpoint == remote->endpoint &&
-                       utils::case_insensitive_equal(
-                           p->local_candidate().transport_type,
-                           local->transport_type);
+                       utils::nceq(p->local_candidate().transport_type,
+                                   local->transport_type);
             });
         it != this->_check_list.end()) {
         auto &pair = *it;

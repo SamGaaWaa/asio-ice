@@ -3,7 +3,7 @@
 
 namespace asioice::utils {
 
-bool case_insensitive_equal(std::string_view a, std::string_view b) noexcept {
+bool nceq(std::string_view a, std::string_view b) noexcept {
     if (a.size() != b.size())
         return false;
     auto it1 = a.begin();
@@ -43,6 +43,23 @@ std::string random_string(std::size_t n) {
             }
             return n;
         });
+    return res;
+}
+
+std::string dot_hex(const void *data, std::size_t n) {
+    if (n == 0)
+        return {};
+    std::string res;
+    res.resize_and_overwrite(n * 3, [&](char *p, std::size_t) -> std::size_t {
+        const char *const begin = p;
+        for (std::size_t i = 0; i < n; ++i) {
+            const uint8_t b = *((const uint8_t *)data + i);
+            *p++ = "0123456789ABCDEF"[b >> 4];
+            *p++ = "0123456789ABCDEF"[b & 0xf];
+            *p++ = ':';
+        }
+        return p - begin - 1;
+    });
     return res;
 }
 

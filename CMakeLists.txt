@@ -135,7 +135,7 @@ endif()
 target_include_directories(asioice PUBLIC ${STDEXEC_DIR})
 target_include_directories(asioice PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)
 target_include_directories(asioice PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
-target_include_directories(asioice PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/third_party)
+target_include_directories(asioice PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/third_party)
 
 add_library(asioice_test_flags INTERFACE)
 target_link_libraries(asioice_test_flags INTERFACE Boost::boost)

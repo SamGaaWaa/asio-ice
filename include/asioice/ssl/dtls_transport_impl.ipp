@@ -445,16 +445,7 @@ int dtls_impl<NextLayer>::verify_callback(int preverify_ok,
     const hash_algorithm algo = self->_expected_remote_fingerprint.algorithm;
     if (!::X509_digest(cert, evp_md_from_hash_algo(algo), md, &n))
         return 0;
-
-    std::string hex_str;
-    hex_str.reserve(n * 3);
-    for (unsigned int i = 0; i < n; ++i) {
-        std::format_to(std::back_inserter(hex_str),
-                       "{:02X}:", static_cast<int>(md[i]));
-    }
-    if (!hex_str.empty())
-        hex_str.pop_back();
-
+    std::string hex_str = utils::dot_hex(md, n);
     return (hex_str == self->_expected_remote_fingerprint.value) ? 1 : 0;
 }
 
@@ -480,16 +471,7 @@ dtls_impl<NextLayer>::get_remote_fingerprint(hash_algorithm algo) const {
     ::X509_free(peer_cert);
     if (!ok)
         return fingerprint{algo, ""};
-
-    std::string hex_str;
-    hex_str.reserve(n * 3);
-    for (unsigned int i = 0; i < n; ++i) {
-        std::format_to(std::back_inserter(hex_str),
-                       "{:02X}:", static_cast<int>(md[i]));
-    }
-    if (!hex_str.empty())
-        hex_str.pop_back();
-
+    std::string hex_str = utils::dot_hex(md, n);
     return fingerprint{algo, std::move(hex_str)};
 }
 
