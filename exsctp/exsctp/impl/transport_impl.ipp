@@ -68,9 +68,7 @@ exsctp::task<void> transport_impl<Interface>::packet_sender() {
         auto [ec, n] = co_await this->_interface->send(packet);
         if (ec) {
             SAMLOG_WARN(auto sink) {
-                char buf[256];
-                sink({buf, sizeof(buf)}, "packet_sender error: {}\n",
-                     ec.message());
+                sink("packet_sender error: {}\n", ec.message());
             };
             co_return;
         }
@@ -80,9 +78,7 @@ exsctp::task<void> transport_impl<Interface>::packet_sender() {
         }
         if (n < packet.size()) {
             SAMLOG_WARN(auto sink) {
-                char buf[256];
-                sink({buf, sizeof(buf)},
-                     "packet_sender sent partial packet: {} of {} bytes\n", n,
+                sink("packet_sender sent partial packet: {} of {} bytes\n", n,
                      packet.size());
             };
         }

@@ -321,18 +321,14 @@ dtls_impl<NextLayer>::perform(Op op, auto... self) {
                 auto [ec, n] = co_await this->next_layer().async_send(packet);
                 if (ec) {
                     SAMLOG_WARN(auto sink) {
-                        char buf[256];
-                        sink({buf, sizeof(buf)},
-                             "next_layer().async_send_to failed: {}\n",
+                        sink("next_layer().async_send_to failed: {}\n",
                              ec.message());
                     };
                     co_return std::make_tuple(ec, 0);
                 }
                 if (n < packet.size()) {
                     SAMLOG_WARN(auto sink) {
-                        char buf[256];
-                        sink({buf, sizeof(buf)},
-                             "dtls_impl::async_send: short write drop {} "
+                        sink("dtls_impl::async_send: short write drop {} "
                              "bytes\n",
                              packet.size() - n);
                     };
@@ -359,10 +355,7 @@ dtls_impl<NextLayer>::perform(Op op, auto... self) {
             this->_peer_closed = true;
             co_return std::make_tuple(std::error_code{}, 0);
         default:
-            SAMLOG_WARN(auto sink) {
-                char buf[256];
-                sink({buf, sizeof(buf)}, "perform error: {}\n", err);
-            };
+            SAMLOG_WARN(auto sink) { sink("perform error: {}\n", err); };
             co_return std::make_tuple(std::make_error_code(std::errc::io_error),
                                       0);
         }

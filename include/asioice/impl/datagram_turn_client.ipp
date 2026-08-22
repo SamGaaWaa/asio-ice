@@ -138,9 +138,8 @@ asioice::task<bool> datagram_client<NextLayer>::request_with_retry(
     const auto code = resp.error_code->code;
     if (code != 401 && code != 438) {
         SAMLOG_DEBUG(auto sink) {
-            char buf[256];
-            sink({buf, sizeof(buf)}, "Unexpected error code: {}, reason: {}\n",
-                 code, resp.error_code->reason);
+            sink("Unexpected error code: {}, reason: {}\n", code,
+                 resp.error_code->reason);
         };
         co_return false;
     }
@@ -295,9 +294,7 @@ asioice::task<void> datagram_client<NextLayer>::refresh_allocation_task() {
             co_return;
         }
         SAMLOG_INFO(auto sink) {
-            char buf[256];
-            sink({buf, sizeof(buf)}, "Refresh task succeeded, lifetime: {}\n",
-                 this->_lifetime);
+            sink("Refresh task succeeded, lifetime: {}\n", this->_lifetime);
         };
     }
 }
@@ -498,17 +495,13 @@ datagram_client<NextLayer>::permission_state::refresh_task() {
 
         if (co_await this->client().request_with_retry(req, resp, 7)) {
             SAMLOG_INFO(auto sink) {
-                char buf[256];
-                sink({buf, sizeof(buf)},
-                     "permission_state::refresh_task: refreshed permission "
+                sink("permission_state::refresh_task: refreshed permission "
                      "\"{}\"\n",
                      this->ip().to_string());
             };
         } else {
             SAMLOG_WARN(auto sink) {
-                char buf[256];
-                sink({buf, sizeof(buf)},
-                     "permission_state::refresh_task: failed to refresh "
+                sink("permission_state::refresh_task: failed to refresh "
                      "permission \"{}\"\n",
                      this->ip().to_string());
             };
@@ -646,9 +639,7 @@ void datagram_client<NextLayer>::delete_permission(
     if (!this->is_running())
         return;
     SAMLOG_INFO(auto sink) {
-        char buf[256];
-        sink({buf, sizeof(buf)}, "Delete permission of \"{}\"\n",
-             peer.to_string());
+        sink("Delete permission of \"{}\"\n", peer.to_string());
     };
     auto it = this->_permissions.find(peer);
     if (it == this->_permissions.end())
@@ -677,9 +668,7 @@ datagram_client<NextLayer>::async_send_to(ConstBufferSequence buffer_sequence,
     auto permission = this->_permissions.find(destination.address());
     if (permission == this->_permissions.end()) {
         SAMLOG_WARN(auto sink) {
-            char buf[256];
-            sink({buf, sizeof(buf)}, "No permission of {}\n",
-                 destination.address().to_string());
+            sink("No permission of {}\n", destination.address().to_string());
         };
         co_return std::make_tuple(std::make_error_code(std::errc::bad_address),
                                   0);
@@ -759,8 +748,7 @@ datagram_client<NextLayer>::channel_bind(net::ip::udp::endpoint peer,
     } else
         channel = this->generate_channel_number();
     SAMLOG_INFO(auto sink) {
-        char buf[256];
-        sink({buf, sizeof(buf)}, "Binding or refreshing channel: ({}:{}, {})\n",
+        sink("Binding or refreshing channel: ({}:{}, {})\n",
              peer.address().to_string(), peer.port(), (int)channel);
     };
     stun::message req;
@@ -775,17 +763,13 @@ datagram_client<NextLayer>::channel_bind(net::ip::udp::endpoint peer,
     bool success = co_await this->request_with_retry(req, resp, 7);
     if (!success) {
         SAMLOG_WARN(auto sink) {
-            char buf[256];
-            sink({buf, sizeof(buf)},
-                 "Bind or refresh channel failed: ({}:{}, {})\n",
+            sink("Bind or refresh channel failed: ({}:{}, {})\n",
                  peer.address().to_string(), peer.port(), (int)channel);
         };
         co_return false;
     }
     SAMLOG_INFO(auto sink) {
-        char buf[256];
-        sink({buf, sizeof(buf)},
-             "Bind or refresh channel success: ({}:{}, {})\n",
+        sink("Bind or refresh channel success: ({}:{}, {})\n",
              peer.address().to_string(), peer.port(), (int)channel);
     };
     if (!this->is_running())
@@ -841,9 +825,7 @@ template <class NextLayer>
 asioice::task<void> datagram_client<NextLayer>::channel_state::refresh_task() {
     utils::scope_guard on_error([this]() noexcept {
         SAMLOG_TRACE(auto sink) {
-            char buf[256];
-            sink({buf, sizeof(buf)},
-                 "refresh_task stopped, channel: {}, peer: {}:{}\n",
+            sink("refresh_task stopped, channel: {}, peer: {}:{}\n",
                  (int)this->channel(), this->peer().address().to_string(),
                  this->peer().port());
         };
@@ -861,18 +843,14 @@ asioice::task<void> datagram_client<NextLayer>::channel_state::refresh_task() {
             this->client().channel_bind(this->peer()));
         if (!ret) {
             SAMLOG_TRACE(auto sink) {
-                char buf[256];
-                sink({buf, sizeof(buf)},
-                     "channel_state::refresh_task cancelled, channel = {}\n",
+                sink("channel_state::refresh_task cancelled, channel = {}\n",
                      (int)this->channel());
             };
             break;
         }
         if (!*ret) {
             SAMLOG_WARN(auto sink) {
-                char buf[256];
-                sink({buf, sizeof(buf)},
-                     "channel_state::refresh_task failed, channel = {}\n",
+                sink("channel_state::refresh_task failed, channel = {}\n",
                      (int)this->channel());
             };
             break;
@@ -889,9 +867,7 @@ asioice::task<void> datagram_client<NextLayer>::channel_state::refresh_task() {
        channel number.
     */
     SAMLOG_TRACE(auto sink) {
-        char buf[256];
-        sink({buf, sizeof(buf)},
-             "refresh_task expired, channel: {}, peer: {}:{}\n",
+        sink("refresh_task expired, channel: {}, peer: {}:{}\n",
              (int)this->channel(), this->peer().address().to_string(),
              this->peer().port());
     };
@@ -949,9 +925,7 @@ bool datagram_client<NextLayer>::datagram_received(
         auto it = this->_channel_to_peer.find(ch);
         if (it == this->_channel_to_peer.end()) {
             SAMLOG_DEBUG(auto sink) {
-                char buf[256];
-                sink({buf, sizeof(buf)}, "WARNING: unknown channel: {}\n",
-                     (int)ch);
+                sink("WARNING: unknown channel: {}\n", (int)ch);
             };
             // ignore
             return true;

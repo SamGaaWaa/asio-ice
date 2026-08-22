@@ -113,9 +113,7 @@ struct transaction
                 net::const_buffer(buf.data(), buf.size()), server);
             if (ec) {
                 SAMLOG_DEBUG(auto sink) {
-                    char buf[256];
-                    sink({buf, sizeof(buf)}, "STUN transaction failed: {}\n",
-                         ec.message());
+                    sink("STUN transaction failed: {}\n", ec.message());
                 };
                 set_state(state_t::ERR);
                 co_return;
@@ -128,9 +126,7 @@ struct transaction
             ec = co_await _timer.async_wait(utils::use_sender);
             if (ec) {
                 SAMLOG_DEBUG(auto sink) {
-                    char buf[256];
-                    sink({buf, sizeof(buf)}, "STUN transaction failed: {}\n",
-                         ec.message());
+                    sink("STUN transaction failed: {}\n", ec.message());
                 };
                 set_state(state_t::ERR);
                 co_return;

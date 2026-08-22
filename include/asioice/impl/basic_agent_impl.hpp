@@ -105,9 +105,7 @@ template <class Sock> struct basic_agent_impl final : agent_base {
         }
         if (ec) {
             SAMLOG_WARN(auto sink) {
-                char buf[256];
-                sink({buf, sizeof(buf)}, "Failed to open socket: {}\n",
-                     ec.message());
+                sink("Failed to open socket: {}\n", ec.message());
             };
             return {};
         }
@@ -116,8 +114,7 @@ template <class Sock> struct basic_agent_impl final : agent_base {
         sock.bind(asioice::endpoint(local_addr, 0), ec);
         if (ec) {
             SAMLOG_WARN(auto sink) {
-                char buf[256];
-                sink({buf, sizeof(buf)}, "Failed to bind address \"{}\": {}\n",
+                sink("Failed to bind address \"{}\": {}\n",
                      local_addr.to_string(), ec.message());
             };
             return {};
@@ -127,8 +124,7 @@ template <class Sock> struct basic_agent_impl final : agent_base {
         transport->set_buffer_pool(this->buffer_pool());
 
         SAMLOG_TRACE(auto sink) {
-            char buf[256];
-            sink({buf, sizeof(buf)}, "Host transport bound to {}:{}\n",
+            sink("Host transport bound to {}:{}\n",
                  transport->local_endpoint().address().to_string(),
                  transport->local_endpoint().port());
         };

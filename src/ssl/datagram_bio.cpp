@@ -77,9 +77,7 @@ static int __read(::BIO *b, char *buf, int size) noexcept {
     std::memcpy(buf, input.data(), nread);
     if (nread < input.size()) {
         SAMLOG_DEBUG(auto sink) {
-            char buf[256];
-            sink({buf, sizeof(buf)},
-                 "BIO_ice_datagram_method::read: drop {} bytes\n",
+            sink("BIO_ice_datagram_method::read: drop {} bytes\n",
                  input.size() - nread);
         };
     }

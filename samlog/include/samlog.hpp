@@ -6,7 +6,6 @@
 #include <memory>
 #include <format>
 #include <source_location>
-#include <span>
 
 namespace samlog {
 
@@ -55,18 +54,19 @@ class logger_interface {
         template <class A, class... Args>
         void operator()(std::format_string<A, Args...> fmt, A &&a,
                         Args &&...args) {
-            logger->log(l,
-                        std::format(fmt, std::forward<A>(a),
-                                    std::forward<Args>(args)...),
-                        loc);
-        }
-
-        template <class... Args>
-        void operator()(std::span<char> buf, std::format_string<Args...> fmt,
-                        Args &&...args) {
-            auto res = std::format_to_n(buf.data(), buf.size(), fmt,
-                                        std::forward<Args>(args)...);
-            logger->log(l, {buf.data(), res.out}, loc);
+            char buf[1024];
+            const std::size_t n = std::formatted_size(
+                fmt, std::forward<A>(a), std::forward<Args>(args)...);
+            if (n > sizeof(buf))
+                logger->log(l,
+                            std::format(fmt, std::forward<A>(a),
+                                        std::forward<Args>(args)...),
+                            loc);
+            else {
+                std::format_to(buf, fmt, std::forward<A>(a),
+                               std::forward<Args>(args)...);
+                logger->log(l, std::string_view{buf, n}, loc);
+            }
         }
 
         template <class MsgGen> int operator<<(MsgGen &&g) {

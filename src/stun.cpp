@@ -525,9 +525,7 @@ bool message::integrity::verify(std::string_view password, const void *data,
                                 std::size_t size) const {
     ICE_IN_DEBUG {
         SAMLOG_TRACE(auto sink) {
-            char buf[256];
-            sink({buf, sizeof(buf)}, "Check message integrity with key: {}\n",
-                 password);
+            sink("Check message integrity with key: {}\n", password);
         };
         if (message::is_not_stun(data, size)) {
             SAMLOG_DEBUG(auto sink) { sink("Not STUN message\n"); };
@@ -771,18 +769,14 @@ bool message::parse(const void *data, std::size_t buf_size,
                 if (n_in != 4 || n_out != 3) {
                     _security_features = 0;
                     SAMLOG_DEBUG(auto sink) {
-                        char buf[256];
-                        sink({buf, sizeof(buf)},
-                             "Nonce has cookie, but the encoded "
+                        sink("Nonce has cookie, but the encoded "
                              "Security Feature bits field is invalid: {}\n",
                              this->nonce);
                     };
                 } else {
                     _security_features = binary::read_big<uint32_t>(bytes);
                     SAMLOG_TRACE(auto sink) {
-                        char buf[256];
-                        sink({buf, sizeof(buf)},
-                             "STUN: Security features: {}\n",
+                        sink("STUN: Security features: {}\n",
                              _security_features);
                     };
                 }
@@ -805,9 +799,7 @@ bool message::parse(const void *data, std::size_t buf_size,
             if (pwd_algo_type != password_algorithm::MD5 &&
                 pwd_algo_type != password_algorithm::SHA256) {
                 SAMLOG_DEBUG(auto sink) {
-                    char buf[256];
-                    sink({buf, sizeof(buf)}, "Unknown password algorithm: {}\n",
-                         pwd_algo_type);
+                    sink("Unknown password algorithm: {}\n", pwd_algo_type);
                 };
             }
             this->pwd_algorithm.emplace(
@@ -838,9 +830,7 @@ bool message::parse(const void *data, std::size_t buf_size,
                 if (pwd_algo_type != password_algorithm::MD5 &&
                     pwd_algo_type != password_algorithm::SHA256) {
                     SAMLOG_DEBUG(auto sink) {
-                        char buf[256];
-                        sink({buf, sizeof(buf)},
-                             "Unknown password algorithm: {}\n", pwd_algo_type);
+                        sink("Unknown password algorithm: {}\n", pwd_algo_type);
                     };
                 }
 

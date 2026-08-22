@@ -391,9 +391,8 @@ class data_channel_manager_impl
                              bool success, std::string_view reason) {
         if (!success) {
             SAMLOG_DEBUG(auto sink) {
-                char buf[256];
                 for (auto id : ids)
-                    sink({buf, sizeof(buf)}, "Reset stream {} failed\n", *id);
+                    sink("Reset stream {} failed\n", *id);
             };
             // fallthrough
         }
@@ -581,8 +580,7 @@ class data_channel_manager_impl
                 break;
             default:
                 SAMLOG_DEBUG(auto sink) {
-                    char buf[256];
-                    sink({buf, sizeof(buf)}, "unknown priority: {}\n", pri);
+                    sink("unknown priority: {}\n", pri);
                 };
                 opt.priority = data_channel_priority::low;
                 break;

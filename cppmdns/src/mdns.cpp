@@ -257,9 +257,7 @@ inline_task<void> query::query_loop() {
     const auto n = msg.write(buf, sizeof(buf));
     if (!n.has_value()) {
         SAMLOG_ERROR(auto sink) {
-            char buf[256];
-            sink({buf, sizeof(buf)}, "Error while serializing query: {}\n",
-                 n.error().message());
+            sink("Error while serializing query: {}\n", n.error().message());
         };
         this->_result.set_value(std::unexpected(n.error()));
         co_return;
@@ -290,9 +288,8 @@ inline_task<void> query::query_loop() {
         auto err2 = err1;
         if (err1 || err2) {
             SAMLOG_ERROR(auto sink) {
-                char buf[256];
-                sink({buf, sizeof(buf)}, "Error while sending query: {} {}\n",
-                     err1.message(), err2.message());
+                sink("Error while sending query: {} {}\n", err1.message(),
+                     err2.message());
             };
             this->_result.set_value(std::unexpected(err1 ? err1 : err2));
             co_return;
@@ -399,8 +396,7 @@ server::impl_t::queryAddr(std::string name,
     auto type = dns::get_record_type(addr);
     if (type != dns::record_type::A && type != dns::record_type::AAAA) {
         SAMLOG_ERROR(auto sink) {
-            char buf[256];
-            sink({buf, sizeof(buf)}, "Unexpected record type: {}\n", (int)type);
+            sink("Unexpected record type: {}\n", (int)type);
         };
         co_return std::unexpected(
             std::error_code((int)error::invalid_result, mdns_category()));
@@ -414,9 +410,7 @@ server::impl_t::queryAddr(std::string name,
             .to_string();
     } catch (const std::exception &e) {
         SAMLOG_ERROR(auto sink) {
-            char buf[256];
-            sink({buf, sizeof(buf)}, "Error while parsing address: {}\n",
-                 e.what());
+            sink("Error while parsing address: {}\n", e.what());
         };
         co_return std::unexpected(
             std::error_code((int)error::invalid_result, mdns_category()));
@@ -524,9 +518,7 @@ inline_task<void> server::impl_t::server_loop() {
             net::buffer(buf, sizeof(buf)), remote, asio2exec::use_sender);
         if (err) {
             SAMLOG_ERROR(auto sink) {
-                char buf[256];
-                sink({buf, sizeof(buf)},
-                     "Server loop: Error while receiving query: {}\n",
+                sink("Server loop: Error while receiving query: {}\n",
                      err.message());
             };
             continue;
@@ -538,10 +530,8 @@ inline_task<void> server::impl_t::server_loop() {
         // TODO: Check if it was send from a local network
         {
             SAMLOG_TRACE(auto sink) {
-                char buf[256];
                 auto local_ep = this->sock_r4.local_endpoint();
-                sink({buf, sizeof(buf)},
-                     "Local endpoint: {}:{}\nRemote endpoint: {}:{}\n",
+                sink("Local endpoint: {}:{}\nRemote endpoint: {}:{}\n",
                      local_ep.address().to_string(), local_ep.port(),
                      remote.address().to_string(), remote.port());
             };
@@ -613,9 +603,7 @@ inline_task<void> server::impl_t::server_loop() {
             auto len = multicast_resp.write(buf, sizeof(buf));
             if (!len) {
                 SAMLOG_WARN(auto sink) {
-                    char buf[256];
-                    sink({buf, sizeof(buf)},
-                         "Failed to serialize multicast response: {}\n",
+                    sink("Failed to serialize multicast response: {}\n",
                          len.error().message());
                 };
                 continue;
@@ -624,9 +612,7 @@ inline_task<void> server::impl_t::server_loop() {
                 net::buffer(buf, *len), MDNS_ENDPOINT, asio2exec::use_sender);
             if (err) {
                 SAMLOG_WARN(auto sink) {
-                    char buf[256];
-                    sink({buf, sizeof(buf)},
-                         "Error while sending multicast response: {}\n",
+                    sink("Error while sending multicast response: {}\n",
                          err.message());
                 };
             }
@@ -635,9 +621,7 @@ inline_task<void> server::impl_t::server_loop() {
             auto len = unicast_resp.write(buf, sizeof(buf));
             if (!len) {
                 SAMLOG_WARN(auto sink) {
-                    char buf[256];
-                    sink({buf, sizeof(buf)},
-                         "Failed to serialize unicast response: {}\n",
+                    sink("Failed to serialize unicast response: {}\n",
                          len.error().message());
                 };
                 continue;
@@ -646,9 +630,7 @@ inline_task<void> server::impl_t::server_loop() {
                 net::buffer(buf, *len), remote, asio2exec::use_sender);
             if (err) {
                 SAMLOG_WARN(auto sink) {
-                    char buf[256];
-                    sink({buf, sizeof(buf)},
-                         "Error while sending unicast response: {}\n",
+                    sink("Error while sending unicast response: {}\n",
                          err.message());
                 };
             }
@@ -670,9 +652,7 @@ inline_task<void> server::impl_t::receive_loop() {
             net::buffer(buf, sizeof(buf)), remote, asio2exec::use_sender);
         if (err) {
             SAMLOG_WARN(auto sink) {
-                char buf[256];
-                sink({buf, sizeof(buf)},
-                     "Receive loop: Error while receiving query: {}\n",
+                sink("Receive loop: Error while receiving query: {}\n",
                      err.message());
             };
             continue;

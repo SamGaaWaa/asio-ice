@@ -115,9 +115,7 @@ struct io_interface : std::enable_shared_from_this<io_interface<Layer>> {
                 net::buffer(buf), utils::use_sender);
             if (ec) {
                 SAMLOG_WARN(auto sink) {
-                    char buf[256];
-                    sink({buf, sizeof(buf)},
-                         "sctp::impl::io_interface::read_loop async_receive: "
+                    sink("sctp::impl::io_interface::read_loop async_receive: "
                          "{}\n",
                          ec.message());
                 };

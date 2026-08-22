@@ -34,8 +34,7 @@ asioice::task<void> datagram_transport_impl<Socket>::recv_loop() {
                 buf->prepare_back(buf->capacity()), ep, utils::use_sender);
             if (ec) {
                 SAMLOG_WARN(auto sink) {
-                    char buf[256];
-                    sink({buf, sizeof(buf)}, "recv_loop: {}\n", ec.message());
+                    sink("recv_loop: {}\n", ec.message());
                 };
                 co_return;
             }
@@ -47,8 +46,7 @@ asioice::task<void> datagram_transport_impl<Socket>::recv_loop() {
                 buf->prepare_back(buf->capacity()), utils::use_sender);
             if (ec) {
                 SAMLOG_WARN(auto sink) {
-                    char buf[256];
-                    sink({buf, sizeof(buf)}, "recv_loop: {}\n", ec.message());
+                    sink("recv_loop: {}\n", ec.message());
                 };
                 co_return;
             }

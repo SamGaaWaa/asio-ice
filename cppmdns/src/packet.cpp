@@ -77,9 +77,7 @@ static std::error_code __parse_name(std::string &name, const void *buf,
                 }
                 if (!__is_valid_domain_name(name)) {
                     SAMLOG_DEBUG(auto sink) {
-                        char buf[256];
-                        sink({buf, sizeof(buf)}, "invalid domain name: {}\n",
-                             name);
+                        sink("invalid domain name: {}\n", name);
                     };
                     return std::error_code{(int)error::invalid_domain_name,
                                            mdns_category()};
@@ -96,9 +94,7 @@ static std::error_code __parse_name(std::string &name, const void *buf,
             const uint16_t ptr = binary::read_big<uint16_t>(iter) - 0xC000;
             if (ptr >= offset) {
                 SAMLOG_DEBUG(auto sink) {
-                    char buf[256];
-                    sink({buf, sizeof(buf)}, "invalid pointer: {} >= {}\n", ptr,
-                         offset);
+                    sink("invalid pointer: {} >= {}\n", ptr, offset);
                 };
                 return std::error_code{(int)error::invalid_format,
                                        mdns_category()};
@@ -306,8 +302,7 @@ static std::error_code __parse_record(record_t &record, const void *buf,
     case record_type::UknownType:
     default: {
         SAMLOG_DEBUG(auto sink) {
-            char buf[256];
-            sink({buf, sizeof(buf)}, "Parse record Unknown record type: {}\n",
+            sink("Parse record Unknown record type: {}\n",
                  (uint16_t)record.type());
         };
     }
@@ -428,9 +423,7 @@ static bool __is_valid_record(const record_t &record) noexcept {
     case record_type::UknownType:
     default: {
         SAMLOG_DEBUG(auto sink) {
-            char buf[256];
-            sink({buf, sizeof(buf)},
-                 "__is_valid_record Unknown record type: {}\n",
+            sink("__is_valid_record Unknown record type: {}\n",
                  (uint16_t)record.type());
         };
         return false;
@@ -512,9 +505,7 @@ class name_compressor {
                        std::ranges::equal(labels, *it_tmp) &&
                        "Domain name should be prepared before writing." ||
                    [&]() {
-                       char buf[256];
-                       sink({buf, sizeof(buf)},
-                            "Name \"{}\" is not found in name pool.\n", name);
+                       sink("Name \"{}\" is not found in name pool.\n", name);
                        return false;
                    }());
         };
@@ -768,9 +759,7 @@ static std::error_code __write_record(void *buf, std::size_t size,
     case record_type::HINFO: {
         // TODO:
         SAMLOG_DEBUG(auto sink) {
-            char buf[256];
-            sink({buf, sizeof(buf)}, "Unsupported record type: {}\n",
-                 (uint16_t)record.type());
+            sink("Unsupported record type: {}\n", (uint16_t)record.type());
         };
         break;
     }
@@ -831,8 +820,7 @@ static std::error_code __write_record(void *buf, std::size_t size,
     case record_type::UknownType:
     default: {
         SAMLOG_DEBUG(auto sink) {
-            char buf[256];
-            sink({buf, sizeof(buf)}, "Write record Unknown record type: {}\n",
+            sink("Write record Unknown record type: {}\n",
                  (uint16_t)record.type());
         };
     }

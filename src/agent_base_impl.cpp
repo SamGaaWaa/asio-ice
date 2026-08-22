@@ -36,9 +36,7 @@ static void parse_ice_servers(const std::vector<std::string> &urls,
                         "::(\\d+))?(?:\\?transport=(udp|tcp))?">(url);
         if (!match) {
             SAMLOG_WARN(auto sink) {
-                char buf[256];
-                sink({buf, sizeof(buf)}, "ICE server with invalid url: {}\n",
-                     url);
+                sink("ICE server with invalid url: {}\n", url);
             };
             continue;
         }
@@ -112,17 +110,14 @@ resolve_host(net::any_io_executor ex, const resolved_result &res) {
 
     if (ec) {
         SAMLOG_WARN(auto sink) {
-            char buf[256];
-            sink({buf, sizeof(buf)}, "DNS resolve failed for {}: {}\n", host,
-                 ec.message());
+            sink("DNS resolve failed for {}: {}\n", host, ec.message());
         };
         co_return results;
     }
 
     if (rr.empty()) {
         SAMLOG_WARN(auto sink) {
-            char buf[256];
-            sink({buf, sizeof(buf)}, "DNS resolve no result for {}\n", host);
+            sink("DNS resolve no result for {}\n", host);
         };
         co_return results;
     }
@@ -214,8 +209,7 @@ asioice::task<void> agent_base_impl::server_reflexive_candidate(
     srflx_candidates.emplace_back(std::move(srflx));
 } catch (const std::exception &e) {
     SAMLOG_WARN(auto sink) {
-        char buf[256];
-        sink({buf, sizeof(buf)}, "server_reflexive_candidate: {}\n", e.what());
+        sink("server_reflexive_candidate: {}\n", e.what());
     };
     co_return;
 }
@@ -282,9 +276,7 @@ asioice::task<void> agent_base_impl::get_component_candidates(
             (!this->_config.use_ipv6 && address.is_v6()) ||
             (!this->_config.use_loopback && address.is_loopback())) {
             SAMLOG_TRACE(auto sink) {
-                char buf[256];
-                sink({buf, sizeof(buf)}, "Skipping address: {}\n",
-                     address.to_string());
+                sink("Skipping address: {}\n", address.to_string());
             };
             continue;
         }
@@ -292,9 +284,7 @@ asioice::task<void> agent_base_impl::get_component_candidates(
             net::ip::address_v6 addr = address.to_v6();
             if (addr.is_site_local() || addr.is_v4_mapped()) {
                 SAMLOG_TRACE(auto sink) {
-                    char buf[256];
-                    sink({buf, sizeof(buf)}, "Skipping address: {}\n",
-                         address.to_string());
+                    sink("Skipping address: {}\n", address.to_string());
                 };
                 continue;
             }
@@ -345,9 +335,7 @@ asioice::task<void> agent_base_impl::get_component_candidates(
                         c.mdns_host = std::move(mdns);
                     }
                     SAMLOG_TRACE(auto sink) {
-                        char buf[256];
-                        sink({buf, sizeof(buf)},
-                             "mDNS publish result: \"{}\" -> \"{}\"\n",
+                        sink("mDNS publish result: \"{}\" -> \"{}\"\n",
                              c.endpoint.address().to_string(), c.mdns_host);
                     };
                 });
@@ -361,9 +349,7 @@ asioice::task<void> agent_base_impl::get_component_candidates(
                                 })) |
                         stdexec::upon_stopped([&c] {
                             SAMLOG_WARN(auto sink) {
-                                char buf[256];
-                                sink({buf, sizeof(buf)},
-                                     "mDNS publish \"{}\" timeout\n",
+                                sink("mDNS publish \"{}\" timeout\n",
                                      c.endpoint.address().to_string());
                             };
                         }) |
@@ -427,8 +413,7 @@ asioice::task<void> agent_base_impl::create_relayed_candidate(
     auto ret = co_await client->create_allocation(std::chrono::seconds(60 * 5));
     if (!ret) {
         SAMLOG_WARN(auto sink) {
-            char buf[256];
-            sink({buf, sizeof(buf)}, "Create allocation for \"{}\" failed\n",
+            sink("Create allocation for \"{}\" failed\n",
                  client->local_endpoint().to_string());
         };
         co_return;
@@ -456,9 +441,7 @@ asioice::task<void> agent_base_impl::create_relayed_candidate(
                 c.mdns_related = this->_mdns_names.at(c.related->address());
             } catch (const std::exception &e) {
                 SAMLOG_WARN(auto sink) {
-                    char buf[256];
-                    sink({buf, sizeof(buf)}, "mdns name not found: {}\n",
-                         e.what());
+                    sink("mdns name not found: {}\n", e.what());
                 };
                 co_return;
             }
@@ -748,9 +731,8 @@ agent_base_impl::add_remote_candidate(asioice::candidate remote_c) {
             co_return false;
         }
         SAMLOG_TRACE(auto sink) {
-            char buf[256];
-            sink({buf, sizeof(buf)}, "mDNS name \"{}\" resolved: {}\n",
-                 remote_c.mdns_host, remote_c.endpoint.address().to_string());
+            sink("mDNS name \"{}\" resolved: {}\n", remote_c.mdns_host,
+                 remote_c.endpoint.address().to_string());
         };
         std::string{}.swap(remote_c.mdns_host);
     }
@@ -763,18 +745,14 @@ agent_base_impl::add_remote_candidate(asioice::candidate remote_c) {
             });
         it != this->_remote_candidates.end()) {
         SAMLOG_DEBUG(auto sink) {
-            char buf[256];
-            sink({buf, sizeof(buf)}, "Remote candidate already exists: {}\n",
-                 remote_c.to_string());
+            sink("Remote candidate already exists: {}\n", remote_c.to_string());
         };
         co_return true;
     }
 
     if (!__validate_remote_candidate(remote_c)) {
         SAMLOG_WARN(auto sink) {
-            char buf[256];
-            sink({buf, sizeof(buf)}, "Invalid remote candidate: {}\n",
-                 remote_c.to_string());
+            sink("Invalid remote candidate: {}\n", remote_c.to_string());
         };
         co_return false;
     }
@@ -978,10 +956,7 @@ asioice::task<bool> agent_base_impl::do_connect() noexcept {
             if (auto ret = co_await std::move(wakeup); !ret || *ret)
                 break;
         } catch (const std::exception &e) {
-            SAMLOG_WARN(auto sink) {
-                char buf[256];
-                sink({buf, sizeof(buf)}, "Exception: {}\n", e.what());
-            };
+            SAMLOG_WARN(auto sink) { sink("Exception: {}\n", e.what()); };
             break;
         }
     for (auto &trans : this->_transaction_states) {
@@ -992,8 +967,7 @@ asioice::task<bool> agent_base_impl::do_connect() noexcept {
     co_await (utils::on_scope_empty(scope) |
               stdexec::continues_on(utils::scheduler{this->_any_executor}));
     SAMLOG_DEBUG(auto sink) {
-        char buf[256];
-        sink({buf, sizeof(buf)}, "connect: {}\n",
+        sink("connect: {}\n",
              (this->_state == agent_state_t::CONNECTED ? "success\n"
                                                        : "failed\n"));
     };
@@ -1026,8 +1000,7 @@ void agent_base_impl::switch_role(bool ice_controlling) noexcept {
     if (this->_remote_is_lite && !ice_controlling)
         return;
     SAMLOG_INFO(auto sink) {
-        char buf[256];
-        sink({buf, sizeof(buf)}, "Switching to {} role\n",
+        sink("Switching to {} role\n",
              (ice_controlling ? "controlling" : "controlled"));
     };
     this->_config.ice_controlling = ice_controlling;
@@ -1080,18 +1053,15 @@ asioice::task<void> agent_base_impl::do_check(check_task ct) {
             if (!client->has_permission(
                     pair.remote_candidate().endpoint.address())) {
                 SAMLOG_DEBUG(auto sink) {
-                    char buf[256];
                     sink(
-                        {buf, sizeof(buf)}, "Creating permission for: {}\n",
+                        "Creating permission for: {}\n",
                         pair.remote_candidate().endpoint.address().to_string());
                 };
                 bool ok = co_await client->create_permission(
                     pair.remote_candidate().endpoint.address());
                 if (!ok) {
                     SAMLOG_WARN(auto sink) {
-                        char buf[256];
-                        sink({buf, sizeof(buf)},
-                             "Failed to create permission for: {}\n",
+                        sink("Failed to create permission for: {}\n",
                              pair.remote_candidate()
                                  .endpoint.address()
                                  .to_string());
@@ -1133,8 +1103,7 @@ asioice::task<void> agent_base_impl::do_check(check_task ct) {
         if (resp.cls == stun::class_t::STUN_CLASS_RESP_ERROR) {
             assert(resp.error_code.has_value());
             SAMLOG_DEBUG(auto sink) {
-                char buf[256];
-                sink({buf, sizeof(buf)}, "ERROR response with error code: {}\n",
+                sink("ERROR response with error code: {}\n",
                      resp.error_code->reason);
             };
 
@@ -1245,9 +1214,7 @@ agent_base_impl::construct_valid_pair(const stun::message &req,
         }
         this->_local_candidates.emplace_back(std::move(c));
         SAMLOG_DEBUG(auto sink) {
-            char buf[256];
-            sink({buf, sizeof(buf)}, "Peer-Reflexive Candidate: {}\n",
-                 local_it->to_string());
+            sink("Peer-Reflexive Candidate: {}\n", local_it->to_string());
         };
         local_it = this->_local_candidates.begin() +
                    (this->_local_candidates.size() - 1);
@@ -1467,9 +1434,8 @@ agent_base_impl::do_handle_request(asioice::any_transport transport,
     utils::scope_guard on_exit(
         [this]() noexcept { --this->_outgoing_request_handler_count; });
     SAMLOG_DEBUG(auto sink) {
-        char buf[256];
-        sink({buf, sizeof(buf)}, "Connectivity check request from {} to {}\n",
-             source.to_string(), transport.local_endpoint().to_string());
+        sink("Connectivity check request from {} to {}\n", source.to_string(),
+             transport.local_endpoint().to_string());
     };
 
     stun::message req, resp;
@@ -1580,9 +1546,7 @@ agent_base_impl::do_handle_request(asioice::any_transport transport,
                                .type = asioice::candidate_type::prflx});
         remote = &this->_remote_candidates.back();
         SAMLOG_DEBUG(auto sink) {
-            char buf[256];
-            sink({buf, sizeof(buf)}, "Peer-Reflexive Candidate: {}\n",
-                 remote->to_string());
+            sink("Peer-Reflexive Candidate: {}\n", remote->to_string());
         };
     }
 
@@ -1957,9 +1921,7 @@ void agent_base_impl::create_turn_permission(const net::ip::address &ip) {
         assert(client);
         if (!client->has_permission(ip)) {
             SAMLOG_DEBUG(auto sink) {
-                char buf[256];
-                sink({buf, sizeof(buf)}, "Creating permission for: {}\n",
-                     ip.to_string());
+                sink("Creating permission for: {}\n", ip.to_string());
             };
             utils::detached_with_data(
                 utils::stop_when(client->create_permission(ip),
@@ -1978,9 +1940,7 @@ void agent_base_impl::create_channel_for_valid_pair() {
             valid_p.pair->local_candidate().transport.data());
         assert(client);
         SAMLOG_DEBUG(auto sink) {
-            char buf[256];
-            sink({buf, sizeof(buf)}, "Creating channel for: {}\n",
-                 valid_p.pair->to_string());
+            sink("Creating channel for: {}\n", valid_p.pair->to_string());
         };
         utils::detached_with_data(
             utils::stop_when(
@@ -2006,9 +1966,7 @@ agent_base_impl::find_nominated_pair(uint8_t component) const noexcept {
         }
     }
     SAMLOG_DEBUG(auto sink) {
-        char buf[256];
-        sink({buf, sizeof(buf)}, "No nominated pairs for component {}\n",
-             (int)component);
+        sink("No nominated pairs for component {}\n", (int)component);
     };
     return nullptr;
 }
@@ -2034,9 +1992,7 @@ void agent_base_impl::dispatch_received_data(asioice::io_buffer_ptr buffer,
         (*it)->data_received(std::move(buffer));
     } else {
         SAMLOG_DEBUG(auto sink) {
-            char buf[256];
-            sink({buf, sizeof(buf)}, "No receiver for component {}\n",
-                 static_cast<int>(component));
+            sink("No receiver for component {}\n", static_cast<int>(component));
         };
     }
 }
