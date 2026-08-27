@@ -700,7 +700,7 @@ agent_base_impl::add_remote_candidate(asioice::candidate remote_c) {
     if (this->_state == agent_state_t::CLOSED ||
         this->_state == agent_state_t::CONNECTED ||
         this->_remote_candidates_end)
-        co_return false;
+        co_return true;
     remote_c.transport.clear();
     remote_c.related.reset();
     std::string{}.swap(remote_c.mdns_related);
