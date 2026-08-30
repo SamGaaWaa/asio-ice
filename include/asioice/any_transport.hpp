@@ -4,7 +4,6 @@
 #include "asioice/detail/buffer_wrapper.hpp"
 #include "asioice/concepts.hpp"
 #include "asioice/detail/receiver.hpp"
-#include "asioice/detail/small_buffer_resource.hpp"
 
 #include <boost/any/basic_any.hpp>
 
@@ -31,10 +30,6 @@ namespace net = asio;
 namespace asioice {
 
 namespace __any_transport_detail {
-
-// using allocator_query =
-//     exec::queries<std::pmr::polymorphic_allocator<std::byte>(
-//         exec::get_frame_allocator_t) noexcept>;
 
 using sendto_result_type1 = exec::function<
     stdexec::sender_tag(net::const_buffer data, asioice::endpoint dst),
@@ -214,52 +209,8 @@ template <class Transport> struct transport_impl final : public interface {
 } // namespace __any_transport_detail
 
 struct any_transport {
-  private:
-    using allocator_type = std::pmr::polymorphic_allocator<std::byte>;
-    using sbo_resource_type = asioice::utils::small_buffer_resource<1024>;
-
-    template <std::size_t Size, std::size_t Alignment>
-    struct uninitialized_storage {
-        uninitialized_storage() noexcept = default;
-
-        uninitialized_storage(const uninitialized_storage &) noexcept {}
-        uninitialized_storage &
-        operator=(const uninitialized_storage &) noexcept {
-            return *this;
-        }
-        uninitialized_storage(uninitialized_storage &&) noexcept {}
-        uninitialized_storage &operator=(uninitialized_storage &&) noexcept {
-            return *this;
-        }
-
-        std::span<std::byte> storage() noexcept {
-            return std::span<std::byte>{data, Size};
-        }
-
-      private:
-        alignas(Alignment) std::byte data[Size];
-    };
-
-    template <class F>
-    static constexpr auto inject_sbo_resource(F &&f,
-                                              allocator_type alloc) noexcept {
-        return stdexec::just(
-                   uninitialized_storage<sizeof(sbo_resource_type),
-                                         alignof(sbo_resource_type)>{}) |
-               stdexec::let_value(
-                   [f = std::forward<F>(f),
-                    alloc = std::move(alloc)](auto &storage) mutable {
-                       return stdexec::just(
-                                  sbo_resource_type::make_small_buffer_resource(
-                                      storage.storage(), alloc.resource())) |
-                              stdexec::let_value(
-                                  [f = std::move(f)](auto &resource) mutable {
-                                      return std::move(f)(resource.get());
-                                  });
-                   });
-    }
-
   public:
+    using allocator_type = std::pmr::polymorphic_allocator<std::byte>;
     using executor_type = net::any_io_executor;
 
     any_transport() noexcept = default;
@@ -331,92 +282,57 @@ struct any_transport {
 
     void start() { get_interface()->start(); }
 
-    auto send_to(net::const_buffer data, const asioice::endpoint &dst,
-                 allocator_type alloc = {}) {
-        return inject_sbo_resource(
-            [this, data, dst](auto *resource) {
-                return get_interface()->send_to(data, dst) |
-                       stdexec::write_env(
-                           stdexec::prop(exec::get_frame_allocator,
-                                         allocator_type{resource}));
-            },
-            alloc);
+    auto send_to(net::const_buffer data, const asioice::endpoint &dst) {
+        return get_interface()->send_to(data, dst);
     }
 
     auto send_to(std::span<const net::const_buffer> data,
-                 const asioice::endpoint &dst, allocator_type alloc = {}) {
-        return inject_sbo_resource(
-            [this, data, dst](auto *resource) {
-                return get_interface()->send_to(data, dst) |
-                       stdexec::write_env(
-                           stdexec::prop(exec::get_frame_allocator,
-                                         allocator_type{resource}));
-            },
-            alloc);
+                 const asioice::endpoint &dst) {
+        return get_interface()->send_to(data, dst);
     }
 
     template <class ConstBufferSequence>
         requires(!std::same_as<ConstBufferSequence,
                                std::span<const net::const_buffer>> &&
                  !std::same_as<ConstBufferSequence, net::const_buffer>)
-    auto send_to(const ConstBufferSequence &data, const asioice::endpoint &dst,
-                 allocator_type alloc = {}) {
+    auto send_to(const ConstBufferSequence &data,
+                 const asioice::endpoint &dst) {
         return stdexec::just(asioice::buffer_wrapper{data}) |
-               stdexec::let_value([this, dst, alloc = std::move(alloc)](
-                                      const auto &wrapper) {
+               stdexec::let_value([this, dst](const auto &wrapper) {
                    return send_to(
                        std::span<const net::const_buffer>{wrapper.buffers()},
-                       dst, std::move(alloc));
+                       dst);
                });
     }
 
-    auto send(net::const_buffer data, allocator_type alloc = {}) {
-        return inject_sbo_resource(
-            [this, data](auto *resource) {
-                return get_interface()->send(data) |
-                       stdexec::write_env(
-                           stdexec::prop(exec::get_frame_allocator,
-                                         allocator_type{resource}));
-            },
-            alloc);
-    }
+    auto send(net::const_buffer data) { return get_interface()->send(data); }
 
-    auto send(std::span<const net::const_buffer> data,
-              allocator_type alloc = {}) {
-        return inject_sbo_resource(
-            [this, data](auto *resource) {
-                return get_interface()->send(data) |
-                       stdexec::write_env(
-                           stdexec::prop(exec::get_frame_allocator,
-                                         allocator_type{resource}));
-            },
-            alloc);
+    auto send(std::span<const net::const_buffer> data) {
+        return get_interface()->send(data);
     }
 
     template <class ConstBufferSequence>
         requires(!std::same_as<ConstBufferSequence,
                                std::span<const net::const_buffer>> &&
                  !std::same_as<ConstBufferSequence, net::const_buffer>)
-    auto send(const ConstBufferSequence &data, allocator_type alloc = {}) {
+    auto send(const ConstBufferSequence &data) {
         return stdexec::just(asioice::buffer_wrapper{data}) |
-               stdexec::let_value([this, alloc = std::move(alloc)](
-                                      const auto &wrapper) {
+               stdexec::let_value([this](const auto &wrapper) {
                    return send(
-                       std::span<const net::const_buffer>{wrapper.buffers()},
-                       std::move(alloc));
+                       std::span<const net::const_buffer>{wrapper.buffers()});
                });
     }
 
     template <class BufferSequence, class Endpoint>
     auto async_send_to(const BufferSequence &buffers,
-                       const Endpoint &destination, allocator_type alloc = {}) {
-        return send_to(buffers, destination, std::move(alloc));
+                       const Endpoint &destination) {
+        return send_to(buffers, destination);
     }
 
     template <class BufferSequence>
     __any_transport_detail::send_result_type1
-    async_send(const BufferSequence &buffers, allocator_type alloc = {}) {
-        return send(buffers, std::move(alloc));
+    async_send(const BufferSequence &buffers) {
+        return send(buffers);
     }
 
     asioice::endpoint local_endpoint() const {
