@@ -11,12 +11,14 @@
 #include "asioice/detail/shared_promise.hpp"
 #include "asioice/detail/stop_when.hpp"
 #include "asioice/task.hpp"
+#include "asioice/detail/task_env.hpp"
 #include "asioice/detail/async_mutex.hpp"
 #include "asioice/detail/buffer_wrapper.hpp"
 #include "asioice/ssl/datagram_bio.hpp"
 #include "asioice/ssl/dtls_config.hpp"
 #include "asioice/detail/detached_with_data.hpp"
 #include "asioice/detail/string_utils.hpp"
+#include "asioice/detail/with_allocator.hpp"
 #include "samlog.hpp"
 
 #include <memory>
@@ -80,12 +82,10 @@ struct dtls_impl : asioice::datagram_receiver,
     const auto &next_layer() const noexcept { return _next_layer; }
 
     template <class ConstBufferSequence>
-    asioice::task<std::tuple<std::error_code, std::size_t>>
-    async_send(const ConstBufferSequence &buf, auto... self);
+    auto async_send(const ConstBufferSequence &buf, auto... self);
 
     template <class MutableBufferSequence>
-    asioice::task<std::tuple<std::error_code, std::size_t>>
-    async_receive(const MutableBufferSequence &buf, auto... self);
+    auto async_receive(const MutableBufferSequence &buf, auto... self);
 
     template <class... Args>
     auto async_handshake(handshake_type type, Args &&...self);
@@ -113,8 +113,11 @@ struct dtls_impl : asioice::datagram_receiver,
     static int verify_callback(int preverify_ok, X509_STORE_CTX *ctx);
 
     template <OpenSSLOperation Op>
-    asioice::task<std::tuple<std::error_code, std::size_t>>
-    perform(Op op, auto... self);
+    static stdexec::task<std::tuple<std::error_code, std::size_t>,
+                         ::asioice::task_env>
+    perform(std::allocator_arg_t, auto alloc, dtls_impl *self, Op op);
+
+    template <OpenSSLOperation Op> auto perform(Op op);
 
     void handle_timeout();
     asioice::task<void> timeout_handler();

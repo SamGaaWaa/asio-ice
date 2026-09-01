@@ -12,6 +12,7 @@
 #include "asioice/detail/stop_when.hpp"
 #include "asioice/detail/shared_promise.hpp"
 #include "asioice/detail/asio2exec.hpp"
+#include "asioice/detail/stack_resource.hpp"
 #include "exsctp/transport.hpp"
 #include "samlog.hpp"
 
@@ -109,10 +110,16 @@ struct io_interface : std::enable_shared_from_this<io_interface<Layer>> {
             if (_on_data)
                 _on_data(nullptr, 0, _ptr);
         });
+
+        alignas(std::max_align_t) char mem[2048];
+        ::asioice::utils::stack_resource res{mem, sizeof(mem)};
+        std::pmr::polymorphic_allocator<std::byte> alloc{&res};
+
         std::vector<uint8_t> buf(mtu());
         while (true) {
-            auto [ec, n] = co_await _next_layer->async_receive(
-                net::buffer(buf), utils::use_sender);
+            auto [ec, n] = co_await stdexec::write_env(
+                _next_layer->async_receive(net::buffer(buf), utils::use_sender),
+                stdexec::prop{stdexec::get_allocator, alloc});
             if (ec) {
                 SAMLOG_WARN(auto sink) {
                     sink("sctp::impl::io_interface::read_loop async_receive: "

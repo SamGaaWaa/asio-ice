@@ -7,11 +7,12 @@ namespace asioice::utils {
 
 template <stdexec::sender S, class... Data>
 inline void detached_with_data(S &&s, Data... data) {
-    exec::start_detached(
+    exec::start_detached(stdexec::starts_on(
+        stdexec::inline_scheduler{},
         stdexec::just(std::move(data)...) |
-        stdexec::let_value([_s = std::forward<S>(s)](auto &...) mutable {
-            return std::move(_s);
-        }));
+            stdexec::let_value([_s = std::forward<S>(s)](auto &...) mutable {
+                return std::move(_s);
+            })));
 }
 
 } // namespace asioice::utils

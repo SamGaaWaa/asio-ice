@@ -128,8 +128,8 @@ template <IOInterface Interface = any_io_interface> class basic_transport {
         _impl->dispatch_packet(data);
     }
 
-    exsctp::inline_task<bool> send(const exsctp::message &msg,
-                                   const exsctp::send_options &send_options) {
+    auto send(const exsctp::message &msg,
+              const exsctp::send_options &send_options) {
         return _impl->send(msg, to_dcsctp_options(send_options));
     }
 

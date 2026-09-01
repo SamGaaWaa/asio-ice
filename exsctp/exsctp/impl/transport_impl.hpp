@@ -10,8 +10,10 @@
 #include <memory>
 #include <chrono>
 #include <random>
+#include <memory_resource>
 
 #include "exsctp/config.hpp"
+#include "exsctp/task_env.hpp"
 #include "exsctp/utils/async_mutex.hpp"
 #include "exsctp/utils/async_queue.hpp"
 #include "exsctp/utils/if_else.hpp"
@@ -19,6 +21,7 @@
 #include "exsctp/utils/detached_with_data.hpp"
 #include "exsctp/utils/stop_when.hpp"
 #include "exsctp/utils/scope_guard.hpp"
+#include "exsctp/utils/with_allocator.hpp"
 #include "exsctp/packet_queue.hpp"
 #include "exsctp/message.hpp"
 
@@ -92,8 +95,7 @@ struct transport_impl final
         _dcsctp->ReceivePacket(data);
     }
 
-    exsctp::inline_task<bool> send(exsctp::message msg,
-                                   dcsctp::SendOptions send_options);
+    auto send(exsctp::message msg, dcsctp::SendOptions send_options);
 
     auto read() noexcept;
 
@@ -197,6 +199,10 @@ struct transport_impl final
         return _send_q.buffered_bytes() >=
                (_send_q.max_buffered_bytes() * 3 / 4);
     }
+
+    static stdexec::task<bool, ::exsctp::task_env>
+    send(std::allocator_arg_t, auto alloc, transport_impl *self,
+         exsctp::message msg, dcsctp::SendOptions send_options);
 
     bool _running{true};
     std::shared_ptr<Interface> _interface;

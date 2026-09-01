@@ -54,14 +54,12 @@ class dtls_transport {
     const auto &next_layer() const noexcept { return _impl->next_layer(); }
 
     template <class ConstBufferSequence, class... Args>
-    asioice::task<std::tuple<std::error_code, std::size_t>>
-    async_send(const ConstBufferSequence &buf, Args &&...self) {
+    auto async_send(const ConstBufferSequence &buf, Args &&...self) {
         return _impl->async_send(buf, std::forward<Args>(self)...);
     }
 
     template <class MutableBufferSequence, class... Args>
-    asioice::task<std::tuple<std::error_code, std::size_t>>
-    async_receive(const MutableBufferSequence &buf, Args &&...self) {
+    auto async_receive(const MutableBufferSequence &buf, Args &&...self) {
         return _impl->async_receive(buf, std::forward<Args>(self)...);
     }
 

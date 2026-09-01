@@ -57,15 +57,21 @@ exsctp::task<void> transport_impl<Interface>::timeout_handler() {
 
 template <class Interface>
 exsctp::task<void> transport_impl<Interface>::packet_sender() {
+    alignas(std::max_align_t) char buf[2048];
     while (this->_running) {
         if (this->_send_q.empty()) {
             co_await (this->_notify_sender.get_future() |
                       stdexec::continues_on(this->_interface->scheduler()));
             continue;
         }
+
+        std::pmr::monotonic_buffer_resource res{buf, sizeof(buf)};
+        std::pmr::polymorphic_allocator<std::byte> alloc{&res};
         bool buffered_high = this->send_queue_buffered_high();
         auto packet = this->_send_q.peek();
-        auto [ec, n] = co_await this->_interface->send(packet);
+        auto [ec, n] = co_await (
+            stdexec::write_env(this->_interface->send(packet),
+                               stdexec::prop{stdexec::get_allocator, alloc}));
         if (ec) {
             SAMLOG_WARN(auto sink) {
                 sink("packet_sender error: {}\n", ec.message());
@@ -120,30 +126,43 @@ uint32_t transport_impl<Interface>::GetRandomInt(uint32_t low, uint32_t high) {
 }
 
 template <class Interface>
-exsctp::inline_task<bool>
-transport_impl<Interface>::send(exsctp::message msg,
-                                dcsctp::SendOptions send_options) {
-    if (this->closed())
+auto transport_impl<Interface>::send(exsctp::message msg,
+                                     dcsctp::SendOptions send_options) {
+    return utils::with_allocator(
+        [msg = std::move(msg), opts = std::move(send_options),
+         this](auto alloc) mutable {
+            return transport_impl<Interface>::send(
+                std::allocator_arg, std::move(alloc), this, std::move(msg),
+                std::move(opts));
+        },
+        std::pmr::polymorphic_allocator<std::byte>{});
+}
+
+template <class Interface>
+stdexec::task<bool, ::exsctp::task_env> transport_impl<Interface>::send(
+    std::allocator_arg_t, auto alloc, transport_impl<Interface> *self,
+    exsctp::message msg, dcsctp::SendOptions send_options) {
+    if (self->closed())
         co_return false;
-    auto lk = co_await this->_send_mtx.lock();
-    while (this->send_queue_buffered_high()) {
-        if (this->closed())
+    auto lk = co_await self->_send_mtx.lock();
+    while (self->send_queue_buffered_high()) {
+        if (self->closed())
             co_return false;
         co_await (
-            utils::stop_when(this->_notify_send_queue_buffered_low.get_future(),
-                             this->_on_state_changed.get_future()) |
-            stdexec::continues_on(this->_interface->scheduler()));
+            utils::stop_when(self->_notify_send_queue_buffered_low.get_future(),
+                             self->_on_state_changed.get_future()) |
+            stdexec::continues_on(self->_interface->scheduler()));
     }
-    while (!this->closed()) {
+    while (!self->closed()) {
         dcsctp::DcSctpMessage sctp_msg(
             dcsctp::StreamID(msg.stream_id), dcsctp::PPID(msg.ppid),
             std::vector<uint8_t>(msg.data.begin(), msg.data.end()));
-        auto ret = this->_dcsctp->Send(std::move(sctp_msg), send_options);
+        auto ret = self->_dcsctp->Send(std::move(sctp_msg), send_options);
         if (ret == dcsctp::SendStatus::kErrorResourceExhaustion) [[unlikely]] {
             co_await (utils::stop_when(
-                          this->_notify_total_buffered_amount_low.get_future(),
-                          this->_on_state_changed.get_future()) |
-                      stdexec::continues_on(this->_interface->scheduler()));
+                          self->_notify_total_buffered_amount_low.get_future(),
+                          self->_on_state_changed.get_future()) |
+                      stdexec::continues_on(self->_interface->scheduler()));
             continue;
         }
         co_return ret == dcsctp::SendStatus::kSuccess;

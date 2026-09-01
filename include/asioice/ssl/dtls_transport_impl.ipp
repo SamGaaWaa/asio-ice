@@ -204,30 +204,25 @@ template <class NextLayer> struct dtls_impl<NextLayer>::shutdown_op {
 
 template <class NextLayer>
 template <class ConstBufferSequence>
-asioice::task<std::tuple<std::error_code, std::size_t>>
-dtls_impl<NextLayer>::async_send(const ConstBufferSequence &buf, auto... self) {
-    return this->perform(dtls_impl<NextLayer>::send_op{buf, this},
-                         std::move(self)...);
+auto dtls_impl<NextLayer>::async_send(const ConstBufferSequence &buf,
+                                      auto... self) {
+    return this->perform(dtls_impl<NextLayer>::send_op{buf, this});
 }
 
 template <class NextLayer>
 template <class MutableBufferSequence>
-asioice::task<std::tuple<std::error_code, std::size_t>>
-dtls_impl<NextLayer>::async_receive(const MutableBufferSequence &buf_seq,
-                                    auto... self) {
+auto dtls_impl<NextLayer>::async_receive(const MutableBufferSequence &buf_seq,
+                                         auto... self) {
     net::mutable_buffer buf = *net::buffer_sequence_begin(buf_seq);
-    return this->perform(dtls_impl<NextLayer>::read_op{buf, this},
-                         std::move(self)...);
+    return this->perform(dtls_impl<NextLayer>::read_op{buf, this});
 }
 
 template <class NextLayer>
 template <class... Args>
 auto dtls_impl<NextLayer>::async_handshake(
     dtls_impl<NextLayer>::handshake_type type, Args &&...self) {
-    return this->perform(
-               dtls_impl<NextLayer>::handshake_op{
-                   type == dtls_impl<NextLayer>::handshake_type::client, this},
-               std::forward<Args>(self)...) |
+    return this->perform(dtls_impl<NextLayer>::handshake_op{
+               type == dtls_impl<NextLayer>::handshake_type::client, this}) |
            stdexec::then([](std::tuple<std::error_code, std::size_t> ret) {
                return std::get<0>(ret);
            });
@@ -236,8 +231,8 @@ auto dtls_impl<NextLayer>::async_handshake(
 template <class NextLayer>
 template <class... Args>
 auto dtls_impl<NextLayer>::async_shutdown(bool fast_shutdown, Args &&...self) {
-    return this->perform(dtls_impl<NextLayer>::shutdown_op{fast_shutdown, this},
-                         std::forward<Args>(self)...) |
+    return this->perform(
+               dtls_impl<NextLayer>::shutdown_op{fast_shutdown, this}) |
            stdexec::then([this](std::tuple<std::error_code, std::size_t> ret) {
                if (std::get<0>(ret) == std::error_code{})
                    this->_closed = true;
@@ -292,33 +287,34 @@ asioice::task<void> dtls_impl<NextLayer>::timeout_handler() {
 
 template <class NextLayer>
 template <OpenSSLOperation Op>
-asioice::task<std::tuple<std::error_code, std::size_t>>
-dtls_impl<NextLayer>::perform(Op op, auto... self) {
-    auto ssl_lk = co_await this->_ssl_mutex.lock();
-    assert(this->_bio.out.empty());
+stdexec::task<std::tuple<std::error_code, std::size_t>, ::asioice::task_env>
+dtls_impl<NextLayer>::perform(std::allocator_arg_t, auto alloc, dtls_impl *self,
+                              Op op) {
+    auto ssl_lk = co_await self->_ssl_mutex.lock();
+    assert(self->_bio.out.empty());
 
     ::ERR_clear_error();
-    this->_bio.last_io_failed(false);
+    self->_bio.last_io_failed(false);
     utils::scope_guard on_exit(
         [&]() noexcept { assert(op.error() != SSL_ERROR_WANT_WRITE); });
     while (true) {
-        this->handle_timeout();
+        self->handle_timeout();
         if (!ssl_lk)
-            ssl_lk = co_await this->_ssl_mutex.lock();
+            ssl_lk = co_await self->_ssl_mutex.lock();
         utils::scope_guard clear_out_guard(
-            [this]() noexcept { this->_bio.out.clear(); });
+            [self]() noexcept { self->_bio.out.clear(); });
         op();
-        if (!this->_bio.out.empty()) {
+        if (!self->_bio.out.empty()) {
             utils::scope_guard reset_guard{[&]() noexcept {
                 if (op.success() || op.error() != SSL_ERROR_WANT_WRITE)
                     return;
                 // reset the SSL state
-                this->_bio.last_io_failed(true);
+                self->_bio.last_io_failed(true);
                 op();
             }};
-            while (!this->_bio.out.empty()) {
-                auto packet = this->_bio.out.peek();
-                auto [ec, n] = co_await this->next_layer().async_send(packet);
+            while (!self->_bio.out.empty()) {
+                auto packet = self->_bio.out.peek();
+                auto [ec, n] = co_await self->next_layer().async_send(packet);
                 if (ec) {
                     SAMLOG_WARN(auto sink) {
                         sink("next_layer().async_send_to failed: {}\n",
@@ -333,7 +329,7 @@ dtls_impl<NextLayer>::perform(Op op, auto... self) {
                              packet.size() - n);
                     };
                 }
-                this->_bio.out.pop();
+                self->_bio.out.pop();
             }
             reset_guard.dismiss();
         }
@@ -352,22 +348,33 @@ dtls_impl<NextLayer>::perform(Op op, auto... self) {
                 std::make_error_code(std::errc::protocol_error), 0);
         case SSL_ERROR_ZERO_RETURN:
             SAMLOG_INFO(auto sink) { sink("DTLS connection closed\n"); };
-            this->_peer_closed = true;
+            self->_peer_closed = true;
             co_return std::make_tuple(std::error_code{}, 0);
         default:
             SAMLOG_WARN(auto sink) { sink("perform error: {}\n", err); };
             co_return std::make_tuple(std::make_error_code(std::errc::io_error),
                                       0);
         }
-        this->_bio.out.clear();
+        self->_bio.out.clear();
         clear_out_guard.dismiss();
 
         ssl_lk.unlock();
-        while (this->_bio.in.empty()) {
-            co_await this->_bio.in.wait();
+        while (self->_bio.in.empty()) {
+            co_await self->_bio.in.wait();
         }
     }
     std::unreachable();
+}
+
+template <class NextLayer>
+template <OpenSSLOperation Op>
+auto dtls_impl<NextLayer>::perform(Op op) {
+    return ::asioice::utils::with_allocator(
+        [op = std::move(op), this](auto alloc) mutable {
+            return perform(std::allocator_arg, std::move(alloc), this,
+                           std::move(op));
+        },
+        std::pmr::polymorphic_allocator<std::byte>{});
 }
 
 // ---------------------------------------------------------------------------

@@ -49,9 +49,8 @@ template <UniqueAsyncPacketConnectionTransport Layer> struct transport {
         }
     }
 
-    stdexec::sender_of<stdexec::set_value_t(bool)> auto
-    send(const exsctp::message &msg,
-         const exsctp::send_options &send_options) noexcept {
+    auto send(const exsctp::message &msg,
+              const exsctp::send_options &send_options) noexcept {
         return _impl->send(msg, send_options);
     }
 

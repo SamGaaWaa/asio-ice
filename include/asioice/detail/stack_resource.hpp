@@ -7,6 +7,8 @@
 #include <memory>
 #include <memory_resource>
 
+#include "samlog.hpp"
+
 namespace asioice::utils {
 
 class stack_resource final : public std::pmr::memory_resource {
@@ -49,6 +51,9 @@ class stack_resource final : public std::pmr::memory_resource {
     void *allocate_with_upstream(size_t bytes, size_t alignment) {
         if (!_upstream)
             throw std::bad_alloc{};
+        SAMLOG_WARN(auto sink) {
+            sink("allocated in heap: {} bytes, {} aligned\n", bytes, alignment);
+        };
         return _upstream->allocate(bytes, alignment);
     }
 
