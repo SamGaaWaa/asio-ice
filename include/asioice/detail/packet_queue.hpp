@@ -19,7 +19,7 @@ struct packet_queue {
     }
 
   public:
-    static constexpr std::size_t max_packet_size = 4096;
+    static constexpr std::size_t max_packet_size = 1200 * 10;
 
     packet_queue(std::size_t max_payload_bytes = 16 * 1024)
         : _max_bytes{max_payload_bytes} {

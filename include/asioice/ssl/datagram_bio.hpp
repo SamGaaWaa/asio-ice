@@ -81,8 +81,8 @@ struct datagram_bio {
         const std::size_t _max_bytes;
     };
 
-    datagram_bio(std::size_t max_send_buf_size = 16 * 1024,
-                 std::size_t max_recv_buf_size = 16 * 1024) noexcept
+    datagram_bio(std::size_t max_send_buf_size = 256 * 1024,
+                 std::size_t max_recv_buf_size = 256 * 1024) noexcept
         : out{max_send_buf_size}, in{max_recv_buf_size} {}
 
     datagram_bio(const datagram_bio &) = delete;

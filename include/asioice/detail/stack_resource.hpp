@@ -43,6 +43,10 @@ class stack_resource final : public std::pmr::memory_resource {
     stack_resource(stack_resource &&) = delete;
     stack_resource &operator=(stack_resource &&) = delete;
 
+    std::size_t allocated_in_stack() const noexcept { return _in_stack_count; }
+
+    std::size_t allocated_in_heap() const noexcept { return _in_heap_count; }
+
   private:
     std::max_align_t *buffer_end() const noexcept {
         return _buffer + _capacity;
@@ -54,6 +58,7 @@ class stack_resource final : public std::pmr::memory_resource {
         SAMLOG_WARN(auto sink) {
             sink("allocated in heap: {} bytes, {} aligned\n", bytes, alignment);
         };
+        ++_in_heap_count;
         return _upstream->allocate(bytes, alignment);
     }
 
@@ -67,6 +72,7 @@ class stack_resource final : public std::pmr::memory_resource {
         auto ptr = _top;
         _top = new_top;
         ++_frame_count;
+        ++_in_stack_count;
         return ptr;
     }
 
@@ -100,6 +106,9 @@ class stack_resource final : public std::pmr::memory_resource {
 
     std::size_t _frame_count{0};
     std::max_align_t *_top;
+
+    std::size_t _in_heap_count{0};
+    std::size_t _in_stack_count{0};
 };
 
 } // namespace asioice::utils
