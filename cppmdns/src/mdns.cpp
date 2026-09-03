@@ -247,9 +247,7 @@ inline_task<void> query::query_loop() {
     });
 
     dns::message_t msg;
-    // Require a unicast response
     msg.questions.emplace_back(this->_question);
-    msg.questions.back().cls |= (uint16_t{1} << 15);
 
     net::steady_timer timer{impl.executor};
     char buf[4096];
