@@ -12,7 +12,7 @@ namespace asioice {
 #if __cpp_lib_flat_set > 202207L
 template <class Key, std::size_t N = 16, class Compare = std::less<Key>>
 using small_set =
-    std::flat_set<Key, Compare, boost::containers::small_vector<Key, N>>;
+    std::flat_set<Key, Compare, boost::container::small_vector<Key, N>>;
 #else
 template <class Key, std::size_t N = 16, class Compare = std::less<Key>>
 using small_set = boost::container::flat_set<Key, Compare>;

@@ -35,9 +35,10 @@ struct buffer_wrapper {
             throw std::runtime_error("Too many buffers");
 
         _buffers.resize(buffer_count);
-        std::transform(
-            buffer_first, buffer_last, _buffers.begin(),
-            [](const auto &b) noexcept { return net::const_buffer(b); });
+        for (auto dst = _buffers.begin(); buffer_first != buffer_last;
+             ++buffer_first) {
+            *dst++ = net::const_buffer(*buffer_first);
+        }
     }
 
     buffer_wrapper(const buffer_wrapper &other) = default;

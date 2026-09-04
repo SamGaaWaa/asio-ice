@@ -15,6 +15,7 @@
 #include <algorithm>
 #include <cassert>
 #include <utility>
+#include <stdexcept>
 
 namespace asioice::ssl {
 
