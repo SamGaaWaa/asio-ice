@@ -95,6 +95,7 @@ static std::string random_username() {
 
 static task<std::optional<std::string>>
 read_line(net::posix::stream_descriptor &stream, std::string &buffer) {
+    char buf[1024];
     while (buffer.find('\n') == std::string::npos) {
         auto [ec, n] = co_await stream.async_read_some(
             net::buffer(buf), net::as_tuple(asioice::utils::use_sender));
