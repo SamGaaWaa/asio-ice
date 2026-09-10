@@ -27,6 +27,7 @@ void transport_impl<Interface>::timeout_impl::Stop() {
 
 template <class Interface>
 exsctp::task<void> transport_impl<Interface>::timeout_handler() {
+    utils::scope_guard on_exit([this]() noexcept { this->stop(); });
     while (this->_running) {
         auto now = std::chrono::steady_clock::now();
         if (this->_timeout_set.empty())
@@ -57,6 +58,7 @@ exsctp::task<void> transport_impl<Interface>::timeout_handler() {
 
 template <class Interface>
 exsctp::task<void> transport_impl<Interface>::packet_sender() {
+    utils::scope_guard on_exit([this]() noexcept { this->stop(); });
     alignas(std::max_align_t) char buf[2048];
     while (this->_running) {
         if (this->_send_q.empty()) {

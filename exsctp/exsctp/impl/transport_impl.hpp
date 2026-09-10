@@ -71,8 +71,7 @@ struct transport_impl final
         close();
         _stop.set_value();
         _notify_timeout_set_changed.set_value();
-        _dcsctp.reset();
-        assert(_timeout_set.empty());
+        _on_state_changed.set_value();
 
         _notify_sender.set_value();
         _on_outgoing_reseted = nullptr;
