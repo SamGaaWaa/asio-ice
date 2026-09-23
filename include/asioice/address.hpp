@@ -48,6 +48,19 @@ struct endpoint {
         return *this;
     }
 
+    const void *data() const {
+        return std::visit(
+            [](const auto &ep) -> const void * { return ep.data(); }, _data);
+    }
+
+    void *data() {
+        return std::visit([](auto &ep) -> void * { return ep.data(); }, _data);
+    }
+
+    std::size_t size() const {
+        return std::visit([](const auto &ep) { return ep.size(); }, _data);
+    }
+
     uint16_t port() const noexcept {
         return std::visit([](const auto &e) { return e.port(); }, _data);
     }

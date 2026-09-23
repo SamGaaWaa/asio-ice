@@ -200,7 +200,7 @@ struct basic_request_t {
 
         bool ret = false;
         utils::inplace_receiver<void> retry_receiver;
-        auto retry_op = retry_receiver.start(stdexec::starts_on(
+        auto retry_op = retry_receiver.connect(stdexec::starts_on(
             utils::basic_scheduler<typename Transport::executor_type>{
                 transport.get_executor()},
             trans.run(transport)));

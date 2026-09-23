@@ -75,9 +75,6 @@ struct agent_base {
 
     void set_remote_is_lite(bool lite) noexcept;
 
-    std::shared_ptr<io_buffer_pool> &buffer_pool() noexcept;
-    const std::shared_ptr<io_buffer_pool> &buffer_pool() const noexcept;
-
     agent_state_t state() const noexcept;
     exec::function<void()> on_state_change() noexcept;
 

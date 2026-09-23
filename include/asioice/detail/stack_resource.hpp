@@ -29,14 +29,14 @@ class stack_resource final : public std::pmr::memory_resource {
     }
 
   public:
-    stack_resource(void *buf, std::size_t buf_size,
+    stack_resource(void *buf, std::size_t buf_size, const char *name,
                    std::pmr::memory_resource *upstream =
                        std::pmr::get_default_resource()) noexcept
         : _buffer{get_aligned(buf, buf_size)},
           _capacity{_buffer == nullptr
                         ? 0
                         : get_block_count(_buffer, (uint8_t *)buf + buf_size)},
-          _upstream{upstream}, _top{_buffer} {}
+          _name{name}, _upstream{upstream}, _top{_buffer} {}
 
     stack_resource(const stack_resource &other) = delete;
     stack_resource &operator=(const stack_resource &) = delete;
@@ -56,7 +56,8 @@ class stack_resource final : public std::pmr::memory_resource {
         if (!_upstream)
             throw std::bad_alloc{};
         SAMLOG_WARN(auto sink) {
-            sink("allocated in heap: {} bytes, {} aligned\n", bytes, alignment);
+            sink("<{}> allocated in heap: {} bytes, {} aligned\n", _name, bytes,
+                 alignment);
         };
         ++_in_heap_count;
         return _upstream->allocate(bytes, alignment);
@@ -102,6 +103,7 @@ class stack_resource final : public std::pmr::memory_resource {
 
     std::max_align_t *const _buffer;
     const std::size_t _capacity;
+    const char *const _name;
     std::pmr::memory_resource *const _upstream;
 
     std::size_t _frame_count{0};

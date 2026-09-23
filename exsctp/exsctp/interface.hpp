@@ -42,6 +42,16 @@ struct any_io_interface {
         co_return std::make_tuple(std::error_code{}, total);
     }
 
+    virtual exsctp::task<std::tuple<std::error_code, std::size_t>>
+    send_multi(std::span<std::span<const uint8_t>> data_array) {
+        for (const auto &data : data_array) {
+            auto [ec, n] = co_await this->send(data);
+            if (ec)
+                co_return std::make_tuple(ec, &data - data_array.data());
+        }
+        co_return std::make_tuple(std::error_code{}, data_array.size());
+    }
+
     virtual scheduler_type scheduler() const noexcept {
         return scheduler_type{stdexec::inline_scheduler{}};
     }
@@ -99,6 +109,9 @@ concept IOInterface = requires(
         __send_receiver{});
     stdexec::connect(stdexec::starts_on(stdexec::inline_scheduler{},
                                         interface->send(data_array)),
+                     __send_receiver{});
+    stdexec::connect(stdexec::starts_on(stdexec::inline_scheduler{},
+                                        interface->send_multi(data_array)),
                      __send_receiver{});
     stdexec::connect(stdexec::starts_on(stdexec::inline_scheduler{},
                                         interface->schedule_at(steady_time)),

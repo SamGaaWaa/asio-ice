@@ -77,6 +77,25 @@ struct io_interface : std::enable_shared_from_this<io_interface<Layer>> {
         return _next_layer->async_send(data_array);
     }
 
+    auto send_multi(std::span<std::span<const uint8_t>> data_array) {
+        if constexpr (requires { _next_layer->async_send_multi(data_array); })
+            return _next_layer->async_send_multi(data_array);
+        else {
+            return
+                [](auto self, auto data_array)
+                    -> asioice::task<std::tuple<std::error_code, std::size_t>> {
+                    for (const auto &data : data_array) {
+                        auto [ec, n] = co_await self->send(data);
+                        if (ec)
+                            co_return std::make_tuple(
+                                ec, &data - data_array.data());
+                    }
+                    co_return std::make_tuple(std::error_code{},
+                                              data_array.size());
+                }(this, data_array);
+        }
+    }
+
     auto schedule_at(std::chrono::steady_clock::time_point t) {
         using timer_type =
             asioice::net::steady_timer::rebind_executor<executor_type>::other;
@@ -111,8 +130,10 @@ struct io_interface : std::enable_shared_from_this<io_interface<Layer>> {
                 _on_data(nullptr, 0, _ptr);
         });
 
-        alignas(std::max_align_t) char mem[2048];
-        ::asioice::utils::stack_resource res{mem, sizeof(mem)};
+        std::vector<uint8_t> mem(9000);
+        ::asioice::utils::stack_resource res{
+            mem.data(), mem.size(),
+            "asioice::sctp::impl::io_interface::read_loop"};
         std::pmr::polymorphic_allocator<std::byte> alloc{&res};
 
         std::vector<uint8_t> buf(mtu());

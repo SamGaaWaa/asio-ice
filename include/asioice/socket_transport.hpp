@@ -54,27 +54,15 @@ template <class Socket> struct datagram_transport {
         return _impl->local_endpoint();
     }
 
-    std::size_t max_buffer_size() const noexcept {
-        return _impl->max_buffer_size();
-    }
-    void max_buffer_size(std::size_t size) noexcept {
-        _impl->max_buffer_size(size);
-    }
-
-    void set_buffer_pool(std::shared_ptr<io_buffer_pool> pool) noexcept {
-        _impl->set_buffer_pool(std::move(pool));
-    }
-
-    template <class ConstBufferSequence, class... Args>
+    template <class ConstBufferSequence>
     auto async_send_to(const ConstBufferSequence &buffers,
-                       const endpoint_type &destination, Args &&...args) {
-        return _impl->async_send_to(buffers, destination,
-                                    std::forward<Args>(args)...);
+                       const endpoint_type &destination) {
+        return _impl->async_send_to(buffers, destination);
     }
 
-    template <class ConstBufferSequence, class... Args>
-    auto async_send(const ConstBufferSequence &buffers, Args &&...args) {
-        return _impl->async_send(buffers, std::forward<Args>(args)...);
+    template <class ConstBufferSequence>
+    auto async_send(const ConstBufferSequence &buf) {
+        return _impl->async_send(buf);
     }
 
     void add_receiver(datagram_receiver &receiver) noexcept {

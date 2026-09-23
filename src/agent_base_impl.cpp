@@ -131,8 +131,7 @@ resolve_host(net::any_io_executor ex, const resolved_result &res) {
 
 agent_base_impl::agent_base_impl(net::any_io_executor ex, agent_config config,
                                  agent_base *agent)
-    : _any_executor(std::move(ex)), _config(std::move(config)), _agent(agent),
-      _pool(std::make_shared<io_buffer_pool>(_config.max_buffer_pool_size)) {
+    : _any_executor(std::move(ex)), _config(std::move(config)), _agent(agent) {
 #if ASIOICE_USE_CPPMDNS
     if (_config.enable_mdns && _config.mdns == nullptr)
         _config.mdns = default_mdns_interface();
@@ -1272,7 +1271,7 @@ agent_base_impl::request(asioice::candidate_pair &pair,
     this->_transaction_states.insert(trans_state);
 
     utils::inplace_receiver<void> retry_receiver;
-    auto retry_op = retry_receiver.start(
+    auto retry_op = retry_receiver.connect(
         stdexec::starts_on(utils::scheduler{this->_any_executor},
                            trans.run(pair.local_candidate().transport)));
     stdexec::start(retry_op);

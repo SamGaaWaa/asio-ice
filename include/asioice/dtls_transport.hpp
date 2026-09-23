@@ -58,6 +58,11 @@ class dtls_transport {
         return _impl->async_send(buf, std::forward<Args>(self)...);
     }
 
+    template <class ConstBufferSequence>
+    auto async_send_multi(const ConstBufferSequence &buf) {
+        return _impl->async_send_multi(buf);
+    }
+
     template <class MutableBufferSequence, class... Args>
     auto async_receive(const MutableBufferSequence &buf, Args &&...self) {
         return _impl->async_receive(buf, std::forward<Args>(self)...);

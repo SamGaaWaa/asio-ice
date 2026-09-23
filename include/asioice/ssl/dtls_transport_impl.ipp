@@ -69,6 +69,47 @@ template <class NextLayer> struct dtls_impl<NextLayer>::send_op {
     bool _success = false;
 };
 
+template <class NextLayer>
+template <class ConstBufferSequence>
+struct dtls_impl<NextLayer>::send_multi_op {
+    using begin_iterator_type = decltype(net::buffer_sequence_begin(
+        std::declval<const ConstBufferSequence &>()));
+    using end_iterator_type = decltype(net::buffer_sequence_end(
+        std::declval<const ConstBufferSequence &>()));
+
+    send_multi_op(const ConstBufferSequence &buf,
+                  dtls_impl<NextLayer> *impl) noexcept
+        : _buf_seq{buf}, _buf_begin{net::buffer_sequence_begin(buf)},
+          _buf_end{net::buffer_sequence_end(buf)}, _impl{impl} {}
+
+    bool success() const noexcept { return _success; }
+    int result() const noexcept { return _count; }
+    int error() const noexcept { return _err; }
+
+    void operator()() noexcept {
+        assert(!_success);
+        while (_buf_begin != _buf_end) {
+            int ret = ::SSL_write(_impl->_ssl, _buf_begin->data(),
+                                  _buf_begin->size());
+            if (ret <= 0) {
+                _err = ::SSL_get_error(_impl->_ssl, ret);
+                return;
+            }
+            ++_buf_begin;
+        }
+        _success = true;
+    }
+
+  private:
+    ConstBufferSequence _buf_seq;
+    begin_iterator_type _buf_begin;
+    end_iterator_type _buf_end;
+    dtls_impl<NextLayer> *_impl;
+    int _count = 0;
+    int _err = 0;
+    bool _success = false;
+};
+
 template <class NextLayer> struct dtls_impl<NextLayer>::read_op {
     read_op(net::mutable_buffer buf, dtls_impl<NextLayer> *impl) noexcept
         : _buf{buf}, _impl{impl} {}
@@ -210,6 +251,14 @@ auto dtls_impl<NextLayer>::async_send(const ConstBufferSequence &buf,
 }
 
 template <class NextLayer>
+template <class ConstBufferSequence>
+auto dtls_impl<NextLayer>::async_send_multi(const ConstBufferSequence &buf) {
+    return this->perform(
+        dtls_impl<NextLayer>::send_multi_op<std::decay_t<ConstBufferSequence>>{
+            buf, this});
+}
+
+template <class NextLayer>
 template <class MutableBufferSequence>
 auto dtls_impl<NextLayer>::async_receive(const MutableBufferSequence &buf_seq,
                                          auto... self) {
@@ -313,23 +362,55 @@ dtls_impl<NextLayer>::perform(std::allocator_arg_t, auto alloc, dtls_impl *self,
                 op();
             }};
             while (!self->_bio.out.empty()) {
-                auto packet = self->_bio.out.peek();
-                auto [ec, n] = co_await self->next_layer().async_send(packet);
-                if (ec) {
-                    SAMLOG_WARN(auto sink) {
-                        sink("next_layer().async_send_to failed: {}\n",
-                             ec.message());
-                    };
-                    co_return std::make_tuple(ec, 0);
+                constexpr std::size_t batch_size = 4;
+                std::array<std::span<const uint8_t>, batch_size> pkts;
+                auto peek_res = self->_bio.out.peek(pkts.data(), batch_size);
+                if (peek_res.count() == 1) {
+                    auto [ec, n] =
+                        co_await self->next_layer().async_send(pkts.front());
+                    if (ec) {
+                        SAMLOG_WARN(auto sink) {
+                            sink("next_layer().async_send failed: {}\n",
+                                 ec.message());
+                        };
+                        co_return std::make_tuple(ec, 0);
+                    }
+                    if (n < pkts.front().size()) {
+                        SAMLOG_WARN(auto sink) {
+                            sink("dtls_impl::async_send: short write drop {} "
+                                 "bytes\n",
+                                 pkts.front().size() - n);
+                        };
+                    }
+                } else {
+                    std::error_code batch_send_ec{};
+                    co_await utils::when_all_range<batch_size>([&](std::size_t
+                                                                       i) {
+                        return utils::if_else(
+                            stdexec::just(i >= peek_res.count()),
+                            [] { return stdexec::just(); },
+                            [&, i] {
+                                return self->next_layer().async_send(pkts[i]) |
+                                       stdexec::then([&](auto ec, auto... res) {
+                                           if constexpr (sizeof...(res) == 0) {
+                                               if (std::get<0>(ec))
+                                                   batch_send_ec =
+                                                       std::get<0>(ec);
+                                           } else {
+                                               if (ec)
+                                                   batch_send_ec = ec;
+                                           }
+                                       });
+                            });
+                    });
+                    if (batch_send_ec) {
+                        SAMLOG_WARN(auto sink) {
+                            sink("next_layer().async_send failed: {}\n",
+                                 batch_send_ec.message());
+                        };
+                        co_return std::make_tuple(batch_send_ec, 0);
+                    }
                 }
-                if (n < packet.size()) {
-                    SAMLOG_WARN(auto sink) {
-                        sink("dtls_impl::async_send: short write drop {} "
-                             "bytes\n",
-                             packet.size() - n);
-                    };
-                }
-                self->_bio.out.pop();
             }
             reset_guard.dismiss();
         }

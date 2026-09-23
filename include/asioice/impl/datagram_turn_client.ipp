@@ -16,7 +16,7 @@ asioice::task<bool> datagram_client<NextLayer>::request(
     bool ret = false;
     utils::inplace_receiver<void> retry_receiver;
     utils::scheduler sched{this->get_executor()};
-    auto retry_op = retry_receiver.start(
+    auto retry_op = retry_receiver.connect(
         stdexec::starts_on(sched, trans.run(this->_next_layer)));
     stdexec::start(retry_op);
 
@@ -266,8 +266,7 @@ template <class NextLayer> void datagram_client<NextLayer>::stop() noexcept {
         if (auto n = req.write_to(&buf[0], 1024); n > 0) {
             net::const_buffer data{&buf[0], (std::size_t)n};
             utils::detached_with_data(
-                this->next_layer().async_send_to(data, this->_server,
-                                                 utils::use_sender),
+                this->next_layer().async_send_to(data, this->_server),
                 this->shared_from_this(), std::move(buf));
         }
     }
@@ -695,8 +694,8 @@ datagram_client<NextLayer>::async_send_to(ConstBufferSequence buffer_sequence,
     if (data_size % 4 != 0) {
         buffers.buffers().emplace_back(pad, 4 - data_size % 4);
     }
-    co_return co_await this->next_layer().async_send_to(
-        buffers.buffers(), this->_server, utils::use_sender);
+    co_return co_await this->next_layer().async_send_to(buffers.buffers(),
+                                                        this->_server);
 }
 
 template <class NextLayer>
@@ -716,8 +715,8 @@ auto datagram_client<NextLayer>::send_channel_data(
                    buffers.buffers().insert(
                        buffers.buffers().begin(),
                        net::const_buffer(header.data(), header.size()));
-                   return this->next_layer().async_send_to(
-                       buffers.buffers(), this->_server, utils::use_sender);
+                   return this->next_layer().async_send_to(buffers.buffers(),
+                                                           this->_server);
                });
 }
 

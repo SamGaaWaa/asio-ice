@@ -16,12 +16,25 @@ template <class T> struct inplace_receiver {
     inplace_receiver(inplace_receiver &&) = delete;
     inplace_receiver &operator=(inplace_receiver &&) = delete;
 
-    template <stdexec::sender S> auto start(S &&s) {
+    template <stdexec::sender S> auto connect(S &&s) {
         return stdexec::connect(std::forward<S>(s), receiver{this});
     }
 
     auto wait() noexcept { return wait_sender{this}; }
 
+    bool finish() const noexcept { return _var.index() != 0; }
+
+    bool has_value() const noexcept { return _var.index() == 1; }
+
+    bool has_error() const noexcept { return _var.index() == 2; }
+
+    bool stopped() const noexcept { return _var.index() == 3; }
+
+    T get() { return std::move(std::get<1>(_var)); }
+
+    std::exception_ptr error() { return std::move(std::get<2>(_var)); }
+
+  private:
     struct op_base {
         op_base() = default;
         op_base(const op_base &) = delete;
@@ -134,8 +147,7 @@ template <class T> struct inplace_receiver {
                 }
                 assert(_storage->_waiter == nullptr);
                 _storage->_waiter = this;
-                const auto &env = stdexec::get_env(_r);
-                const auto &token = stdexec::get_stop_token(env);
+                auto token = stdexec::get_stop_token(stdexec::get_env(_r));
                 _stop_cb.emplace(token, forward_stop{_storage});
             }
             static void _set_value(op_base *p, T t) noexcept {
@@ -206,6 +218,10 @@ template <class T> struct inplace_receiver {
 };
 
 template <> struct inplace_receiver<void> {
+  private:
+    enum struct state_t : char { EMPTY, STOPPED, VALUE, ERR };
+
+  public:
     inplace_receiver() {}
 
     inplace_receiver(const inplace_receiver &) = delete;
@@ -213,12 +229,32 @@ template <> struct inplace_receiver<void> {
     inplace_receiver(inplace_receiver &&) = delete;
     inplace_receiver &operator=(inplace_receiver &&) = delete;
 
-    template <stdexec::sender S> auto start(S &&s) {
+    template <stdexec::sender S> auto connect(S &&s) {
         return stdexec::connect(std::forward<S>(s), receiver{this});
     }
 
     auto wait() noexcept { return wait_sender{this}; }
 
+    bool finish() const noexcept { return _state != state_t::EMPTY; }
+
+    bool has_value() const noexcept { return _state == state_t::VALUE; }
+
+    bool has_error() const noexcept { return _state == state_t::ERR; }
+
+    bool stopped() const noexcept { return _state == state_t::STOPPED; }
+
+    void get() {
+        if (!has_value())
+            throw std::bad_variant_access{};
+    }
+
+    std::exception_ptr error() {
+        if (!has_error())
+            throw std::bad_variant_access{};
+        return std::move(_error);
+    }
+
+  private:
     struct op_base {
         op_base() = default;
         op_base(const op_base &) = delete;
@@ -263,14 +299,14 @@ template <> struct inplace_receiver<void> {
             }
             void start() & noexcept {
                 switch (_storage->_state) {
-                case STOPPED:
-                    _storage->_state = EMPTY;
+                case state_t::STOPPED:
+                    _storage->_state = state_t::EMPTY;
                     return stdexec::set_stopped(std::move(_r));
-                case VALUE:
-                    _storage->_state = EMPTY;
+                case state_t::VALUE:
+                    _storage->_state = state_t::EMPTY;
                     return stdexec::set_value(std::move(_r));
-                case ERR:
-                    _storage->_state = EMPTY;
+                case state_t::ERR:
+                    _storage->_state = state_t::EMPTY;
                     stdexec::set_error(std::move(_r),
                                        std::move(_storage->_error));
                     return;
@@ -315,22 +351,21 @@ template <> struct inplace_receiver<void> {
                 typename Token::template callback_type<forward_stop>;
             void start() & noexcept {
                 switch (_storage->_state) {
-                case STOPPED:
-                    _storage->_state = EMPTY;
+                case state_t::STOPPED:
+                    _storage->_state = state_t::EMPTY;
                     return stdexec::set_stopped(std::move(_r));
-                case VALUE:
-                    _storage->_state = EMPTY;
+                case state_t::VALUE:
+                    _storage->_state = state_t::EMPTY;
                     return stdexec::set_value(std::move(_r));
-                case ERR:
-                    _storage->_state = EMPTY;
+                case state_t::ERR:
+                    _storage->_state = state_t::EMPTY;
                     stdexec::set_error(std::move(_r),
                                        std::move(_storage->_error));
                     return;
                 }
                 assert(_storage->_waiter == nullptr);
                 _storage->_waiter = this;
-                const auto &env = stdexec::get_env(_r);
-                const auto &token = stdexec::get_stop_token(env);
+                auto token = stdexec::get_stop_token(stdexec::get_env(_r));
                 _stop_cb.emplace(token, forward_stop{_storage});
             }
             static void _set_value(op_base *p) noexcept {
@@ -368,37 +403,35 @@ template <> struct inplace_receiver<void> {
     };
 
     void set_value() noexcept {
-        assert(_state == EMPTY);
+        assert(_state == state_t::EMPTY);
         if (_waiter) {
             op_base *op = std::exchange(_waiter, nullptr);
             return op->set_value(op);
         }
-        _state = VALUE;
+        _state = state_t::VALUE;
     }
 
     void set_error(std::exception_ptr e) noexcept {
-        assert(_state == EMPTY);
+        assert(_state == state_t::EMPTY);
         if (_waiter) {
             op_base *op = std::exchange(_waiter, nullptr);
             return op->set_error(op, std::move(e));
         }
-        _state = ERR;
+        _state = state_t::ERR;
         _error = std::move(e);
     }
 
     void set_stopped() noexcept {
-        assert(_state == EMPTY);
+        assert(_state == state_t::EMPTY);
         if (_waiter) {
             op_base *op = std::exchange(_waiter, nullptr);
             return op->set_stopped(op);
         }
-        _state = STOPPED;
+        _state = state_t::STOPPED;
     }
 
-    enum state_t { EMPTY, STOPPED, VALUE, ERR };
-
     stdexec::inplace_stop_source _source;
-    state_t _state{EMPTY};
+    state_t _state{state_t::EMPTY};
     std::exception_ptr _error{};
     op_base *_waiter{nullptr};
 };

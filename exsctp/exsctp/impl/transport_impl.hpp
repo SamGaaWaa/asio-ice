@@ -24,6 +24,7 @@
 #include "exsctp/utils/with_allocator.hpp"
 #include "exsctp/packet_queue.hpp"
 #include "exsctp/message.hpp"
+#include "../../../include/asioice/detail/stack_resource.hpp"
 
 #include <exec/repeat_until.hpp>
 
@@ -212,7 +213,7 @@ struct transport_impl final
 
     // sending
     utils::async_mutex _send_mtx{};
-    exsctp::packet_queue _send_q;
+    exsctp::packet_queue _send_q{256 * 1024};
     exsctp::shared_promise<void> _notify_sender{};
     exsctp::shared_promise<void> _notify_send_queue_buffered_low{};
     exsctp::shared_promise<void> _notify_total_buffered_amount_low{};

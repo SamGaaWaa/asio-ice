@@ -121,8 +121,6 @@ template <class Sock> struct basic_agent_impl final : agent_base {
         }
 
         auto transport = std::make_shared<raw_transport>(std::move(sock));
-        transport->set_buffer_pool(this->buffer_pool());
-
         SAMLOG_TRACE(auto sink) {
             sink("Host transport bound to {}:{}\n",
                  transport->local_endpoint().address().to_string(),

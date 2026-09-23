@@ -9,15 +9,20 @@
 #include "asioice/task.hpp"
 #include "asioice/detail/early_data_cache.hpp"
 #include "asioice/detail/detached_with_data.hpp"
+#include "asioice/impl/transport_base.hpp"
 #include "samlog.hpp"
 
 #include <memory>
+
+#include <boost/container/small_vector.hpp>
 
 namespace asioice::impl {
 
 template <class Socket>
 struct datagram_transport_impl
-    : std::enable_shared_from_this<datagram_transport_impl<Socket>> {
+    : std::enable_shared_from_this<datagram_transport_impl<Socket>>,
+      ::asioice::transport_base {
+    using socket_type = Socket;
     using endpoint_type = typename Socket::endpoint_type;
     using executor_type = typename Socket::executor_type;
     using receiver_list_t =
@@ -39,9 +44,9 @@ struct datagram_transport_impl
     datagram_transport_impl(datagram_transport_impl &&) = delete;
     datagram_transport_impl &operator=(datagram_transport_impl &&) = delete;
 
-    void start();
+    void start() override;
 
-    void stop() { _stop.set_value(); }
+    void stop() noexcept override { _stop.set_value(); }
 
     bool is_running() const noexcept { return _running; }
 
@@ -52,24 +57,6 @@ struct datagram_transport_impl
 
     const auto &local_endpoint() const noexcept { return _local_endpoint; }
 
-    std::size_t max_buffer_size() const noexcept { return _max_buffer_size; }
-    void max_buffer_size(std::size_t size) noexcept { _max_buffer_size = size; }
-
-    void set_buffer_pool(std::shared_ptr<io_buffer_pool> pool) noexcept {
-        _pool = std::move(pool);
-    }
-
-    template <class ConstBufferSequence, class... Args>
-    auto async_send_to(const ConstBufferSequence &buffers,
-                       const endpoint_type &destination, Args &&...args) {
-        return _sock.async_send_to(buffers, destination, utils::use_sender);
-    }
-
-    template <class ConstBufferSequence, class... Args>
-    auto async_send(const ConstBufferSequence &buffers, Args &&...args) {
-        return _sock.async_send(buffers, utils::use_sender);
-    }
-
     void add_receiver(datagram_receiver &receiver) noexcept;
 
     auto &receivers() noexcept { return _receivers; }
@@ -77,16 +64,23 @@ struct datagram_transport_impl
 
     void clear_early_data() noexcept;
 
+    template <class ConstBufferSequence>
+    auto async_send(const ConstBufferSequence &buf, auto...) {
+        return _sock.async_send(buf, utils::use_sender);
+    }
+
   private:
+    asioice::task<void> send_loop();
     asioice::task<void> recv_loop();
+    std::error_code
+    do_sendmmsg(typename ::asioice::transport_base::send_op_queue::value_type
+                    &q) noexcept;
 
     Socket _sock;
-    std::shared_ptr<io_buffer_pool> _pool{nullptr};
     endpoint_type _local_endpoint;
     early_data_cache _early_data;
     bool _stop_cache_early_data{false};
     receiver_list_t _receivers{};
-    std::size_t _max_buffer_size{4096};
     bool _running{false};
     asioice::shared_promise<void> _stop{};
 };

@@ -88,12 +88,6 @@ struct agent_base_impl : std::enable_shared_from_this<agent_base_impl> {
                stdexec::continues_on(utils::scheduler{_any_executor});
     }
 
-    std::shared_ptr<io_buffer_pool> &buffer_pool() noexcept { return _pool; }
-
-    const std::shared_ptr<io_buffer_pool> &buffer_pool() const noexcept {
-        return _pool;
-    }
-
     auto on_closed() noexcept {
         return stdexec::just() | stdexec::let_value([this] {
                    return utils::if_else(
@@ -353,7 +347,6 @@ struct agent_base_impl : std::enable_shared_from_this<agent_base_impl> {
     agent_config _config;
     std::vector<resolved_result> _stun_servers{};
     std::vector<resolved_result> _turn_servers{};
-    std::shared_ptr<io_buffer_pool> _pool;
     bool _remote_is_lite = false;
     std::string _remote_username{};
     std::string _remote_password{};

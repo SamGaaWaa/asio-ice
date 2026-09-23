@@ -19,6 +19,8 @@
 #include "asioice/detail/detached_with_data.hpp"
 #include "asioice/detail/string_utils.hpp"
 #include "asioice/detail/with_allocator.hpp"
+#include "asioice/detail/when_all_range.hpp"
+#include "asioice/detail/if_else.hpp"
 #include "samlog.hpp"
 
 #include <memory>
@@ -84,6 +86,9 @@ struct dtls_impl : asioice::datagram_receiver,
     template <class ConstBufferSequence>
     auto async_send(const ConstBufferSequence &buf, auto... self);
 
+    template <class ConstBufferSequence>
+    auto async_send_multi(const ConstBufferSequence &buf);
+
     template <class MutableBufferSequence>
     auto async_receive(const MutableBufferSequence &buf, auto... self);
 
@@ -101,6 +106,7 @@ struct dtls_impl : asioice::datagram_receiver,
 
   private:
     struct send_op;
+    template <class ConstBufferSequence> struct send_multi_op;
     struct read_op;
     struct retransmission_op;
     struct handshake_op;

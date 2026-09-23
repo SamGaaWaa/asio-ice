@@ -59,39 +59,59 @@ exsctp::task<void> transport_impl<Interface>::timeout_handler() {
 template <class Interface>
 exsctp::task<void> transport_impl<Interface>::packet_sender() {
     utils::scope_guard on_exit([this]() noexcept { this->stop(); });
-    alignas(std::max_align_t) char buf[2048];
+    std::vector<char> mem_buf(9000);
+
+    constexpr auto batch_count = 4;
     while (this->_running) {
         if (this->_send_q.empty()) {
             co_await (this->_notify_sender.get_future() |
                       stdexec::continues_on(this->_interface->scheduler()));
             continue;
         }
-
-        std::pmr::monotonic_buffer_resource res{buf, sizeof(buf)};
+        ::asioice::utils::stack_resource res{
+            mem_buf.data(), mem_buf.size(),
+            "exsctp::transport_impl<Interface>::packet_sender"};
         std::pmr::polymorphic_allocator<std::byte> alloc{&res};
-        bool buffered_high = this->send_queue_buffered_high();
-        auto packet = this->_send_q.peek();
-        auto [ec, n] = co_await (
-            stdexec::write_env(this->_interface->send(packet),
-                               stdexec::prop{stdexec::get_allocator, alloc}));
-        if (ec) {
-            SAMLOG_WARN(auto sink) {
-                sink("packet_sender error: {}\n", ec.message());
-            };
-            co_return;
+
+        std::span<const uint8_t> buffers[batch_count];
+        if (auto peek_res = this->_send_q.peek(buffers, batch_count);
+            peek_res.count() == 1) {
+            auto packet = buffers[0];
+            auto [ec, n] = co_await stdexec::write_env(
+                this->_interface->send(packet),
+                stdexec::prop{stdexec::get_allocator, alloc});
+            if (ec) {
+                SAMLOG_WARN(auto sink) {
+                    sink("packet_sender error: {}\n", ec.message());
+                };
+                co_return;
+            }
+            if (n == 0) {
+                SAMLOG_WARN(auto sink) {
+                    sink("packet_sender sent 0 bytes\n");
+                };
+                co_return;
+            }
+            if (n < packet.size()) {
+                SAMLOG_WARN(auto sink) {
+                    sink("packet_sender sent partial packet: {} of {} bytes\n",
+                         n, packet.size());
+                };
+            }
+        } else {
+            auto [ec, _] = co_await stdexec::write_env(
+                this->_interface->send_multi(
+                    std::span<std::span<const uint8_t>>{buffers,
+                                                        peek_res.count()}),
+                stdexec::prop{stdexec::get_allocator, alloc});
+            if (ec) {
+                SAMLOG_WARN(auto sink) {
+                    sink("packet_sender error: {}\n", ec.message());
+                };
+                co_return;
+            }
         }
-        if (n == 0) {
-            SAMLOG_WARN(auto sink) { sink("packet_sender sent 0 bytes\n"); };
-            co_return;
-        }
-        if (n < packet.size()) {
-            SAMLOG_WARN(auto sink) {
-                sink("packet_sender sent partial packet: {} of {} bytes\n", n,
-                     packet.size());
-            };
-        }
-        this->_send_q.pop();
-        if (buffered_high && !this->send_queue_buffered_high())
+        if (!this->send_queue_buffered_high())
             this->_notify_send_queue_buffered_low.set_value();
     }
 }

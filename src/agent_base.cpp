@@ -57,15 +57,6 @@ void agent_base::set_remote_is_lite(bool lite) noexcept {
     _impl->set_remote_is_lite(lite);
 }
 
-std::shared_ptr<io_buffer_pool> &agent_base::buffer_pool() noexcept {
-    return _impl->buffer_pool();
-}
-
-const std::shared_ptr<io_buffer_pool> &
-agent_base::buffer_pool() const noexcept {
-    return _impl->buffer_pool();
-}
-
 agent_state_t agent_base::state() const noexcept { return _impl->state(); }
 exec::function<void()> agent_base::on_state_change() noexcept {
     return exec::function<void()>{[this] { return _impl->on_state_change(); }};
@@ -80,8 +71,7 @@ exec::function<void()> agent_base::on_connected_or_closed() noexcept {
         [this] { return _impl->on_connected_or_closed(); }};
 }
 
-bool agent_base::restart(std::string new_ufrag,
-                         std::string new_pwd) noexcept {
+bool agent_base::restart(std::string new_ufrag, std::string new_pwd) noexcept {
     return _impl->restart(std::move(new_ufrag), std::move(new_pwd));
 }
 
