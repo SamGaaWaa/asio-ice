@@ -58,17 +58,22 @@ void agent_base::set_remote_is_lite(bool lite) noexcept {
 }
 
 agent_state_t agent_base::state() const noexcept { return _impl->state(); }
-exec::function<void()> agent_base::on_state_change() noexcept {
-    return exec::function<void()>{[this] { return _impl->on_state_change(); }};
+exec::function<void() &> agent_base::on_state_change() & {
+    return exec::function<void() &>(*this, [](agent_base &self) {
+        return self._impl->on_state_change();
+    });
 }
 
-exec::function<void()> agent_base::on_closed() noexcept {
-    return exec::function<void()>{[this] { return _impl->on_closed(); }};
+exec::function<void() &> agent_base::on_closed() & {
+    return exec::function<void() &>(*this, [](agent_base &self) {
+        return self._impl->on_closed();
+    });
 }
 
-exec::function<void()> agent_base::on_connected_or_closed() noexcept {
-    return exec::function<void()>{
-        [this] { return _impl->on_connected_or_closed(); }};
+exec::function<void() &> agent_base::on_connected_or_closed() & {
+    return exec::function<void() &>(*this, [](agent_base &self) {
+        return self._impl->on_connected_or_closed();
+    });
 }
 
 bool agent_base::restart(std::string new_ufrag, std::string new_pwd) noexcept {
@@ -93,9 +98,10 @@ asioice::task<bool> agent_base::add_remote_candidate(asioice::candidate c) {
     return _impl->add_remote_candidate(std::move(c));
 }
 
-exec::function<bool()> agent_base::add_remote_candidate() noexcept {
-    return exec::function<bool()>{
-        [this] { return _impl->add_remote_candidate(); }};
+exec::function<bool() &> agent_base::add_remote_candidate() & {
+    return exec::function<bool() &>(*this, [](agent_base &self) {
+        return self._impl->add_remote_candidate();
+    });
 }
 
 asioice::task<bool> agent_base::connect() {

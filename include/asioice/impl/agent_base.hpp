@@ -76,11 +76,11 @@ struct agent_base {
     void set_remote_is_lite(bool lite) noexcept;
 
     agent_state_t state() const noexcept;
-    exec::function<void()> on_state_change() noexcept;
+    exec::function<void() &> on_state_change() &;
 
-    exec::function<void()> on_closed() noexcept;
+    exec::function<void() &> on_closed() &;
 
-    exec::function<void()> on_connected_or_closed() noexcept;
+    exec::function<void() &> on_connected_or_closed() &;
 
     bool restart(std::string new_ufrag, std::string new_pwd) noexcept;
 
@@ -92,7 +92,7 @@ struct agent_base {
     asioice::task<void> gather_candidates();
 
     asioice::task<bool> add_remote_candidate(asioice::candidate c);
-    exec::function<bool()> add_remote_candidate() noexcept;
+    exec::function<bool() &> add_remote_candidate() &;
 
     asioice::task<bool> connect();
 
