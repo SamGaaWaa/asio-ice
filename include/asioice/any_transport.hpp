@@ -112,7 +112,7 @@ template <class Transport> struct transport_impl final : public interface {
     sendto_result_type1 send_to(net::const_buffer data,
                                 asioice::endpoint dst) override {
         return sendto_result_type1(
-            *this, std::move(data), std::move(dst),
+            *this, data, std::move(dst),
             [](transport_impl &self, net::const_buffer data,
                asioice::endpoint dst) {
                 return self._transport->async_send_to(data, dst) |
@@ -123,7 +123,7 @@ template <class Transport> struct transport_impl final : public interface {
     sendto_result_type2 send_to(std::span<const net::const_buffer> data,
                                 asioice::endpoint dst) override {
         return sendto_result_type2(
-            *this, std::move(data), std::move(dst),
+            *this, data, std::move(dst),
             [](transport_impl &self, std::span<const net::const_buffer> data,
                asioice::endpoint dst) {
                 return self._transport->async_send_to(data, dst) |
@@ -133,7 +133,7 @@ template <class Transport> struct transport_impl final : public interface {
 
     send_result_type1 send(net::const_buffer data) override {
         return send_result_type1(
-            *this, std::move(data),
+            *this, data,
             [](transport_impl &self, net::const_buffer data) {
                 if constexpr (requires { self._transport->async_send(data); }) {
                     return self._transport->async_send(data) |
@@ -148,7 +148,7 @@ template <class Transport> struct transport_impl final : public interface {
 
     send_result_type2 send(std::span<const net::const_buffer> data) override {
         return send_result_type2(
-            *this, std::move(data),
+            *this, data,
             [](transport_impl &self, std::span<const net::const_buffer> data) {
                 if constexpr (requires { self._transport->async_send(data); }) {
                     return self._transport->async_send(data) |
