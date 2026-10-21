@@ -32,26 +32,26 @@ namespace asioice {
 namespace __any_transport_detail {
 
 using sendto_result_type1 = exec::function<
-    stdexec::sender_tag(net::const_buffer data, asioice::endpoint dst),
+    stdexec::sender_tag(net::const_buffer data, asioice::endpoint dst) &,
     stdexec::completion_signatures<
         stdexec::set_value_t(std::tuple<std::error_code, std::size_t>),
         stdexec::set_error_t(std::exception_ptr), stdexec::set_stopped_t()>>;
 
 using sendto_result_type2 = exec::function<
     stdexec::sender_tag(std::span<const net::const_buffer> data,
-                        asioice::endpoint dst),
+                        asioice::endpoint dst) &,
     stdexec::completion_signatures<
         stdexec::set_value_t(std::tuple<std::error_code, std::size_t>),
         stdexec::set_error_t(std::exception_ptr), stdexec::set_stopped_t()>>;
 
 using send_result_type1 = exec::function<
-    stdexec::sender_tag(net::const_buffer data),
+    stdexec::sender_tag(net::const_buffer data) &,
     stdexec::completion_signatures<
         stdexec::set_value_t(std::tuple<std::error_code, std::size_t>),
         stdexec::set_error_t(std::exception_ptr), stdexec::set_stopped_t()>>;
 
 using send_result_type2 = exec::function<
-    stdexec::sender_tag(std::span<const net::const_buffer> data),
+    stdexec::sender_tag(std::span<const net::const_buffer> data) &,
     stdexec::completion_signatures<
         stdexec::set_value_t(std::tuple<std::error_code, std::size_t>),
         stdexec::set_error_t(std::exception_ptr), stdexec::set_stopped_t()>>;
@@ -112,9 +112,10 @@ template <class Transport> struct transport_impl final : public interface {
     sendto_result_type1 send_to(net::const_buffer data,
                                 asioice::endpoint dst) override {
         return sendto_result_type1(
-            std::move(data), std::move(dst),
-            [this](net::const_buffer data, asioice::endpoint dst) {
-                return _transport->async_send_to(data, dst) |
+            *this, data, std::move(dst),
+            [](transport_impl &self, net::const_buffer data,
+               asioice::endpoint dst) {
+                return self._transport->async_send_to(data, dst) |
                        __transform_sndr();
             });
     }
@@ -122,19 +123,21 @@ template <class Transport> struct transport_impl final : public interface {
     sendto_result_type2 send_to(std::span<const net::const_buffer> data,
                                 asioice::endpoint dst) override {
         return sendto_result_type2(
-            std::move(data), std::move(dst),
-            [this](std::span<const net::const_buffer> data,
-                   asioice::endpoint dst) {
-                return _transport->async_send_to(data, dst) |
+            *this, data, std::move(dst),
+            [](transport_impl &self, std::span<const net::const_buffer> data,
+               asioice::endpoint dst) {
+                return self._transport->async_send_to(data, dst) |
                        __transform_sndr();
             });
     }
 
     send_result_type1 send(net::const_buffer data) override {
         return send_result_type1(
-            std::move(data), [this](net::const_buffer data) {
-                if constexpr (requires { _transport->async_send(data); }) {
-                    return _transport->async_send(data) | __transform_sndr();
+            *this, data,
+            [](transport_impl &self, net::const_buffer data) {
+                if constexpr (requires { self._transport->async_send(data); }) {
+                    return self._transport->async_send(data) |
+                           __transform_sndr();
                 } else {
                     return stdexec::just(std::tuple{
                         std::make_error_code(std::errc::function_not_supported),
@@ -145,9 +148,11 @@ template <class Transport> struct transport_impl final : public interface {
 
     send_result_type2 send(std::span<const net::const_buffer> data) override {
         return send_result_type2(
-            std::move(data), [this](std::span<const net::const_buffer> data) {
-                if constexpr (requires { _transport->async_send(data); }) {
-                    return _transport->async_send(data) | __transform_sndr();
+            *this, data,
+            [](transport_impl &self, std::span<const net::const_buffer> data) {
+                if constexpr (requires { self._transport->async_send(data); }) {
+                    return self._transport->async_send(data) |
+                           __transform_sndr();
                 } else {
                     return stdexec::just(std::tuple{
                         std::make_error_code(std::errc::function_not_supported),
